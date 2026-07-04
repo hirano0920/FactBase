@@ -35,6 +35,7 @@ jobs:
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          RADAR_CLASSIFY_MODEL: ${{ secrets.RADAR_CLASSIFY_MODEL }}
           RADAR_AUTO_PUBLISH_PER_DAY: "8"
         run: npx tsx scripts/radar/detect.ts
 

@@ -292,7 +292,7 @@ export async function classifyHeadlines(
   const capped = headlines.slice(0, 50);
   const list = capped.map((h) => `${h.index}: [${h.feed}] ${h.title}`).join("\n");
   const res = await getOpenAIRadar().chat.completions.create({
-    model: process.env.RADAR_CLASSIFY_MODEL ?? AI_MODELS.utility,
+    model: process.env.RADAR_CLASSIFY_MODEL || AI_MODELS.utility,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: RADAR_CLASSIFY_PROMPT },
