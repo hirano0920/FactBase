@@ -21,12 +21,15 @@ MAX_CHUNK = 600
 
 @dataclass
 class Chunk:
-    law_id: str          # 法令番号 or 会議録ID
-    law_name: str        # 法令名 or 「第X回国会 委員会名」
+    source_id: str        # 法令番号 / 会議録検索キーワードID / 条約スラッグ等
+    source_name: str      # 法令名 or 「第X回国会 委員会名」 or 条約名
     article_ref: str | None  # 第X条 / 発言番号
     text: str
     source_url: str
-    issue_slug: str | None   # 紐づける争点（任意）
+    source_type: str = "LAW"  # LAW / DIET_RECORD / TREATY / HISTORICAL_DOC / COURT_RULING
+    category: list[str] | None = None   # IssueCategory値の配列（グローバル検索のブースト用）
+    keywords: list[str] | None = None
+    issue_slug: str | None = None   # 明示的にpinしたい争点（任意）
 
     @property
     def content_hash(self) -> str:

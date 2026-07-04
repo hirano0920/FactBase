@@ -1,7 +1,8 @@
 """stagingのチャンクを差分のみembedding生成してNeon(pgvector)にupsertする。
 
 - 既存チャンクとSHA256ハッシュ比較 → 変更なしはskip（embedding課金ゼロ）
-- --issue-slug 指定チャンクは IssueLawLink も張る
+- --issue-slug 指定チャンクは IssueEvidenceLink を pinned=true で張る
+  （pinnedが無くてもEvidenceChunkはグローバル検索の対象になる＝リンクは必須ではない）
 - 実行は冪等（何度実行しても壊れない）
 
 使い方:
@@ -34,22 +35,22 @@ def cuid_like() -> str:
 def main() -> None:
     rows = read_all_staging()
     if not rows:
-        raise SystemExit("stagingが空です。先に fetch_egov.py / fetch_kokkai.py を実行してください")
+        raise SystemExit("stagingが空です。先に fetch_egov.py / fetch_kokkai.py / fetch_manual.py を実行してください")
 
-    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"], base_url=os.environ.get("OPENAI_BASE_URL"))
     conn = psycopg.connect(database_url())
     conn.autocommit = False
     cur = conn.cursor()
 
     # 既存チャンクのハッシュを取得（text本文のsha256をDB側で計算）
-    cur.execute('SELECT id, "lawId", encode(sha256(text::bytea), \'hex\') FROM "LawChunk"')
-    existing = {(law_id, h): chunk_id for chunk_id, law_id, h in cur.fetchall()}
+    cur.execute('SELECT id, "sourceId", encode(sha256(text::bytea), \'hex\') FROM "EvidenceChunk"')
+    existing = {(source_id, h): chunk_id for chunk_id, source_id, h in cur.fetchall()}
 
-    new_rows = [r for r in rows if (r["law_id"], r["hash"]) not in existing]
+    new_rows = [r for r in rows if (r["source_id"], r["hash"]) not in existing]
     skipped = len(rows) - len(new_rows)
     print(f"チャンク: 全{len(rows)}件 / 新規{len(new_rows)}件 / 変更なしskip {skipped}件")
 
-    changed_law_ids: set[str] = set()
+    changed_source_ids: set[str] = set()
 
     inserted = 0
     for i in range(0, len(new_rows), BATCH_SIZE):
@@ -59,16 +60,21 @@ def main() -> None:
             chunk_id = cuid_like()
             cur.execute(
                 """
-                INSERT INTO "LawChunk" (id, "lawId", "lawName", "articleRef", text, "sourceUrl", "isActive", embedding, "createdAt", "updatedAt")
-                VALUES (%s, %s, %s, %s, %s, %s, true, %s::vector, now(), now())
+                INSERT INTO "EvidenceChunk"
+                  (id, "sourceType", "sourceId", "sourceName", "articleRef", text, "sourceUrl",
+                   category, keywords, "isActive", embedding, "createdAt", "updatedAt")
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s::text[]::"IssueCategory"[], %s, true, %s::vector, now(), now())
                 """,
                 (
                     chunk_id,
-                    row["law_id"],
-                    row["law_name"],
+                    row.get("source_type") or "LAW",
+                    row["source_id"],
+                    row["source_name"],
                     row["article_ref"],
                     row["text"],
                     row["source_url"],
+                    row.get("category") or [],
+                    row.get("keywords") or [],
                     str(emb),
                 ),
             )
@@ -78,53 +84,53 @@ def main() -> None:
                 if issue:
                     cur.execute(
                         """
-                        INSERT INTO "IssueLawLink" (id, "issueId", "lawChunkId")
-                        VALUES (%s, %s, %s)
-                        ON CONFLICT ("issueId", "lawChunkId") DO NOTHING
+                        INSERT INTO "IssueEvidenceLink" (id, "issueId", "chunkId", pinned)
+                        VALUES (%s, %s, %s, true)
+                        ON CONFLICT ("issueId", "chunkId") DO UPDATE SET pinned = true
                         """,
                         (cuid_like(), issue[0], chunk_id),
                     )
                 else:
                     print(f"  ⚠️ 争点 {row['issue_slug']} が未作成のためリンクをskip（記事生成後に再実行でOK）")
             inserted += 1
-            changed_law_ids.add(row["law_id"])
+            changed_source_ids.add(row["source_id"])
         conn.commit()
         print(f"  {inserted}/{len(new_rows)} 投入済み")
 
     # 改正で消えた条文の無効化（廃止された条文を根拠にFCさせない）。
-    # 会議録(kokkai_*)は追記型なので対象外、法令はスナップショット型なので全量比較。
-    egov_law_ids = {r["law_id"] for r in rows if not r["law_id"].startswith("kokkai_")}
-    for law_id in sorted(egov_law_ids):
-        current_hashes = [r["hash"] for r in rows if r["law_id"] == law_id]
+    # 会議録(kokkai_*)・手動投入(manual_*)は追記型なので対象外、法令はスナップショット型なので全量比較。
+    egov_source_ids = {r["source_id"] for r in rows if r.get("source_type", "LAW") == "LAW"}
+    for source_id in sorted(egov_source_ids):
+        current_hashes = [r["hash"] for r in rows if r["source_id"] == source_id]
         cur.execute(
             """
-            UPDATE "LawChunk" SET "isActive" = false, "updatedAt" = now()
-            WHERE "lawId" = %s AND "isActive" = true
+            UPDATE "EvidenceChunk" SET "isActive" = false, "updatedAt" = now()
+            WHERE "sourceId" = %s AND "isActive" = true
               AND encode(sha256(text::bytea), 'hex') != ALL(%s)
             """,
-            (law_id, current_hashes),
+            (source_id, current_hashes),
         )
         if cur.rowcount:
-            print(f"  {law_id}: 改正で消えた{cur.rowcount}チャンクを無効化")
-            changed_law_ids.add(law_id)
+            print(f"  {source_id}: 改正で消えた{cur.rowcount}チャンクを無効化")
+            changed_source_ids.add(source_id)
     conn.commit()
 
     # 根拠が変わった争点のFCキャッシュを無効化（次のタップ時に最新根拠で再判定・¥0.01/件）
-    if changed_law_ids:
+    if changed_source_ids:
         cur.execute(
             """
             DELETE FROM "FcCache"
             WHERE "commentId" IN (
               SELECT c.id FROM "Comment" c
               WHERE c."issueId" IN (
-                SELECT DISTINCT ill."issueId"
-                FROM "IssueLawLink" ill
-                JOIN "LawChunk" lc ON lc.id = ill."lawChunkId"
-                WHERE lc."lawId" = ANY(%s)
+                SELECT DISTINCT iel."issueId"
+                FROM "IssueEvidenceLink" iel
+                JOIN "EvidenceChunk" ec ON ec.id = iel."chunkId"
+                WHERE ec."sourceId" = ANY(%s)
               )
             )
             """,
-            (sorted(changed_law_ids),),
+            (sorted(changed_source_ids),),
         )
         if cur.rowcount:
             print(f"  根拠が更新されたためFCキャッシュ{cur.rowcount}件を無効化（次回タップで再判定）")

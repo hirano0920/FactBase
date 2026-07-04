@@ -38,6 +38,8 @@ jobs:
           RADAR_CLASSIFY_MODEL: ${{ secrets.RADAR_CLASSIFY_MODEL }}
           RADAR_AUTO_PUBLISH_PER_DAY: "8"
           RADAR_ALERT_WEBHOOK_URL: ${{ secrets.RADAR_ALERT_WEBHOOK_URL }}
+          RADAR_INTERNAL_SECRET: ${{ secrets.RADAR_INTERNAL_SECRET }}
+          AUTH_URL: ${{ secrets.AUTH_URL }}
         run: npx tsx scripts/radar/detect.ts
 
       - name: Generate Level-2 summaries (GPT-5)
@@ -48,4 +50,18 @@ jobs:
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           ARTICLE_DAILY_ARTICLE_LIMIT: "10"
           RADAR_ALERT_WEBHOOK_URL: ${{ secrets.RADAR_ALERT_WEBHOOK_URL }}
+          RADAR_INTERNAL_SECRET: ${{ secrets.RADAR_INTERNAL_SECRET }}
+          AUTH_URL: ${{ secrets.AUTH_URL }}
         run: npx tsx scripts/radar/summarize.ts
+
+      - name: Follow-up: link new events & refresh live articles
+        env:
+          DATABASE_URL: ${{ secrets.DIRECT_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          FOLLOWUP_DAILY_LIMIT: "15"
+          RADAR_ALERT_WEBHOOK_URL: ${{ secrets.RADAR_ALERT_WEBHOOK_URL }}
+          RADAR_INTERNAL_SECRET: ${{ secrets.RADAR_INTERNAL_SECRET }}
+          AUTH_URL: ${{ secrets.AUTH_URL }}
+        run: npx tsx scripts/radar/followup.ts

@@ -14,7 +14,7 @@
  *   2. nano: 法令チャンク分割の提案（JSON）
  *   3. コンソールで承認 (y/n)
  *   4. GPT-5: SEO記事生成（3行要約 + H2要点 + 賛否両論 + FAQ + 出典）
- *   5. Issue + LawChunk + IssueLawLink をDBに保存
+ *   5. Issue + EvidenceChunk + IssueEvidenceLink をDBに保存（pinned=trueで優先リンク）
  */
 import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
@@ -186,17 +186,19 @@ async function main() {
   });
 
   for (const chunk of chunks) {
-    const lawChunk = await prisma.lawChunk.create({
+    const evidenceChunk = await prisma.evidenceChunk.create({
       data: {
-        lawId: args["law-name"] ?? slug,
-        lawName: args["law-name"] ?? title,
+        sourceType: "LAW",
+        sourceId: args["law-name"] ?? slug,
+        sourceName: args["law-name"] ?? title,
         articleRef: chunk.articleRef,
         text: chunk.text,
         sourceUrl: args["law-url"] ?? "https://elaws.e-gov.go.jp/",
+        category: [category as IssueCategory],
       },
     });
-    await prisma.issueLawLink.create({
-      data: { issueId: issue.id, lawChunkId: lawChunk.id },
+    await prisma.issueEvidenceLink.create({
+      data: { issueId: issue.id, chunkId: evidenceChunk.id, pinned: true },
     });
   }
 

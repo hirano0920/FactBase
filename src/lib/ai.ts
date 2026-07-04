@@ -38,7 +38,7 @@ function getOpenAIRadar(): OpenAI {
 
 export interface FcChunk {
   id: string;
-  lawName: string;
+  sourceName: string;
   articleRef: string | null;
   text: string;
   /** 出典URL（FC結果に必ず出典リンクを付ける要件） */
@@ -107,7 +107,7 @@ export async function factCheck(commentBody: string, chunks: FcChunk[]): Promise
   const context = chunks
     .map((c) => {
       const date = c.updatedAt ? `（${c.updatedAt.slice(0, 10)}時点）` : "";
-      return `[${c.id}] ${c.lawName}${c.articleRef ? ` ${c.articleRef}` : ""}${date}\n${c.text}`;
+      return `[${c.id}] ${c.sourceName}${c.articleRef ? ` ${c.articleRef}` : ""}${date}\n${c.text}`;
     })
     .join("\n---\n");
 
@@ -316,8 +316,13 @@ politics / economy / law / finance / rights / education / international
 投票選択肢3つ（for/against/undecidedの順。疑惑系なら「説明すべき」「問題ない」「報道だけでは判断できない」のように中立に）を作る。
 断定・煽り・予断を含めないこと。
 
+# 続報判定（match_issue_id）
+「既に公開中の争点一覧」が渡された場合、クラスタが一覧のいずれかの続報（同一の出来事の新しい展開）だと判断できれば、
+match_issue_id にその争点の id を設定すること。新しい別の出来事であれば match_issue_id は null のままにする。
+迷う場合や一覧に該当がなければ必ず null にする（誤って別の出来事に紐付けない）。
+
 必ずJSONのみ:
-{"clusters": [{"title": "クラスタの中立的な題", "member_indices": [0,2,5], "classification": "...", "category": "...", "risk_flags": [...], "question": "投票設問", "choices": {"for": "...", "against": "...", "undecided": "..."}}]}`;
+{"clusters": [{"title": "クラスタの中立的な題", "member_indices": [0,2,5], "classification": "...", "category": "...", "risk_flags": [...], "question": "投票設問", "choices": {"for": "...", "against": "...", "undecided": "..."}, "match_issue_id": null}]}`;
 
 export interface RadarCluster {
   title: string;
@@ -327,6 +332,7 @@ export interface RadarCluster {
   risk_flags: string[];
   question: string;
   choices: { for: string; against: string; undecided: string };
+  match_issue_id: string | null;
 }
 
 const RADAR_CLUSTER_SCHEMA = z.object({
@@ -340,22 +346,36 @@ const RADAR_CLUSTER_SCHEMA = z.object({
     .object({ for: z.string(), against: z.string(), undecided: z.string() })
     .optional()
     .default({ for: "", against: "", undecided: "" }),
+  match_issue_id: z.string().nullable().optional().default(null),
 });
 const RADAR_CLASSIFY_RESPONSE_SCHEMA = z.object({
   clusters: z.array(RADAR_CLUSTER_SCHEMA).optional().default([]),
 });
 
+export interface ActiveIssueForMatch {
+  id: string;
+  title: string;
+  keywords: string[];
+}
+
 export async function classifyHeadlines(
   headlines: { index: number; feed: string; title: string }[],
+  activeIssues: ActiveIssueForMatch[] = [],
 ): Promise<RadarCluster[]> {
   const capped = headlines.slice(0, 50);
   const list = capped.map((h) => `${h.index}: [${h.feed}] ${h.title}`).join("\n");
+  const activeIssuesBlock =
+    activeIssues.length > 0
+      ? `\n\n# 既に公開中の争点一覧（続報ならmatch_issue_idにidを設定）\n${activeIssues
+          .map((i) => `${i.id}: ${i.title}${i.keywords.length ? ` (${i.keywords.join("/")})` : ""}`)
+          .join("\n")}`
+      : "";
   const res = await getOpenAIRadar().chat.completions.create({
     model: process.env.RADAR_CLASSIFY_MODEL || AI_MODELS.utility,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: RADAR_CLASSIFY_PROMPT },
-      { role: "user", content: list },
+      { role: "user", content: `${list}${activeIssuesBlock}` },
     ],
   });
   const parsed = safeParseJson(

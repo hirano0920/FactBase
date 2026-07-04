@@ -27,6 +27,7 @@ const OPTIONAL = [
   "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY", // 現状コードは未使用（Checkoutのみ）
   "AZURE_OPENAI_API_KEY",
   "AZURE_OPENAI_BASE_URL",
+  "RADAR_INTERNAL_SECRET", // 未設定でもRadarは動くがrevalidate通知がスキップされる
 ];
 
 function parseEnvFile(path: string): Record<string, string> {

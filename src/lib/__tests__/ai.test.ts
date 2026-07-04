@@ -21,7 +21,7 @@ beforeEach(() => {
 });
 
 describe("factCheck", () => {
-  const chunks = [{ id: "c1", lawName: "テスト法", articleRef: "第1条", text: "本文" }];
+  const chunks = [{ id: "c1", sourceName: "テスト法", articleRef: "第1条", text: "本文" }];
 
   it("正常なJSON応答をverdict/sourceIdsに反映する", async () => {
     mockContent(JSON.stringify({ v: "TRUE", l: "一次情報で確認", r: "条文に明記", s: ["c1"] }));

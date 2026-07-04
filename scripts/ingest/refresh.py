@@ -22,7 +22,13 @@ from pathlib import Path
 import requests
 
 import embed_upsert
-from fetch_egov import API_BASE as EGOV_API, build_chunks as egov_chunks, extract_articles, fetch_law_xml
+from fetch_egov import (
+    API_BASE as EGOV_API,
+    build_chunks as egov_chunks,
+    extract_articles,
+    fetch_law_xml,
+    resolve_law_id,
+)
 from fetch_kokkai import build_chunks as kokkai_chunks, fetch_speeches
 from common import write_staging
 
@@ -57,7 +63,13 @@ def latest_revision(law_id: str) -> str | None:
 def refresh_laws(registry: dict, dry_run: bool) -> bool:
     changed = False
     for entry in registry.get("laws", []):
-        law_id = entry["law_id"]
+        law_id = entry.get("law_id")
+        if not law_id and entry.get("law_title"):
+            law_id = resolve_law_id(entry["law_title"])
+            if not law_id:
+                print(f"  ⚠️ {entry['law_title']}: law_idを解決できませんでした（skip）")
+                continue
+            entry["law_id"] = law_id  # 次回以降は解決済みIDを再利用
         current = latest_revision(law_id)
         if current is None:
             continue
@@ -71,7 +83,10 @@ def refresh_laws(registry: dict, dry_run: bool) -> bool:
             continue
         root = fetch_law_xml(law_id)
         law_name, articles = extract_articles(root)
-        chunks = egov_chunks(law_id, law_name, articles, entry.get("issue_slug"))
+        chunks = egov_chunks(
+            law_id, law_name, articles, entry.get("issue_slug"),
+            entry.get("category", []), entry.get("keywords", []),
+        )
         write_staging(f"egov_{law_id}", chunks)
         entry["last_revision"] = current
     return changed
@@ -96,7 +111,10 @@ def refresh_kokkai(registry: dict, dry_run: bool) -> bool:
         changed = True
         if dry_run:
             continue
-        chunks = kokkai_chunks(speeches, keyword, entry.get("issue_slug"))
+        chunks = kokkai_chunks(
+            speeches, keyword, entry.get("issue_slug"),
+            entry.get("category", []), entry.get("keywords", []),
+        )
         write_staging(f"kokkai_{keyword.replace(' ', '_')}_{date.today().isoformat()}", chunks)
         entry["last_fetched"] = date.today().isoformat()
     return changed

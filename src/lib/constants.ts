@@ -43,7 +43,7 @@ export const SITE = {
   tagline: "一次情報で、日本の議論をクリーンに。",
   description:
     "時事・政治・経済・金融・法律などを一次情報にもとづき、投票と議論ができるプラットフォーム。",
-  url: "https://factbase.tokyo",
+  url: "https://www.factbase.tokyo",
 } as const;
 
 // NGワードは別ファイルで管理・定期更新
@@ -134,6 +134,14 @@ export const RADAR = {
   qualityReportVoterRatio: 0.02,
   /** この倍率に達したらAI裏取り結果に関わらず強制的にunderReview（AIも欺かれた場合の保険） */
   qualityReportHardMultiplier: 3,
+  /** 続報記事再生成の1日上限（初回生成のarticleDailyArticleLimitとは別枠） */
+  followUpDailyLimit: 15,
+  /** LIVE（REPORTED）争点の続報再生成の最短間隔（分） */
+  followUpMinIntervalLiveMin: 30,
+  /** 公式（OFFICIAL）争点の続報再生成の最短間隔（分） */
+  followUpMinIntervalOfficialMin: 120,
+  /** 続報マッチング用にnanoへ渡すアクティブIssueの最大件数（プロンプト肥大化防止） */
+  followUpMaxActiveIssuesForMatch: 30,
 } as const;
 
 /** 称号ランク（役に立った評価の累計数で決まる）。特典はバッジ表示・並び順やや優先のみ。 */

@@ -234,3 +234,41 @@ export function clusterCoherence(titles: string[]): number {
 
 /** この類似度未満なら「nanoが無関係な見出しを誤って束ねた」とみなす */
 export const COHERENCE_THRESHOLD = 0.12;
+
+export interface FollowUpAggregate {
+  confirmation: "OFFICIAL" | "REPORTED" | "MANUAL";
+  articleGeneratedAt: Date;
+  newEventCount: number;
+  newDistinctFeeds: number;
+  maxNewTrustWeight: number;
+}
+
+/** 続報再生成の最短間隔（分）。confirmationにより速報LIVEを優先して短くする */
+export const FOLLOW_UP_MIN_INTERVAL_MIN = {
+  REPORTED: 30,
+  OFFICIAL: 120,
+} as const;
+
+/** 一次情報とみなす信頼度の下限（PRIMARY_SOURCE_FEEDと同水準） */
+const FOLLOW_UP_PRIMARY_TRUST_THRESHOLD = 85;
+
+/**
+ * 続報を反映して記事を再生成すべきか判定する純関数。
+ * LIVE(REPORTED)は新着distinctFeed>=1で30分間隔、OFFICIALは新着に一次情報級の
+ * trustWeightがあり2時間間隔、を最短サイクルとする（静かなOFFICIAL案件でAI予算を消費しすぎない）。
+ */
+export function shouldRegenerateFollowUp(agg: FollowUpAggregate, now: Date): boolean {
+  if (agg.newEventCount <= 0) return false;
+  const minutesSinceGenerated = (now.getTime() - agg.articleGeneratedAt.getTime()) / 60_000;
+
+  if (agg.confirmation === "REPORTED") {
+    return agg.newDistinctFeeds >= 1 && minutesSinceGenerated >= FOLLOW_UP_MIN_INTERVAL_MIN.REPORTED;
+  }
+  if (agg.confirmation === "OFFICIAL") {
+    return (
+      agg.maxNewTrustWeight >= FOLLOW_UP_PRIMARY_TRUST_THRESHOLD &&
+      minutesSinceGenerated >= FOLLOW_UP_MIN_INTERVAL_MIN.OFFICIAL
+    );
+  }
+  return false;
+}

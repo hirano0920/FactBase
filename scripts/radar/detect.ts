@@ -12,13 +12,14 @@ import { readFileSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { PrismaClient, type IssueCategory, type Prisma } from "@prisma/client";
 import { XMLParser } from "fast-xml-parser";
-import { classifyHeadlines, type RadarCluster } from "../../src/lib/ai";
+import { classifyHeadlines, type RadarCluster, type ActiveIssueForMatch } from "../../src/lib/ai";
 import { decidePublish, dedupKey, clusterCoherence, COHERENCE_THRESHOLD, isOutOfScopeTopic, isBreakingNews } from "../../src/lib/radar";
 import { RADAR } from "../../src/lib/constants";
 import type { FeedItem } from "./sources/common";
 import { fetchCourtsNews, fetchCourtsKijitsu } from "./sources/courts";
 import { fetchShugiinBills, fetchSangiinBills } from "./sources/diet";
 import { notifyRadarFailure } from "./notify";
+import { notifyRevalidate } from "./lib/notify-revalidate";
 
 const prisma = new PrismaClient();
 
@@ -83,12 +84,13 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 /** classifyHeadlines失敗時は最大2回まで指数バックオフで再試行。全滅してもジョブは落とさずスキップする */
 async function classifyWithRetry(
   headlines: { index: number; feed: string; title: string }[],
+  activeIssues: ActiveIssueForMatch[],
   retries = 2,
 ): Promise<RadarCluster[]> {
   let lastError: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      return await classifyHeadlines(headlines);
+      return await classifyHeadlines(headlines, activeIssues);
     } catch (e) {
       lastError = e;
       if (attempt < retries) {
@@ -242,8 +244,23 @@ async function main() {
     return;
   }
   console.log(`  分類対象 ${recent.length}件（今回の新規のみ）`);
+
+  // 続報マッチング候補: 監視期限内でまだアクティブな公開済みIssue（新規クラスタ化のスキップ判定に使う）
+  const activeIssuesRaw = await prisma.issue.findMany({
+    where: {
+      status: { in: ["ACTIVE", "TRENDING"] },
+      confirmation: { in: ["OFFICIAL", "REPORTED"] },
+      monitoringUntil: { gt: new Date() },
+    },
+    orderBy: { createdAt: "desc" },
+    take: RADAR.followUpMaxActiveIssuesForMatch,
+    select: { id: true, title: true, keywords: true },
+  });
+  const activeIssueIds = new Set(activeIssuesRaw.map((i) => i.id));
+
   const clusters = await classifyWithRetry(
     recent.map((e, i) => ({ index: i, feed: e.feedName, title: e.title })),
+    activeIssuesRaw,
   );
   console.log(`  ${clusters.length}クラスタ検出`);
 
@@ -259,14 +276,38 @@ async function main() {
   let publishedThisRun = 0;
 
   for (const cluster of clusters) {
-    const key = dedupKey(cluster.title);
-    const exists = await prisma.topicCandidate.findUnique({ where: { dedupKey: key } });
-    if (exists) continue; // 既知トピック（続報はsummarize/timelineの担当）
-
     const members = cluster.member_indices
       .filter((i) => i >= 0 && i < recent.length)
       .map((i) => recent[i]);
     if (members.length === 0) continue;
+
+    // AIが既存の公開済みIssueの続報だと判定した場合: 新規クラスタ化せず、
+    // 該当SourceEventを紐付けてタイムラインに1行追記するだけに留める（軽量・即時）。
+    // 記事本文の再生成は followup.ts が頻度制御込みで別途担当する。
+    if (cluster.match_issue_id && activeIssueIds.has(cluster.match_issue_id)) {
+      const matchedIssueId = cluster.match_issue_id;
+      await prisma.sourceEvent.updateMany({
+        where: { id: { in: members.map((m) => m.id) } },
+        data: { issueId: matchedIssueId },
+      });
+      const matchedIssue = activeIssuesRaw.find((i) => i.id === matchedIssueId);
+      const newest = members.reduce((a, b) => (a.publishedAt > b.publishedAt ? a : b));
+      await prisma.issueTimeline.create({
+        data: {
+          issueId: matchedIssueId,
+          label: `続報: ${cluster.title.slice(0, 60)}`,
+          sourceUrl: newest.url,
+        },
+      });
+      const issueRow = await prisma.issue.findUnique({ where: { id: matchedIssueId }, select: { slug: true } });
+      if (issueRow) await notifyRevalidate(issueRow.slug, matchedIssueId);
+      console.log(`  🔗 [続報] ${matchedIssue?.title ?? matchedIssueId} ← ${cluster.title}`);
+      continue;
+    }
+
+    const key = dedupKey(cluster.title);
+    const exists = await prisma.topicCandidate.findUnique({ where: { dedupKey: key } });
+    if (exists) continue; // 既知トピック（続報はfollowup.tsの担当）
 
     if (isOutOfScopeTopic(cluster.title, members.map((m) => m.title))) {
       console.log(`  [reject/out_of_scope] ${cluster.title} — スポーツ・エンタメ等`);
@@ -358,6 +399,7 @@ async function main() {
         },
       }),
     ]);
+    await notifyRevalidate(slug, issue.id);
     publishedThisRun += 1;
     console.log(`  ✅ [publish/${decision.confirmation}] /issues/${slug} — ${cluster.title}`);
   }

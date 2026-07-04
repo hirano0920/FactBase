@@ -1,6 +1,6 @@
 generator client {
   provider        = "prisma-client-js"
-  previewFeatures = ["postgresqlExtensions"]
+  previewFeatures = ["postgresqlExtensions", "driverAdapters"]
 }
 
 datasource db {
@@ -154,11 +154,12 @@ model Issue {
   underReview    Boolean              @default(false)
   qualityReports IssueQualityReport[]
 
-  votes     Vote[]
-  comments  Comment[]
-  lawLinks  IssueLawLink[]
-  timeline  IssueTimeline[]
-  bookmarks Bookmark[]
+  votes         Vote[]
+  comments      Comment[]
+  evidenceLinks IssueEvidenceLink[]
+  timeline      IssueTimeline[]
+  bookmarks     Bookmark[]
+  sourceEvents  SourceEvent[]
 }
 
 // 「この要約はおかしい」報告（Radar自動生成争点向け）。閾値到達でunderReview化。
@@ -185,8 +186,13 @@ model SourceEvent {
   publishedAt DateTime
   hash        String   @unique // feedName+titleのsha256（重複取り込み防止）
   createdAt   DateTime @default(now())
+  // 公開済みIssueの続報だとnano/AIが判定した場合にセット（続報自動追記・記事再生成の起点）
+  issueId     String?
+
+  issue Issue? @relation(fields: [issueId], references: [id], onDelete: SetNull)
 
   @@index([createdAt])
+  @@index([issueId])
 }
 
 // Radarのトピック候補と公開判断ログ（透明性レポートの材料・長期保存）
@@ -333,32 +339,73 @@ model FcCache {
   comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
 }
 
-model LawChunk {
+enum EvidenceSourceType {
+  LAW // e-Gov 法令
+  DIET_RECORD // 国会会議録
+  TREATY // 条約・国際文書
+  HISTORICAL_DOC // 歴史文書（ポツダム宣言、日本国憲法制定経緯 等）
+  COURT_RULING // 判例（型のみ用意。判例DBは次フェーズで投入）
+}
+
+// ファクトチェックの根拠チャンク（法令・国会発言・条約・歴史文書を汎用的に保持）
+model EvidenceChunk {
   id         String                       @id @default(cuid())
-  lawId      String
-  lawName    String
+  sourceType EvidenceSourceType
+  sourceId   String // 法令ID/会議録検索キーワードID/条約名スラッグ等
+  sourceName String // 表示名「消費税法」「第213回国会 予算委員会」「日本国憲法」
   articleRef String?
   text       String
   sourceUrl  String
+  category   IssueCategory[] // グローバル検索時のブースト用（Issue.categoryと同じ値域）
+  keywords   String[] // 検索補助・自動リンクの手がかり
   isActive   Boolean                      @default(true)
   embedding  Unsupported("vector(1536)")?
   createdAt  DateTime                     @default(now())
   updatedAt  DateTime                     @updatedAt
 
-  issueLinks IssueLawLink[]
+  issueLinks IssueEvidenceLink[]
 
-  @@index([lawId])
+  @@index([sourceType])
+  @@index([sourceId])
 }
 
-model IssueLawLink {
-  id         String @id @default(cuid())
-  issueId    String
-  lawChunkId String
+// 争点⇔証拠チャンクの紐付け。pinned=trueは人間/自動が明示的に選んだ優先リンク
+// （存在しなくてもEvidenceChunkはグローバル検索の対象になる＝必須ではない）
+model IssueEvidenceLink {
+  id      String  @id @default(cuid())
+  issueId String
+  chunkId String
+  pinned  Boolean @default(false)
 
-  issue    Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
-  lawChunk LawChunk @relation(fields: [lawChunkId], references: [id], onDelete: Cascade)
+  issue Issue         @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  chunk EvidenceChunk @relation(fields: [chunkId], references: [id], onDelete: Cascade)
 
-  @@unique([issueId, lawChunkId])
+  @@unique([issueId, chunkId])
+}
+
+// 数値主張の裏取り用データ（GDP・失業率・税収等）。スキーマのみ用意し、
+// e-Stat/日銀時系列からの自動取り込みと数値ファクトチェック機能は次フェーズで実装。
+model StatisticSeries {
+  id         String   @id @default(cuid())
+  seriesId   String   @unique
+  name       String
+  unit       String
+  sourceName String
+  sourceUrl  String
+  updatedAt  DateTime @updatedAt
+
+  points StatisticPoint[]
+}
+
+model StatisticPoint {
+  id          String @id @default(cuid())
+  seriesId    String
+  periodLabel String // "2026Q1", "2026-06" 等
+  value       Float
+
+  series StatisticSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+
+  @@unique([seriesId, periodLabel])
 }
 
 model UserBadge {

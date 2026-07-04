@@ -136,7 +136,7 @@ function buildSourceLinks(usedIds: string[], chunks: FcChunk[]): FcSourceLink[] 
   for (const id of usedIds) {
     const chunk = byId.get(id);
     if (!chunk?.sourceUrl) continue;
-    const label = `${chunk.lawName}${chunk.articleRef ? ` ${chunk.articleRef}` : ""}`;
+    const label = `${chunk.sourceName}${chunk.articleRef ? ` ${chunk.articleRef}` : ""}`;
     if (!links.some((l) => l.url === chunk.sourceUrl)) {
       links.push({ label, url: chunk.sourceUrl });
     }

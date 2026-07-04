@@ -1,8 +1,10 @@
 /**
  * RAG検索層。コメント本文をembeddingし、pgvectorコサイン類似で根拠チャンクを取得。
  * 優先順位:
- *   1. 争点に紐づくチャンク内で類似検索（最も精度が高い）
- *   2. 紐づきが無い/embedding未生成 → 争点リンクの先頭3件（フォールバック）
+ *   1. 争点にpinされたチャンク（人間/自動が明示的に選んだ優先候補）
+ *   2. グローバル検索: isActiveな全EvidenceChunkから、対象Issueのcategoryと重なるものを
+ *      優先しつつコサイン類似度順（争点ごとの手動リンクが無くても根拠が引ける設計）
+ *   3. 類似検索が失敗（embedding未生成・API障害等）した場合のフォールバック
  */
 import OpenAI from "openai";
 import { createHash } from "crypto";
@@ -49,7 +51,7 @@ async function embedQuery(text: string): Promise<number[]> {
 
 interface RawChunkRow {
   id: string;
-  lawName: string;
+  sourceName: string;
   articleRef: string | null;
   text: string;
   sourceUrl: string;
@@ -61,35 +63,52 @@ export async function retrieveChunks(
   query: string,
   limit = 3,
 ): Promise<FcChunk[]> {
-  // 類似検索を試み、失敗（embedding未生成・API障害等）ならリンク順フォールバック
+  const issue = await prisma.issue.findUnique({ where: { id: issueId }, select: { category: true } });
+  const category = issue?.category ?? null;
+
+  // 類似検索を試み、失敗（embedding未生成・API障害等）ならグローバルfindManyフォールバック
   try {
     const embedding = await embedQuery(query);
     const vector = `[${embedding.join(",")}]`;
 
     const rows = await prisma.$queryRaw<RawChunkRow[]>`
-      SELECT lc.id, lc."lawName", lc."articleRef", lc.text, lc."sourceUrl", lc."updatedAt"
-      FROM "LawChunk" lc
-      JOIN "IssueLawLink" ill ON ill."lawChunkId" = lc.id
-      WHERE ill."issueId" = ${issueId}
-        AND lc."isActive" = true
-        AND lc.embedding IS NOT NULL
-      ORDER BY lc.embedding <=> ${vector}::vector
+      SELECT ec.id, ec."sourceName", ec."articleRef", ec.text, ec."sourceUrl", ec."updatedAt"
+      FROM "EvidenceChunk" ec
+      LEFT JOIN "IssueEvidenceLink" iel
+        ON iel."chunkId" = ec.id AND iel."issueId" = ${issueId} AND iel.pinned = true
+      WHERE ec."isActive" = true
+        AND ec.embedding IS NOT NULL
+      ORDER BY
+        (iel.id IS NOT NULL) DESC,
+        (${category}::"IssueCategory" = ANY(ec.category)) DESC,
+        ec.embedding <=> ${vector}::vector
       LIMIT ${limit}
     `;
     if (rows.length > 0) {
       return rows.map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString() }));
     }
-    console.warn(
-      `[rag] fallback=link_order reason=no_embedded_rows issueId=${issueId}`,
-    );
+    console.warn(`[rag] fallback=global_findMany reason=no_embedded_rows issueId=${issueId}`);
   } catch (e) {
-    console.warn(`[rag] fallback=link_order reason=similarity_search_error issueId=${issueId}`, e);
+    console.warn(`[rag] fallback=global_findMany reason=similarity_search_error issueId=${issueId}`, e);
   }
 
-  const fallback = await prisma.lawChunk.findMany({
-    where: { isActive: true, issueLinks: { some: { issueId } } },
-    select: { id: true, lawName: true, articleRef: true, text: true, sourceUrl: true, updatedAt: true },
+  const pinned = await prisma.evidenceChunk.findMany({
+    where: { isActive: true, issueLinks: { some: { issueId, pinned: true } } },
+    select: { id: true, sourceName: true, articleRef: true, text: true, sourceUrl: true, updatedAt: true },
     take: limit,
   });
-  return fallback.map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString() }));
+  if (pinned.length >= limit) {
+    return pinned.map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString() }));
+  }
+
+  const rest = await prisma.evidenceChunk.findMany({
+    where: {
+      isActive: true,
+      ...(category ? { category: { has: category } } : {}),
+      id: { notIn: pinned.map((p) => p.id) },
+    },
+    select: { id: true, sourceName: true, articleRef: true, text: true, sourceUrl: true, updatedAt: true },
+    take: limit - pinned.length,
+  });
+  return [...pinned, ...rest].map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString() }));
 }

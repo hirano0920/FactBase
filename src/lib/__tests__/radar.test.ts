@@ -8,7 +8,9 @@ import {
   isOutOfScopeTopic,
   isBreakingNews,
   hasPrimarySource,
+  shouldRegenerateFollowUp,
   type DecisionInput,
+  type FollowUpAggregate,
 } from "@/lib/radar";
 
 const base: DecisionInput = {
@@ -220,5 +222,62 @@ describe("clusterCoherence（nanoクラスタリングの誤結合検出）", ()
 
   it("空配列は1を返す", () => {
     expect(clusterCoherence([])).toBe(1);
+  });
+});
+
+describe("shouldRegenerateFollowUp（続報再生成の頻度ゲート）", () => {
+  const now = new Date("2026-07-05T12:00:00Z");
+
+  const reportedBase: FollowUpAggregate = {
+    confirmation: "REPORTED",
+    articleGeneratedAt: new Date("2026-07-05T11:00:00Z"), // 60分前
+    newEventCount: 1,
+    newDistinctFeeds: 1,
+    maxNewTrustWeight: 50,
+  };
+
+  it("新着イベントが0件なら再生成しない", () => {
+    expect(shouldRegenerateFollowUp({ ...reportedBase, newEventCount: 0, newDistinctFeeds: 0 }, now)).toBe(
+      false,
+    );
+  });
+
+  it("REPORTED: 新着1媒体以上・30分以上経過で再生成する", () => {
+    expect(shouldRegenerateFollowUp(reportedBase, now)).toBe(true);
+  });
+
+  it("REPORTED: 30分未満なら再生成しない（ちょうど29分は不可）", () => {
+    const recent = { ...reportedBase, articleGeneratedAt: new Date("2026-07-05T11:31:00Z") };
+    expect(shouldRegenerateFollowUp(recent, now)).toBe(false);
+  });
+
+  it("REPORTED: ちょうど30分は再生成する（境界値）", () => {
+    const exact = { ...reportedBase, articleGeneratedAt: new Date("2026-07-05T11:30:00Z") };
+    expect(shouldRegenerateFollowUp(exact, now)).toBe(true);
+  });
+
+  const officialBase: FollowUpAggregate = {
+    confirmation: "OFFICIAL",
+    articleGeneratedAt: new Date("2026-07-05T09:00:00Z"), // 3時間前
+    newEventCount: 1,
+    newDistinctFeeds: 1,
+    maxNewTrustWeight: 90,
+  };
+
+  it("OFFICIAL: 一次情報級の新着(trust>=85)・2時間以上経過で再生成する", () => {
+    expect(shouldRegenerateFollowUp(officialBase, now)).toBe(true);
+  });
+
+  it("OFFICIAL: 新着が一次情報級でなければ再生成しない", () => {
+    expect(shouldRegenerateFollowUp({ ...officialBase, maxNewTrustWeight: 60 }, now)).toBe(false);
+  });
+
+  it("OFFICIAL: 2時間未満なら一次情報級でも再生成しない", () => {
+    const recent = { ...officialBase, articleGeneratedAt: new Date("2026-07-05T11:00:00Z") };
+    expect(shouldRegenerateFollowUp(recent, now)).toBe(false);
+  });
+
+  it("MANUAL争点は対象外", () => {
+    expect(shouldRegenerateFollowUp({ ...reportedBase, confirmation: "MANUAL" }, now)).toBe(false);
   });
 });
