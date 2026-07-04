@@ -117,6 +117,7 @@ async function main() {
   // RSS(feeds.json)に加え、公式RSSがない裁判所・衆参両院はHTML差分/SMRI議案DBで補う。
   // どちらも同じFeedItem形式で返し、既存のfeedName+titleハッシュ重複排除にそのまま乗る。
   console.log("1/4 フィード取得…");
+  const runStarted = new Date();
   const [rssItems, courtsNews, courtsKijitsu, shugiin, sangiin] = await Promise.all([
     Promise.all(config.feeds.map(fetchFeed)).then((r) => r.flat()),
     fetchCourtsNews(),
@@ -148,15 +149,18 @@ async function main() {
     return;
   }
 
-  // 2. 直近6時間のイベントをnanoで1回クラスタリング
-  // 衆参のSMRI議案DBは初回実行時のみ現国会分がまとめて新規イベント化されるため、
-  // その回だけ枠を広めに取る（以降は状況変化があった議案だけなので数件/回に落ち着く）。
+  // 今回新規分だけを分類（初回の国会一括取り込み等で6h窓が数千件になるのを防ぐ）
   console.log("2/4 クラスタリング（nano 1回）…");
   const recent = await prisma.sourceEvent.findMany({
-    where: { createdAt: { gte: new Date(Date.now() - 6 * 3600_000) } },
+    where: { createdAt: { gte: runStarted } },
     orderBy: { publishedAt: "desc" },
-    take: 120,
+    take: 50,
   });
+  if (recent.length === 0) {
+    console.log("  今回の新規イベントなし — スキップ");
+    return;
+  }
+  console.log(`  分類対象 ${recent.length}件（今回の新規のみ）`);
   const clusters = await classifyHeadlines(
     recent.map((e, i) => ({ index: i, feed: e.feedName, title: e.title })),
   );

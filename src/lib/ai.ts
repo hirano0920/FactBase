@@ -13,9 +13,14 @@ const globalForAi = globalThis as unknown as { openai?: OpenAI };
 
 function getOpenAI(): OpenAI {
   if (!globalForAi.openai) {
-    globalForAi.openai = createOpenAIClient({ timeout: 20_000, maxRetries: 1 });
+    globalForAi.openai = createOpenAIClient({ timeout: 60_000, maxRetries: 2 });
   }
   return globalForAi.openai;
+}
+
+/** Radar クラスタリング用（Azure 初回バッチは遅めになりやすい） */
+function getOpenAIRadar(): OpenAI {
+  return createOpenAIClient({ timeout: 180_000, maxRetries: 2 });
 }
 
 export interface FcChunk {
@@ -284,9 +289,10 @@ export interface RadarCluster {
 export async function classifyHeadlines(
   headlines: { index: number; feed: string; title: string }[],
 ): Promise<RadarCluster[]> {
-  const list = headlines.map((h) => `${h.index}: [${h.feed}] ${h.title}`).join("\n");
-  const res = await getOpenAI().chat.completions.create({
-    model: AI_MODELS.utility,
+  const capped = headlines.slice(0, 50);
+  const list = capped.map((h) => `${h.index}: [${h.feed}] ${h.title}`).join("\n");
+  const res = await getOpenAIRadar().chat.completions.create({
+    model: process.env.RADAR_CLASSIFY_MODEL ?? AI_MODELS.utility,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: RADAR_CLASSIFY_PROMPT },
