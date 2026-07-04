@@ -34,6 +34,7 @@ jobs:
           DATABASE_URL: ${{ secrets.DIRECT_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           RADAR_AUTO_PUBLISH_PER_DAY: "8"
         run: npx tsx scripts/radar/detect.ts
 
@@ -42,5 +43,6 @@ jobs:
           DATABASE_URL: ${{ secrets.DIRECT_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           ARTICLE_DAILY_ARTICLE_LIMIT: "10"
         run: npx tsx scripts/radar/summarize.ts
