@@ -1,0 +1,19 @@
+{
+  "_comment": "追跡する一次情報ソースの台帳。争点を追加したらここに1エントリ足すだけで週次自動更新の対象になる",
+  "laws": [
+    {
+      "law_id": "363AC0000000108",
+      "name": "消費税法",
+      "issue_slug": "consumption-tax-reduction",
+      "last_revision": null
+    }
+  ],
+  "kokkai_keywords": [
+    {
+      "keyword": "消費税 減税",
+      "issue_slug": "consumption-tax-reduction",
+      "last_fetched": null,
+      "active": true
+    }
+  ]
+}

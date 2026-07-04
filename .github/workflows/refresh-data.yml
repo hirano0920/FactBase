@@ -1,0 +1,42 @@
+# 一次情報DBの週次自動更新。
+# 変化がない週: e-Gov/国会APIチェックのみ（無料）。embedding課金ゼロ。
+# 変化があった週: 差分チャンクのみembedding（数円）→ Neonにupsert → registry.jsonをコミット。
+name: Refresh primary-source data
+
+on:
+  schedule:
+    - cron: "0 21 * * 0" # 毎週月曜 6:00 JST
+  workflow_dispatch: {} # 手動実行も可（争点追加直後など）
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scripts/ingest/requirements.txt
+
+      - run: pip install -r scripts/ingest/requirements.txt
+
+      - name: Run refresh
+        working-directory: scripts/ingest
+        env:
+          DATABASE_URL: ${{ secrets.DIRECT_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: python refresh.py
+
+      - name: Commit registry updates
+        run: |
+          git config user.name "konkyo-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add sources/registry.json
+          git diff --cached --quiet || git commit -m "chore: weekly data refresh $(date +%F)"
+          git push

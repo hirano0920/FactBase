@@ -1,0 +1,302 @@
+@import "tailwindcss";
+
+/* Tailwind v4のクラスベースdark mode（next-themesが<html class="dark">を付け外しする） */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* 純白ベース（ベージュがかった暖色を廃止、Xのようなクリーンな白+ニュートラルグレーに） */
+  --color-surface: #ffffff;
+  --color-surface-raised: #ffffff;
+  --color-surface-muted: #f7f8f8;
+  --color-border: #e5e7eb;
+  --color-border-strong: #d1d5db;
+
+  --color-ink: #0f1419;
+  --color-ink-secondary: #45494d;
+  --color-ink-muted: #6b7076;
+  --color-ink-faint: #97a0a8;
+
+  /* デニムブルー：法律事務所然としたネイビーより一段やわらかい */
+  --color-accent: #3f6690;
+  --color-accent-hover: #315274;
+
+  /* 差し色（テラコッタ）：ステップ番号・強調バッジなど「あたたかさ」担当。CTAには使わない */
+  --color-warm: #d97b52;
+  --color-warm-muted: #fbe9dd;
+  --color-warm-hover: #c1683f;
+
+  --color-for: #4a7a5c;
+  --color-for-muted: #eaf3ec;
+  --color-against: #b0564f;
+  --color-against-muted: #f8ece9;
+  --color-neutral: #6b7280;
+  --color-neutral-muted: #f1eee6;
+
+  --color-link: #3f6690;
+  --color-link-hover: #315274;
+
+  /* 「燃えてる」争点用。CTAには使わない、トレンド強調専用の色 */
+  --color-hot: #e8481f;
+  --color-hot-muted: #fff3ee;
+  --color-hot-border: #ffd9c7;
+
+  /*
+   * font-serifは「見出し用ウェイト」のエイリアスとして残す（既存の font-serif ユーティリティを
+   * 使っている箇所を全部書き換えずに済むように）。実体はサンセリフ（Apple的な現代感を優先）。
+   */
+  --font-serif: var(--font-noto-sans), "Hiragino Sans", -apple-system, sans-serif;
+  --font-sans: var(--font-noto-sans), "Hiragino Sans", -apple-system, sans-serif;
+
+  --shadow-subtle: 0 1px 2px rgb(15 20 25 / 0.04);
+  --shadow-card: 0 2px 6px rgb(15 20 25 / 0.05), 0 8px 20px rgb(15 20 25 / 0.04);
+  --radius-sm: 0.5rem;
+  --radius-md: 0.875rem;
+  --radius-lg: 1.25rem;
+
+  --spacing-page: 1.5rem;
+  --width-content: 42rem;
+  --width-wide: 56rem;
+}
+
+/*
+ * ダークモード。Tailwind v4は@theme変数をvar()参照で出力するため、
+ * .dark配下でこの値を上書きするだけで全ユーティリティ（bg-surface等）が追従する。
+ * シャドウは黒背景では見えないため、暗所では「縁の光」で階調を出す方針に切り替える。
+ */
+.dark {
+  --color-surface: #131417;
+  --color-surface-raised: #1b1d21;
+  --color-surface-muted: #212327;
+  --color-border: #2c2f34;
+  --color-border-strong: #3d4048;
+
+  --color-ink: #f2f0ec;
+  --color-ink-secondary: #cbc7be;
+  --color-ink-muted: #97928a;
+  --color-ink-faint: #66625b;
+
+  --color-accent: #7aa3c9;
+  --color-accent-hover: #93b6d8;
+
+  --color-warm: #e2916a;
+  --color-warm-muted: #3a2a20;
+  --color-warm-hover: #eba883;
+
+  --color-for: #6fae82;
+  --color-for-muted: #1c2e21;
+  --color-against: #d4837a;
+  --color-against-muted: #322020;
+  --color-neutral: #9aa1ac;
+  --color-neutral-muted: #26282c;
+
+  --color-link: #7aa3c9;
+  --color-link-hover: #93b6d8;
+
+  --color-hot: #ff6a3d;
+  --color-hot-muted: #331c14;
+  --color-hot-border: #4d2a1e;
+
+  --shadow-subtle: 0 0 0 1px rgb(255 255 255 / 0.04);
+  --shadow-card: 0 0 0 1px rgb(255 255 255 / 0.05), 0 8px 24px rgb(0 0 0 / 0.35);
+}
+
+@layer base {
+  html {
+    @apply antialiased;
+    text-rendering: optimizeLegibility;
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-surface text-ink font-sans text-[15px] leading-relaxed transition-colors duration-200;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-sans font-bold tracking-tighter text-ink;
+  }
+
+  a {
+    @apply text-link transition-colors duration-150;
+    @apply focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40;
+  }
+
+  a:hover {
+    @apply text-link-hover;
+  }
+
+  ::selection {
+    @apply bg-accent/15 text-ink;
+  }
+}
+
+@layer utilities {
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* 「燃えてる」争点のライブ感を出すドット点滅。スタートアップらしい生きた感触。 */
+  @keyframes pulse-hot {
+    0% {
+      box-shadow: 0 0 0 0 rgb(232 72 31 / 0.45);
+    }
+    70% {
+      box-shadow: 0 0 0 7px rgb(232 72 31 / 0);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgb(232 72 31 / 0);
+    }
+  }
+
+  .animate-pulse-hot {
+    animation: pulse-hot 1.8s infinite;
+  }
+
+  /* コメント・リスト項目が下からふわっと流れ込む登場アニメーション */
+  @keyframes fade-slide-up {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-fade-slide-up {
+    animation: fade-slide-up 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* 投票結果の反転表示・称号獲得など「じゃん！」の瞬間用 */
+  @keyframes pop-in {
+    0% {
+      opacity: 0;
+      transform: scale(0.85) translateY(6px);
+    }
+    60% {
+      opacity: 1;
+      transform: scale(1.03) translateY(0);
+    }
+    100% {
+      transform: scale(1) translateY(0);
+    }
+  }
+
+  .animate-pop-in {
+    animation: pop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  }
+
+  /* 🔥アイコンのチカチカ揺らめき */
+  @keyframes flicker {
+    0%,
+    100% {
+      transform: scale(1) rotate(-3deg);
+    }
+    50% {
+      transform: scale(1.15) rotate(3deg);
+    }
+  }
+
+  .animate-flicker {
+    animation: flicker 1s ease-in-out infinite;
+    display: inline-block;
+    transform-origin: center;
+  }
+
+  /* 投票確定時の紙吹雪の1粒 */
+  @keyframes confetti-fly {
+    0% {
+      opacity: 1;
+      transform: translate(0, 0) rotate(0deg) scale(1);
+    }
+    100% {
+      opacity: 0;
+      transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(0.4);
+    }
+  }
+
+  .animate-confetti {
+    animation: confetti-fly 0.9s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+
+  /* 投票バーが0からニュッと伸びる */
+  @keyframes grow-width {
+    from {
+      width: 0%;
+    }
+  }
+
+  .animate-grow-width {
+    animation: grow-width 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* いいね/dislikeを押した瞬間、絵文字がふわっと浮いて消える */
+  @keyframes emoji-float {
+    0% {
+      opacity: 0;
+      transform: translate(-50%, 4px) scale(0.6);
+    }
+    30% {
+      opacity: 1;
+      transform: translate(-50%, -6px) scale(1.3);
+    }
+    100% {
+      opacity: 0;
+      transform: translate(-50%, -28px) scale(1);
+    }
+  }
+
+  .animate-emoji-float {
+    animation: emoji-float 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+}
+
+/* AI生成記事（sanitize済みHTML）の組版 */
+@layer components {
+  .prose-article {
+    @apply text-[15px] leading-relaxed text-ink-secondary;
+  }
+  .prose-article h2 {
+    @apply mt-10 mb-4 font-serif text-xl font-semibold text-ink;
+  }
+  .prose-article h3 {
+    @apply mt-6 mb-2 text-base font-semibold text-ink;
+  }
+  .prose-article p {
+    @apply mb-4;
+  }
+  .prose-article ul,
+  .prose-article ol {
+    @apply mb-4 space-y-1.5 pl-5;
+  }
+  .prose-article ul {
+    list-style-type: disc;
+  }
+  .prose-article ol {
+    list-style-type: decimal;
+  }
+  .prose-article blockquote {
+    @apply my-4 border-l-2 border-border-strong pl-4 text-ink-muted;
+  }
+  .prose-article a {
+    @apply text-link underline;
+  }
+  .prose-article table {
+    @apply my-4 w-full border-collapse text-sm;
+  }
+  .prose-article th,
+  .prose-article td {
+    @apply border border-border px-3 py-2 text-left;
+  }
+}

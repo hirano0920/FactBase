@@ -1,0 +1,391 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_URL")
+  extensions = [vector]
+}
+
+enum Plan {
+  FREE
+  COMMENT
+  FACTCHECK
+}
+
+enum VoteChoice {
+  FOR
+  AGAINST
+  UNDECIDED
+}
+
+enum IssueStatus {
+  ACTIVE
+  TRENDING
+  PASSED
+  ARCHIVED
+}
+
+enum IssueCategory {
+  POLITICS
+  LAW
+  ECONOMY
+  FINANCE
+  EDUCATION
+}
+
+enum FcVerdict {
+  TRUE // 一次情報で確認できた
+  FALSE // 一次情報と矛盾
+  UNKNOWN // 一次情報では確認不可
+  OPINION // 意見・評価
+  REPORTED // 報道の存在は確認・内容の真偽は未確認
+  DISPUTED // 当事者間で主張が対立 / 解釈が分かれる
+}
+
+enum ModerationStatus {
+  VISIBLE // 通常表示
+  AUTO_HIDDEN // 通報閾値到達で一時非表示（AI判定待ち）
+  AI_CLEARED // AIが問題なしと判定し復帰（再度の自動非表示はしない）
+  REMOVED_AI // AIが違反と高確度判定（異議申立可）
+  REMOVED_HUMAN // 人間が削除確定
+  HUMAN_REVIEW // AIが判定を保留し人間キュー行き（非表示のまま）
+}
+
+enum RadarStatus {
+  PENDING // 検知直後
+  PUBLISHED // 自動公開済み
+  HELD // 安全ゲートで下書き止め（人間確認必須）
+  REJECTED // スコア不足で見送り
+}
+
+enum ConfirmationStatus {
+  OFFICIAL // 公式発表・法案・判決・統計ベース
+  REPORTED // 報道ベース / 真偽未確認
+  MANUAL // 手動作成（従来の法令争点）
+}
+
+model User {
+  id                   String    @id @default(cuid())
+  name                 String?
+  email                String?   @unique
+  emailVerified        DateTime?
+  image                String?
+  // 軽量プロフィール: 一言自己紹介・絵文字アバター（画像アップロードは不要な設計）
+  bio                  String?
+  avatarEmoji          String?
+  plan                 Plan      @default(FREE)
+  planUntil            DateTime?
+  // Stripe: 二重課金防止・解約導線・webhookのユーザー解決に必須
+  stripeCustomerId     String?   @unique
+  stripeSubscriptionId String?
+  // 新規登録時のIP/国（90日1IP1アカウント・不正投票対策）
+  registrationIp       String?
+  registrationCountry  String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  accounts  Account[]
+  sessions  Session[]
+  votes     Vote[]
+  comments  Comment[]
+  badges    UserBadge[]
+  reports   Report[]
+  bookmarks Bookmark[]
+
+  @@index([registrationIp, createdAt])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Issue {
+  id                 String        @id @default(cuid())
+  slug               String        @unique
+  title              String
+  category           IssueCategory
+  status             IssueStatus   @default(ACTIVE)
+  summaryJson        Json
+  articleHtml        String?
+  articleGeneratedAt DateTime?
+  monitoringUntil    DateTime?
+  keywords           String[]
+  // 非正規化カウンタ: Redisが真実のソース、DBは非同期追従（一覧・SEOページ用）
+  voteForCount       Int           @default(0)
+  voteAgainstCount   Int           @default(0)
+  voteUndecidedCount Int           @default(0)
+  commentCount       Int           @default(0)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  // Radar由来の争点用メタデータ
+  confirmation   ConfirmationStatus   @default(MANUAL)
+  voteLabelsJson Json? // 投票ボタンのカスタム文言 {"for":"説明すべき","against":"問題ない","undecided":"判断できない"}
+  // 公開後の品質報告（誤った要約・的外れなスレ立て等）が閾値に達すると true。
+  // 人間確認が終わるまでトレンド表示・新規流入から外す（削除はしない＝透明性ログとして残す）
+  underReview    Boolean              @default(false)
+  qualityReports IssueQualityReport[]
+
+  votes     Vote[]
+  comments  Comment[]
+  lawLinks  IssueLawLink[]
+  timeline  IssueTimeline[]
+  bookmarks Bookmark[]
+}
+
+// 「この要約はおかしい」報告（Radar自動生成争点向け）。閾値到達でunderReview化。
+model IssueQualityReport {
+  id         String   @id @default(cuid())
+  issueId    String
+  reporterId String
+  reason     String?
+  createdAt  DateTime @default(now())
+
+  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+
+  @@unique([issueId, reporterId])
+}
+
+// Radarが検知した生シグナル（30日でクリーンアップ・Layer 2）
+model SourceEvent {
+  id          String   @id @default(cuid())
+  feedName    String
+  trustWeight Int // フィード信頼度 20-100
+  title       String
+  url         String
+  publishedAt DateTime
+  hash        String   @unique // feedName+titleのsha256（重複取り込み防止）
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// Radarのトピック候補と公開判断ログ（透明性レポートの材料・長期保存）
+model TopicCandidate {
+  id             String      @id @default(cuid())
+  dedupKey       String      @unique // 正規化タイトル（同一トピックの再検知防止）
+  title          String
+  category       String? // politics/economy/law/finance/rights/international
+  classification String? // official/report/scandal/incident/indicator
+  eventCount     Int         @default(0)
+  distinctFeeds  Int         @default(0)
+  hotScore       Int         @default(0)
+  trustScore     Int         @default(0)
+  riskScore      Int         @default(0)
+  riskFlags      String[] // 検出された危険シグナル
+  decision       String? // 判断式の内訳（監査用）
+  status         RadarStatus @default(PENDING)
+  sourceUrls     Json // [{"title","url","feed"}]
+  issueId        String?     @unique
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@index([status, createdAt])
+}
+
+// 争点の時系列更新（続報・本人反応・訂正）
+model IssueTimeline {
+  id        String   @id @default(cuid())
+  issueId   String
+  label     String // 「速報スレ公開」「Sonnetまとめ公開」「本人が否定を表明」等
+  sourceUrl String?
+  at        DateTime @default(now())
+
+  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+
+  @@index([issueId, at])
+}
+
+// モデレーション人間キュー（AIが判定保留した1割 + 異議申立）
+model ModerationCase {
+  id         String    @id @default(cuid())
+  commentId  String
+  source     String // "reports"(通報起点) | "appeal"(異議申立)
+  aiVerdict  Json? // nanoの判定内容（人間の参考情報）
+  status     String    @default("PENDING") // PENDING | RESOLVED
+  resolution String? // "removed" | "restored" | "appeal_accepted" | "appeal_rejected"
+  createdAt  DateTime  @default(now())
+  resolvedAt DateTime?
+
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+}
+
+// 削除への異議申立（本人1回のみ・判断は必ず人間）
+model Appeal {
+  id         String    @id @default(cuid())
+  commentId  String    @unique
+  userId     String
+  reason     String
+  status     String    @default("PENDING") // PENDING | ACCEPTED | REJECTED
+  createdAt  DateTime  @default(now())
+  resolvedAt DateTime?
+
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+}
+
+model Vote {
+  id        String     @id @default(cuid())
+  userId    String
+  issueId   String
+  choice    VoteChoice
+  createdAt DateTime   @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, issueId])
+  @@index([issueId])
+}
+
+model Comment {
+  id               String           @id @default(cuid())
+  issueId          String
+  userId           String
+  stance           VoteChoice
+  body             String
+  likeCount        Int              @default(0)
+  dislikeCount     Int              @default(0)
+  helpfulCount     Int              @default(0)
+  isHidden         Boolean          @default(false) // 表示可否（moderationStatusから導出・クエリ用）
+  moderationStatus ModerationStatus @default(VISIBLE)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  issue    Issue            @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  fcCache  FcCache?
+  reports  Report[]
+  helpfuls Helpful[]
+  cases    ModerationCase[]
+  appeal   Appeal?
+
+  @@index([issueId, createdAt])
+}
+
+model Helpful {
+  id        String   @id @default(cuid())
+  userId    String
+  commentId String
+  createdAt DateTime @default(now())
+
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, commentId])
+}
+
+// 「保存したスレッド」。ユーザーが後で読み返すために争点をブックマークする。
+model Bookmark {
+  id        String   @id @default(cuid())
+  userId    String
+  issueId   String
+  createdAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, issueId])
+  @@index([userId, createdAt])
+}
+
+model FcCache {
+  id         String    @id @default(cuid())
+  commentId  String    @unique
+  verdict    FcVerdict
+  label      String? // 表示用ラベル（「条文上確認」「報道ベース」等の細分類）
+  reason     String
+  sourceIds  String[]
+  sourceUrls Json? // [{"label","url"}] 出典リンク（必ず表示する要件）
+  resultJson Json
+  createdAt  DateTime  @default(now())
+
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+}
+
+model LawChunk {
+  id         String                       @id @default(cuid())
+  lawId      String
+  lawName    String
+  articleRef String?
+  text       String
+  sourceUrl  String
+  isActive   Boolean                      @default(true)
+  embedding  Unsupported("vector(1536)")?
+  createdAt  DateTime                     @default(now())
+  updatedAt  DateTime                     @updatedAt
+
+  issueLinks IssueLawLink[]
+
+  @@index([lawId])
+}
+
+model IssueLawLink {
+  id         String @id @default(cuid())
+  issueId    String
+  lawChunkId String
+
+  issue    Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  lawChunk LawChunk @relation(fields: [lawChunkId], references: [id], onDelete: Cascade)
+
+  @@unique([issueId, lawChunkId])
+}
+
+model UserBadge {
+  id           String        @id @default(cuid())
+  userId       String
+  category     IssueCategory
+  tier         String
+  helpfulCount Int           @default(0)
+  updatedAt    DateTime      @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, category])
+}
+
+model Report {
+  id         String   @id @default(cuid())
+  commentId  String
+  reporterId String
+  reason     String?
+  resolved   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  comment  Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  reporter User    @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+}
+
+model ContentCache {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  type      String
+  content   Json
+  createdAt DateTime @default(now())
+}

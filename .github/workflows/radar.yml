@@ -1,0 +1,46 @@
+# FactBase Radar — 検知〜速報公開〜GPT-5まとめの定期実行。
+# 15分間隔 = 1日96回。publicリポジトリならGitHub Actionsは無料（無制限分数）なのでこの間隔にしている。
+# privateリポジトリの場合はActions分数が課金対象（1回2〜3分 × 96回/日 ≈ 200〜300分/日）。
+# 無料枠(Free: 2,000分/月, Pro: 3,000分/月)を超える可能性があるので、privateのままなら
+# */30 に戻すか、リポジトリをpublicにするか判断すること。
+name: FactBase Radar
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: radar
+  cancel-in-progress: false # 実行中はスキップでなく待機（二重公開防止）
+
+jobs:
+  radar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npx prisma generate
+
+      - name: Detect & publish breaking issues
+        env:
+          DATABASE_URL: ${{ secrets.DIRECT_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          RADAR_AUTO_PUBLISH_PER_DAY: "8"
+        run: npx tsx scripts/radar/detect.ts
+
+      - name: Generate Level-2 summaries (GPT-5)
+        env:
+          DATABASE_URL: ${{ secrets.DIRECT_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ARTICLE_DAILY_ARTICLE_LIMIT: "10"
+        run: npx tsx scripts/radar/summarize.ts
