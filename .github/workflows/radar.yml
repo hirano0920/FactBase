@@ -37,6 +37,7 @@ jobs:
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           RADAR_CLASSIFY_MODEL: ${{ secrets.RADAR_CLASSIFY_MODEL }}
           RADAR_AUTO_PUBLISH_PER_DAY: "8"
+          RADAR_ALERT_WEBHOOK_URL: ${{ secrets.RADAR_ALERT_WEBHOOK_URL }}
         run: npx tsx scripts/radar/detect.ts
 
       - name: Generate Level-2 summaries (GPT-5)
@@ -46,4 +47,5 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           ARTICLE_DAILY_ARTICLE_LIMIT: "10"
+          RADAR_ALERT_WEBHOOK_URL: ${{ secrets.RADAR_ALERT_WEBHOOK_URL }}
         run: npx tsx scripts/radar/summarize.ts

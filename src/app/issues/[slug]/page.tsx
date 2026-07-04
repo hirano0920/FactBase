@@ -12,11 +12,12 @@ import { CategoryBadge, StatusBadge } from "@/components/ui/badge";
 import { AppSidebarStatic } from "@/components/layout/app-sidebar";
 import { AdSlot, PageContainer, Section, SectionTitle } from "@/components/layout/page-container";
 import { getComments, getIssueBySlug, getIssueTimeline, isDbEnabled } from "@/lib/data";
-import { GUEST_COMMENT_LIMIT, ISSUE_PAGE_REVALIDATE_SEC } from "@/lib/constants";
+import { GUEST_COMMENT_LIMIT } from "@/lib/constants";
 import type { Metadata } from "next";
 
 /** ゲスト向け静的シェル。auth() を呼ばず ISR/CDN が効く。ログイン要素はクライアントで hydrate */
-export const revalidate = ISSUE_PAGE_REVALIDATE_SEC;
+// Next.jsのセグメント設定はリテラルのみ許可のため、lib/constants.tsのISSUE_PAGE_REVALIDATE_SEC(3600)と値を同期
+export const revalidate = 3600;
 
 interface IssuePageProps {
   params: Promise<{ slug: string }>;
@@ -78,8 +79,8 @@ export default async function IssuePage({ params }: IssuePageProps) {
                 <CategoryBadge category={issue.category} />
                 <StatusBadge status={issue.status} />
                 {issue.confirmation === "reported" && (
-                  <span className="rounded-full border border-amber-500/40 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800">
-                    報道ベース・真偽未確認
+                  <span className="rounded-full border border-hot/40 bg-hot-muted px-2.5 py-0.5 text-xs font-medium text-hot">
+                    🔴 速報・続報中
                   </span>
                 )}
                 {issue.confirmation === "official" && (

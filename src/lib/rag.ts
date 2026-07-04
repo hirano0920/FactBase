@@ -79,8 +79,11 @@ export async function retrieveChunks(
     if (rows.length > 0) {
       return rows.map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString() }));
     }
+    console.warn(
+      `[rag] fallback=link_order reason=no_embedded_rows issueId=${issueId}`,
+    );
   } catch (e) {
-    console.warn("[rag] similarity search failed, falling back", e);
+    console.warn(`[rag] fallback=link_order reason=similarity_search_error issueId=${issueId}`, e);
   }
 
   const fallback = await prisma.lawChunk.findMany({

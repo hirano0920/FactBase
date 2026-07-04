@@ -3,11 +3,11 @@ import { notFound } from "next/navigation";
 import { CategoryBadge, StatusBadge } from "@/components/ui/badge";
 import { PageContainer, AdSlot } from "@/components/layout/page-container";
 import { getIssueBySlug } from "@/lib/data";
-import { ISSUE_PAGE_REVALIDATE_SEC } from "@/lib/constants";
 import { sanitizeArticleHtml } from "@/lib/sanitize";
 import type { Metadata } from "next";
 
-export const revalidate = ISSUE_PAGE_REVALIDATE_SEC;
+// Next.jsのセグメント設定はリテラルのみ許可のため、lib/constants.tsのISSUE_PAGE_REVALIDATE_SEC(3600)と値を同期
+export const revalidate = 3600;
 
 interface ArticlePageProps {
   params: Promise<{ slug: string }>;

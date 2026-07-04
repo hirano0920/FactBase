@@ -2,14 +2,15 @@ import { PageContainer } from "@/components/layout/page-container";
 import { IssueCard } from "@/components/issue/issue-card";
 import { CategoryPills } from "@/components/issue/category-pills";
 import { AppSidebar } from "@/components/layout/app-sidebar";
-import { CATEGORIES, type CategoryId, ISSUE_PAGE_REVALIDATE_SEC } from "@/lib/constants";
+import { CATEGORIES, type CategoryId } from "@/lib/constants";
 import { getIssues } from "@/lib/data";
 
 export const metadata = {
   title: "争点一覧",
 };
 
-export const revalidate = ISSUE_PAGE_REVALIDATE_SEC;
+// Next.jsのセグメント設定はリテラルのみ許可のため、lib/constants.tsのISSUE_PAGE_REVALIDATE_SEC(3600)と値を同期
+export const revalidate = 3600;
 
 interface IssuesPageProps {
   searchParams: Promise<{ category?: string }>;

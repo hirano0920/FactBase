@@ -5,10 +5,11 @@ import { CategoryPills } from "@/components/issue/category-pills";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { AdSlot, PageContainer } from "@/components/layout/page-container";
 import { formatNumber } from "@/lib/utils";
-import { type CategoryId, ISSUE_PAGE_REVALIDATE_SEC } from "@/lib/constants";
+import { type CategoryId } from "@/lib/constants";
 import { getIssues, getRanking } from "@/lib/data";
 
-export const revalidate = ISSUE_PAGE_REVALIDATE_SEC;
+// Next.jsのセグメント設定はリテラルのみ許可のため、lib/constants.tsのISSUE_PAGE_REVALIDATE_SEC(3600)と値を同期
+export const revalidate = 3600;
 
 export default async function HomePage() {
   const [issues, ranking] = await Promise.all([getIssues(), getRanking()]);

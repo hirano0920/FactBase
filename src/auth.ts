@@ -4,6 +4,7 @@ import Twitter from "next-auth/providers/twitter";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
+import { isAdminEmail } from "@/lib/admin-emails";
 import { kv } from "@/lib/redis";
 import {
   getClientCountryFromHeaders,
@@ -28,6 +29,7 @@ declare module "next-auth" {
       image: string | null;
       plan: Plan;
       createdAt: Date;
+      isAdmin: boolean;
     };
   }
 }
@@ -93,6 +95,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       const dbUser = user as typeof user & { plan: Plan; createdAt: Date };
       session.user.plan = dbUser.plan;
       session.user.createdAt = dbUser.createdAt;
+      session.user.isAdmin = isAdminEmail(session.user.email);
       return session;
     },
   },

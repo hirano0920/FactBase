@@ -88,13 +88,15 @@ model User {
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
-  accounts  Account[]
-  sessions  Session[]
-  votes     Vote[]
-  comments  Comment[]
-  badges    UserBadge[]
-  reports   Report[]
-  bookmarks Bookmark[]
+  accounts       Account[]
+  sessions       Session[]
+  votes          Vote[]
+  comments       Comment[]
+  badges         UserBadge[]
+  reports        Report[]
+  bookmarks      Bookmark[]
+  qualityReports IssueQualityReport[]
+  appeals        Appeal[]
 
   @@index([registrationIp, createdAt])
 }
@@ -167,7 +169,8 @@ model IssueQualityReport {
   reason     String?
   createdAt  DateTime @default(now())
 
-  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  issue    Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  reporter User  @relation(fields: [reporterId], references: [id], onDelete: Cascade)
 
   @@unique([issueId, reporterId])
 }
@@ -249,6 +252,7 @@ model Appeal {
   resolvedAt DateTime?
 
   comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Vote {
@@ -380,12 +384,4 @@ model Report {
 
   comment  Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
   reporter User    @relation(fields: [reporterId], references: [id], onDelete: Cascade)
-}
-
-model ContentCache {
-  id        String   @id @default(cuid())
-  key       String   @unique
-  type      String
-  content   Json
-  createdAt DateTime @default(now())
 }

@@ -1,42 +1,20 @@
 /**
- * 人間モデレーター用CLI（残り1割の人間判断 + 異議申立の処理）。
- *
- * 使い方:
- *   npx tsx scripts/moderation-cli.ts list                     # 未処理キュー一覧
- *   npx tsx scripts/moderation-cli.ts remove <caseId> [理由]   # 削除確定
- *   npx tsx scripts/moderation-cli.ts restore <caseId>         # 復帰
- *   npx tsx scripts/moderation-cli.ts accept-appeal <caseId>   # 異議認容→コメント復帰
- *   npx tsx scripts/moderation-cli.ts reject-appeal <caseId>   # 異議棄却
- *
- *   npx tsx scripts/moderation-cli.ts issues                   # underReview中の争点一覧
- *   npx tsx scripts/moderation-cli.ts issue-clear <slug>        # 確認完了・通常表示に戻す
- *   npx tsx scripts/moderation-cli.ts issue-archive <slug>      # 品質不良でアーカイブ
+ * 人間モデレーター用CLI（管理ダッシュボード /api/admin/* と同じロジック）。
  */
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
+import {
+  listFlaggedIssues,
+  listPendingModerationCases,
+  resolveIssueAdmin,
+  resolveModerationCase,
+  type ModerationResolution,
+} from "../src/lib/moderation-actions";
 
 async function list() {
-  const cases = await prisma.moderationCase.findMany({
-    where: { status: "PENDING" },
-    orderBy: { createdAt: "asc" },
-    include: {
-      comment: {
-        select: {
-          body: true,
-          moderationStatus: true,
-          appeal: { select: { reason: true } },
-          reports: { select: { reason: true } },
-        },
-      },
-    },
-  });
-
+  const cases = await listPendingModerationCases();
   if (cases.length === 0) {
     console.log("未処理のケースはありません 🎉");
     return;
   }
-
   for (const c of cases) {
     console.log("─".repeat(60));
     console.log(`caseId: ${c.id} [${c.source}] ${c.createdAt.toISOString()}`);
@@ -51,52 +29,13 @@ async function list() {
   console.log(`計 ${cases.length} 件`);
 }
 
-async function resolve(
-  caseId: string,
-  resolution: "removed" | "restored" | "appeal_accepted" | "appeal_rejected",
-) {
-  const kase = await prisma.moderationCase.findUnique({
-    where: { id: caseId },
-    select: { id: true, commentId: true, source: true, status: true },
-  });
-  if (!kase) throw new Error("ケースが見つかりません");
-  if (kase.status !== "PENDING") throw new Error("既に処理済みです");
-
-  const commentUpdate =
-    resolution === "removed" || resolution === "appeal_rejected"
-      ? { moderationStatus: "REMOVED_HUMAN" as const, isHidden: true }
-      : { moderationStatus: "AI_CLEARED" as const, isHidden: false };
-
-  await prisma.$transaction([
-    prisma.moderationCase.update({
-      where: { id: caseId },
-      data: { status: "RESOLVED", resolution, resolvedAt: new Date() },
-    }),
-    prisma.comment.update({ where: { id: kase.commentId }, data: commentUpdate }),
-    prisma.report.updateMany({ where: { commentId: kase.commentId }, data: { resolved: true } }),
-    ...(kase.source === "appeal"
-      ? [
-          prisma.appeal.update({
-            where: { commentId: kase.commentId },
-            data: {
-              status: resolution === "appeal_accepted" ? "ACCEPTED" : "REJECTED",
-              resolvedAt: new Date(),
-            },
-          }),
-        ]
-      : []),
-  ]);
+async function resolve(caseId: string, resolution: ModerationResolution) {
+  await resolveModerationCase(caseId, resolution);
   console.log(`✅ ${caseId} → ${resolution}`);
 }
 
-async function listFlaggedIssues() {
-  const issues = await prisma.issue.findMany({
-    where: { underReview: true },
-    include: {
-      qualityReports: { select: { reason: true, createdAt: true } },
-      timeline: { orderBy: { at: "desc" }, take: 3 },
-    },
-  });
+async function listIssues() {
+  const issues = await listFlaggedIssues();
   if (issues.length === 0) {
     console.log("人間確認待ちの争点はありません 🎉");
     return;
@@ -113,32 +52,6 @@ async function listFlaggedIssues() {
   }
   console.log("─".repeat(60));
   console.log(`計 ${issues.length} 件`);
-}
-
-async function resolveIssue(slug: string, action: "clear" | "archive") {
-  const issue = await prisma.issue.findUnique({ where: { slug }, select: { id: true, underReview: true } });
-  if (!issue) throw new Error("争点が見つかりません");
-  if (!issue.underReview) throw new Error("この争点は確認待ちではありません");
-
-  await prisma.$transaction([
-    prisma.issue.update({
-      where: { id: issue.id },
-      data:
-        action === "clear"
-          ? { underReview: false }
-          : { underReview: false, status: "ARCHIVED" },
-    }),
-    prisma.issueTimeline.create({
-      data: {
-        issueId: issue.id,
-        label:
-          action === "clear"
-            ? "人間確認完了。通常表示に復帰しました"
-            : "人間確認の結果、品質不良のためアーカイブしました",
-      },
-    }),
-  ]);
-  console.log(`✅ ${slug} → ${action}`);
 }
 
 async function main() {
@@ -160,20 +73,25 @@ async function main() {
       await resolve(arg, "appeal_rejected");
       break;
     case "issues":
-      await listFlaggedIssues();
+      await listIssues();
       break;
     case "issue-clear":
-      await resolveIssue(arg, "clear");
+      await resolveIssueAdmin(arg, "clear");
+      console.log(`✅ ${arg} → clear`);
       break;
     case "issue-archive":
-      await resolveIssue(arg, "archive");
+      await resolveIssueAdmin(arg, "archive");
+      console.log(`✅ ${arg} → archive`);
+      break;
+    case "issue-unpublish":
+      await resolveIssueAdmin(arg, "unpublish");
+      console.log(`✅ ${arg} → unpublish`);
       break;
     default:
       console.log(
-        "使い方: list | remove <caseId> | restore <caseId> | accept-appeal <caseId> | reject-appeal <caseId> | issues | issue-clear <slug> | issue-archive <slug>",
+        "使い方: list | remove <caseId> | restore <caseId> | accept-appeal <caseId> | reject-appeal <caseId> | issues | issue-clear <slug> | issue-archive <slug> | issue-unpublish <slug>",
       );
   }
-  await prisma.$disconnect();
 }
 
 main().catch((e) => {

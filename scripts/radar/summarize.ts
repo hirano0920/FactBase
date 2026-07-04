@@ -12,6 +12,7 @@
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { AI_MODELS, RADAR } from "../../src/lib/constants";
 import { createOpenAIClient } from "../../src/lib/openai-client";
+import { notifyRadarFailure } from "./notify";
 
 const prisma = new PrismaClient();
 
@@ -165,6 +166,7 @@ ${sourceList}
       console.log(`  ✅ /issues/${issue.slug} のまとめ公開`);
     } catch (e) {
       console.error(`  ❌ 生成失敗: ${e}`);
+      await notifyRadarFailure(`GPT-5要約生成失敗: ${issue.title}`, e);
     }
   }
 }

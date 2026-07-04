@@ -4,13 +4,13 @@ import { AppSidebar } from "@/components/layout/app-sidebar";
 import { PageContainer, Section } from "@/components/layout/page-container";
 import { cn, formatNumber, formatPercent } from "@/lib/utils";
 import { getRanking, getWeeklyRanking } from "@/lib/data";
-import { ISSUE_PAGE_REVALIDATE_SEC } from "@/lib/constants";
 
 export const metadata = {
   title: "ランキング",
 };
 
-export const revalidate = ISSUE_PAGE_REVALIDATE_SEC;
+// Next.jsのセグメント設定はリテラルのみ許可のため、lib/constants.tsのISSUE_PAGE_REVALIDATE_SEC(3600)と値を同期
+export const revalidate = 3600;
 
 interface RankingPageProps {
   searchParams: Promise<{ period?: string }>;

@@ -5,6 +5,9 @@ import {
   hotScore,
   clusterCoherence,
   COHERENCE_THRESHOLD,
+  isOutOfScopeTopic,
+  isBreakingNews,
+  hasPrimarySource,
   type DecisionInput,
 } from "@/lib/radar";
 
@@ -20,10 +23,10 @@ const base: DecisionInput = {
 };
 
 describe("decidePublish（Radar公開判断）", () => {
-  it("複数媒体・高信頼・低リスクは自動公開（報道ベースラベル）", () => {
+  it("報道のみの日常ネタは公開しない（一次情報なし）", () => {
     const d = decidePublish(base);
-    expect(d.action).toBe("publish");
-    if (d.action === "publish") expect(d.confirmation).toBe("REPORTED");
+    expect(d.action).toBe("reject");
+    expect(d.reason).toContain("no_primary_source");
   });
 
   it("公式発表はOFFICIALで公開", () => {
@@ -32,12 +35,34 @@ describe("decidePublish（Radar公開判断）", () => {
     expect(d.action).toBe("publish");
   });
 
+  it("省庁フィード由来はOFFICIALで公開", () => {
+    const d = decidePublish({
+      ...base,
+      classification: "report",
+      feedNames: ["boj-whatsnew", "nhk-economy"],
+    });
+    expect(d.action).toBe("publish");
+    if (d.action === "publish") expect(d.confirmation).toBe("OFFICIAL");
+  });
+
+  it("戦争・事件の速報はREPORTED（LIVE続報）で公開", () => {
+    const d = decidePublish({
+      ...base,
+      classification: "incident",
+      riskFlags: ["foreign_conflict"],
+      clusterTitle: "中東で大規模空爆、複数国が声明",
+    });
+    expect(d.action).toBe("publish");
+    if (d.action === "publish") expect(d.confirmation).toBe("REPORTED");
+  });
+
   it("ハードブロック（未成年）はスコアが高くても必ずHELD", () => {
     const d = decidePublish({
       ...base,
       eventCount: 20,
       distinctFeeds: 8,
       riskFlags: ["minor"],
+      classification: "official",
     });
     expect(d.action).toBe("hold");
     expect(d.reason).toContain("hard_block");
@@ -51,7 +76,13 @@ describe("decidePublish（Radar公開判断）", () => {
     "discrimination",
     "unverified_crime_assertion",
   ])("ハードブロックフラグ %s は自動公開されない", (flag) => {
-    const d = decidePublish({ ...base, eventCount: 20, distinctFeeds: 8, riskFlags: [flag] });
+    const d = decidePublish({
+      ...base,
+      eventCount: 20,
+      distinctFeeds: 8,
+      riskFlags: [flag],
+      classification: "official",
+    });
     expect(d.action).toBe("hold");
   });
 
@@ -67,12 +98,12 @@ describe("decidePublish（Radar公開判断）", () => {
   });
 
   it("日次上限到達後はHELDに落ちる（コスト暴走防止）", () => {
-    const d = decidePublish({ ...base, publishedToday: 8, dailyLimit: 8 });
+    const d = decidePublish({ ...base, classification: "official", publishedToday: 8, dailyLimit: 8 });
     expect(d.action).toBe("hold");
     expect(d.reason).toContain("daily_limit");
   });
 
-  it("政治家疑惑（named_politician_allegation）は減点されつつ公開可能", () => {
+  it("政治家疑惑だけでは公開しない（一次情報なし）", () => {
     const d = decidePublish({
       ...base,
       eventCount: 6,
@@ -80,11 +111,11 @@ describe("decidePublish（Radar公開判断）", () => {
       riskFlags: ["named_politician_allegation"],
       classification: "scandal",
     });
-    expect(d.action).toBe("publish");
-    if (d.action === "publish") expect(d.confirmation).toBe("REPORTED"); // 疑惑は必ず報道ベース
+    expect(d.action).toBe("reject");
+    expect(d.reason).toContain("no_primary_source");
   });
 
-  it("低熱量の話題はreject（ゴミスレ立て防止）", () => {
+  it("低熱量の話題はreject（ゴミスレ乱発防止）", () => {
     const d = decidePublish({
       ...base,
       eventCount: 2,
@@ -93,6 +124,58 @@ describe("decidePublish（Radar公開判断）", () => {
       maxTrustWeight: 40,
     });
     expect(d.action).toBe("reject");
+  });
+
+  it("スポーツ・エンタメフラグは却下", () => {
+    const d = decidePublish({ ...base, riskFlags: ["sports_entertainment"] });
+    expect(d.action).toBe("reject");
+    expect(d.reason).toContain("out_of_scope");
+  });
+});
+
+describe("isOutOfScopeTopic", () => {
+  it("W杯・試合結果は対象外", () => {
+    expect(isOutOfScopeTopic("日本対米国のW杯試合をどう見る？", ["Japan beat USA at World Cup"])).toBe(true);
+  });
+
+  it("はやぶさ・小惑星は対象外", () => {
+    expect(
+      isOutOfScopeTopic("はやぶさ2の小惑星接近をどう評価する？", ["はやぶさ2が小惑星に接近"]),
+    ).toBe(true);
+  });
+
+  it("政策絡みのスポーツ予算は対象", () => {
+    expect(
+      isOutOfScopeTopic("スポーツ振興予算案", ["政府、スポーツ基本法改正案を閣議決定"]),
+    ).toBe(false);
+  });
+});
+
+describe("isBreakingNews / hasPrimarySource", () => {
+  it("incident + foreign_conflict は速報", () => {
+    expect(
+      isBreakingNews({
+        ...base,
+        classification: "incident",
+        riskFlags: ["foreign_conflict"],
+        clusterTitle: "ウクライナ東部で激戦",
+      }),
+    ).toBe(true);
+  });
+
+  it("古い incident は速報扱いしない", () => {
+    expect(
+      isBreakingNews({
+        ...base,
+        classification: "incident",
+        minutesSinceLatest: 500,
+        riskFlags: ["foreign_conflict"],
+      }),
+    ).toBe(false);
+  });
+
+  it("boj フィードは一次情報", () => {
+    expect(hasPrimarySource({ ...base, feedNames: ["boj-whatsnew"] })).toBe(true);
   });
 });
 

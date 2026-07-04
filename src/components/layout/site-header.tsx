@@ -3,6 +3,7 @@ import { auth, signOut } from "@/auth";
 import { SITE } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
+import { isAdminEmail } from "@/lib/admin-emails";
 
 const NAV = [
   { href: "/issues", label: "スレ一覧", emoji: "📁" },
@@ -21,6 +22,7 @@ export async function SiteHeader() {
   const session = await auth();
   const user = session?.user ?? null;
   const planLabel = user ? PLAN_LABELS[user.plan] : null;
+  const showAdmin = user && isAdminEmail(user.email);
 
   return (
     <header className="sticky top-0 z-50 border-b border-border bg-surface/90 backdrop-blur-md">
@@ -53,6 +55,14 @@ export async function SiteHeader() {
                 <span className="hidden rounded-full border border-accent/25 bg-accent/5 px-2.5 py-0.5 text-xs font-medium text-accent sm:inline">
                   {planLabel}
                 </span>
+              )}
+              {showAdmin && (
+                <Link
+                  href="/admin"
+                  className="hidden rounded-md border border-amber-400/50 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 no-underline hover:bg-amber-100 sm:inline"
+                >
+                  管理
+                </Link>
               )}
               <Link
                 href="/account"
