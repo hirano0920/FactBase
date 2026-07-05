@@ -54,7 +54,7 @@ jobs:
           AUTH_URL: ${{ secrets.AUTH_URL }}
         run: npx tsx scripts/radar/summarize.ts
 
-      - name: Follow-up: link new events & refresh live articles
+      - name: "Follow-up: link new events & refresh live articles"
         env:
           DATABASE_URL: ${{ secrets.DIRECT_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
