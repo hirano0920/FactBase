@@ -12,6 +12,7 @@ import { PrismaClient, type Prisma, type ConfirmationStatus } from "@prisma/clie
 import { RADAR } from "../../src/lib/constants";
 import { shouldRegenerateFollowUp } from "../../src/lib/radar";
 import { generateArticle, violatesBan } from "../../src/lib/radar-article";
+import { fetchPrimaryExcerpts } from "./lib/primary-text";
 import { notifyRadarFailure } from "./notify";
 import { notifyRevalidate } from "./lib/notify-revalidate";
 
@@ -29,7 +30,6 @@ interface CandidateRow {
 }
 
 const FOLLOW_UP_LABEL_PREFIX = "続報反映:";
-const SOURCE_CAP = 40;
 
 async function main() {
   const dailyLimit = Number(process.env.FOLLOWUP_DAILY_LIMIT ?? RADAR.followUpDailyLimit);
@@ -98,15 +98,23 @@ async function main() {
       const cumulativeSources = [
         ...baseSources,
         ...newEvents.map((e) => ({ title: e.title, url: e.url, feed: e.feedName })),
-      ].slice(-SOURCE_CAP);
+      ].slice(-RADAR.sourceCap);
 
       const summaryJson = issue.summaryJson as { lead?: string } | null;
       console.log(`続報反映中: ${issue.title}（新着${newEvents.length}件）`);
 
+      // OFFICIAL争点の続報には新着イベント分の公式ページ本文だけを渡す（既報分は前回記事に反映済み）
+      const primaryExcerpts =
+        issue.confirmation === "REPORTED"
+          ? []
+          : await fetchPrimaryExcerpts(
+              newEvents.map((e) => ({ title: e.title, url: e.url, feed: e.feedName })),
+            );
       const article = await generateArticle({
         issueTitle: issue.title,
         isReported: issue.confirmation === "REPORTED",
         sources: cumulativeSources,
+        primaryExcerpts,
         previousArticle: { lead: summaryJson?.lead ?? "", articleHtml: issue.articleHtml },
       });
 
@@ -149,8 +157,9 @@ async function main() {
 }
 
 main()
-  .catch((e) => {
+  .catch(async (e) => {
     console.error(e);
+    await notifyRadarFailure("followup.ts 致命的エラー（ジョブ全体が停止）", e);
     process.exit(1);
   })
   .finally(() => prisma.$disconnect());

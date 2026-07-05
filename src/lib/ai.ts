@@ -309,20 +309,35 @@ politics / economy / law / finance / rights / education / international
 - named_politician_allegation: 政治家個人への疑惑（公開可・ただし報道ベースラベル必須）
 - crime_related: 犯罪に関連する
 - foreign_conflict: 戦争・国際紛争
+- disaster: 大規模災害（震度6弱以上の地震・津波・噴火・特別警報級の台風豪雨・大規模火災/山火事等。震度5以下や日常の天気は対象外）
 - health_medical: 医療・健康
 
-# question
-クラスタごとに、中立的な投票設問タイトル（「〜をどう見る？」「〜に賛成？反対？」形式、40字以内）と、
-投票選択肢3つ（for/against/undecidedの順。疑惑系なら「説明すべき」「問題ない」「報道だけでは判断できない」のように中立に）を作る。
-断定・煽り・予断を含めないこと。
+# question（投票設問）
+クラスタごとに、当事者以外の一般ユーザーも自分の意見を持てる中立的な投票設問タイトルを作る（40字以内）。
+見出しの丸写しではなく「〜、あなたはどう見る？」のように当事者意識を持てる問いかけ調を優先する。
+
+choicesは常にfor/against/undecidedの3キーで返すが、文言は実際の対立軸に合わせてAIが自由に作ってよい
+（「賛成/反対」に無理にはめ込まない）。
+- 単純な賛成/反対が成立する話題（法案・政策等）: 「賛成」「反対」「わからない」に近い言葉でよい
+- 複数の対応・立場が並立し賛成/反対が不自然な話題: forとagainstに実際に対立する2つの立場・対応を当て、
+  undecidedは「どちらとも言えない」「判断に必要な情報がまだ足りない」等にする
+  （例: for="対応Aを支持", against="対応Bを支持", undecided="どちらとも言えない"）
+- 疑惑・スキャンダル系: 「説明すべき」「問題ない」「報道だけでは判断できない」のように中立に
+断定・煽り・一方の立場に不利な言葉選びは禁止。どちらの立場のユーザーも押しやすい言葉にする。
 
 # 続報判定（match_issue_id）
 「既に公開中の争点一覧」が渡された場合、クラスタが一覧のいずれかの続報（同一の出来事の新しい展開）だと判断できれば、
 match_issue_id にその争点の id を設定すること。新しい別の出来事であれば match_issue_id は null のままにする。
 迷う場合や一覧に該当がなければ必ず null にする（誤って別の出来事に紐付けない）。
 
+# 未公開候補との同一性判定（match_candidate_id）
+「まだ公開されていない候補一覧」が渡された場合、クラスタがそのいずれかと同じ出来事（審議中の同じ法案の新しい報道、
+まだ閾値未達の同じ事案の追加報道など）だと判断できれば、match_candidate_id にその候補の id を設定すること。
+これは「毎回タイトルの言い回しが変わっても同じ出来事だと認識して証拠を積み上げる」ための仕組みなので、
+表現が違っても指している出来事が同じなら積極的に一致させてよい。新しい別の出来事なら null のままにする。
+
 必ずJSONのみ:
-{"clusters": [{"title": "クラスタの中立的な題", "member_indices": [0,2,5], "classification": "...", "category": "...", "risk_flags": [...], "question": "投票設問", "choices": {"for": "...", "against": "...", "undecided": "..."}, "match_issue_id": null}]}`;
+{"clusters": [{"title": "クラスタの中立的な題", "member_indices": [0,2,5], "classification": "...", "category": "...", "risk_flags": [...], "question": "投票設問", "choices": {"for": "...", "against": "...", "undecided": "..."}, "match_issue_id": null, "match_candidate_id": null}]}`;
 
 export interface RadarCluster {
   title: string;
@@ -333,6 +348,7 @@ export interface RadarCluster {
   question: string;
   choices: { for: string; against: string; undecided: string };
   match_issue_id: string | null;
+  match_candidate_id: string | null;
 }
 
 const RADAR_CLUSTER_SCHEMA = z.object({
@@ -347,6 +363,7 @@ const RADAR_CLUSTER_SCHEMA = z.object({
     .optional()
     .default({ for: "", against: "", undecided: "" }),
   match_issue_id: z.string().nullable().optional().default(null),
+  match_candidate_id: z.string().nullable().optional().default(null),
 });
 const RADAR_CLASSIFY_RESPONSE_SCHEMA = z.object({
   clusters: z.array(RADAR_CLUSTER_SCHEMA).optional().default([]),
@@ -358,9 +375,16 @@ export interface ActiveIssueForMatch {
   keywords: string[];
 }
 
+/** まだ公開されていないHELD/REJECTED候補（累積判定の同一性マッチ対象） */
+export interface PendingCandidateForMatch {
+  id: string;
+  title: string;
+}
+
 export async function classifyHeadlines(
   headlines: { index: number; feed: string; title: string }[],
   activeIssues: ActiveIssueForMatch[] = [],
+  pendingCandidates: PendingCandidateForMatch[] = [],
 ): Promise<RadarCluster[]> {
   const capped = headlines.slice(0, 50);
   const list = capped.map((h) => `${h.index}: [${h.feed}] ${h.title}`).join("\n");
@@ -370,12 +394,18 @@ export async function classifyHeadlines(
           .map((i) => `${i.id}: ${i.title}${i.keywords.length ? ` (${i.keywords.join("/")})` : ""}`)
           .join("\n")}`
       : "";
+  const pendingCandidatesBlock =
+    pendingCandidates.length > 0
+      ? `\n\n# まだ公開されていない候補一覧（同じ出来事ならmatch_candidate_idにidを設定）\n${pendingCandidates
+          .map((c) => `${c.id}: ${c.title}`)
+          .join("\n")}`
+      : "";
   const res = await getOpenAIRadar().chat.completions.create({
     model: process.env.RADAR_CLASSIFY_MODEL || AI_MODELS.utility,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: RADAR_CLASSIFY_PROMPT },
-      { role: "user", content: `${list}${activeIssuesBlock}` },
+      { role: "user", content: `${list}${activeIssuesBlock}${pendingCandidatesBlock}` },
     ],
   });
   const parsed = safeParseJson(

@@ -4,7 +4,17 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { PageContainer, Section, SectionTitle } from "@/components/layout/page-container";
 
+interface RadarHealth {
+  alive: boolean;
+  lastSourceEventAt: string | null;
+  lastCandidateEvaluatedAt: string | null;
+  minutesSinceLastEvent: number | null;
+  todayIssueCount: number;
+  todayCandidateCount: number;
+}
+
 interface OverviewData {
+  radarHealth: RadarHealth;
   counts: {
     pendingCases: number;
     underReviewIssues: number;
@@ -84,6 +94,133 @@ function ActionButton({
     >
       {children}
     </button>
+  );
+}
+
+function RadarHealthBanner({ health }: { health: RadarHealth }) {
+  const style = health.alive
+    ? "border-for/30 bg-for-muted/40 text-for"
+    : "border-red-300 bg-red-50 text-red-800";
+  return (
+    <div className={`rounded-lg border p-4 text-sm ${style}`}>
+      <p className="font-bold">
+        {health.alive ? "🟢 Radar稼働中" : "🔴 Radar停止の疑いあり"}
+      </p>
+      <p className="mt-1 text-xs opacity-90">
+        {health.lastSourceEventAt
+          ? `最終フィード取得: ${new Date(health.lastSourceEventAt).toLocaleString("ja-JP")}（${health.minutesSinceLastEvent}分前）`
+          : "フィード取得履歴なし"}
+        {" · "}本日の公開 {health.todayIssueCount}件 / 評価した候補 {health.todayCandidateCount}件
+      </p>
+      {!health.alive && (
+        <p className="mt-1 text-xs">
+          15分間隔のcronで新着イベントが40分以上入っていません。GitHub Actionsの実行履歴を確認してください（0件公開自体は静かなニュース日なら正常です）。
+        </p>
+      )}
+    </div>
+  );
+}
+
+interface WorkflowRunStatus {
+  configured: boolean;
+  status: string | null;
+  conclusion: string | null;
+  htmlUrl: string | null;
+  createdAt: string | null;
+  runNumber: number | null;
+}
+
+const RUN_STATUS_LABEL: Record<string, string> = {
+  queued: "⏳ 待機中",
+  in_progress: "🔵 実行中",
+};
+const RUN_CONCLUSION_LABEL: Record<string, string> = {
+  success: "🟢 成功",
+  failure: "🔴 失敗",
+  cancelled: "⚪ キャンセル",
+  timed_out: "🔴 タイムアウト",
+};
+
+/** GitHub Actionsの実行状況表示＋手動実行。GITHUB_TOKEN未設定時は案内だけ出す */
+function WorkflowRunPanel() {
+  const [run, setRun] = useState<WorkflowRunStatus | null>(null);
+  const [triggering, setTriggering] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/radar-workflow");
+      if (res.ok) setRun(await res.json());
+    } catch {
+      // 静かに失敗（このパネルはあくまで補助情報）
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function trigger() {
+    setTriggering(true);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/admin/radar-workflow", { method: "POST" });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j?.error?.message ?? `HTTP ${res.status}`);
+      setMsg("実行をトリガーしました（反映まで数十秒かかります）");
+      setTimeout(load, 5000);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "実行に失敗しました");
+    } finally {
+      setTriggering(false);
+    }
+  }
+
+  if (!run) return null;
+
+  if (!run.configured) {
+    return (
+      <div className="rounded-lg border border-border bg-surface-muted p-4 text-xs text-ink-muted">
+        GitHub Actions連携は未設定です（GITHUB_TOKEN未設定）。fine-grained PAT（対象リポジトリのみ・Actions:
+        Read and write権限）を発行し環境変数に設定すると、ここから実行状況の確認と手動実行ができるようになります。
+      </div>
+    );
+  }
+
+  const statusLabel =
+    run.status === "completed"
+      ? (run.conclusion && RUN_CONCLUSION_LABEL[run.conclusion]) || run.conclusion
+      : (run.status && RUN_STATUS_LABEL[run.status]) || run.status;
+
+  return (
+    <div className="rounded-lg border border-border bg-surface-raised p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="text-sm">
+          <span className="font-bold">GitHub Actions（Radar）: </span>
+          {run.runNumber ? (
+            <>
+              {statusLabel}
+              {run.htmlUrl && (
+                <Link href={run.htmlUrl} target="_blank" className="ml-2 text-xs text-link underline">
+                  #{run.runNumber} を見る →
+                </Link>
+              )}
+              {run.createdAt && (
+                <span className="ml-2 text-xs text-ink-faint">
+                  {new Date(run.createdAt).toLocaleString("ja-JP")}
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="text-ink-muted">実行履歴を取得できませんでした</span>
+          )}
+        </div>
+        <ActionButton onClick={trigger} disabled={triggering}>
+          {triggering ? "実行中…" : "今すぐ実行"}
+        </ActionButton>
+      </div>
+      {msg && <p className="mt-2 text-xs text-ink-muted">{msg}</p>}
+    </div>
   );
 }
 
@@ -180,6 +317,9 @@ export function AdminDashboard() {
           </p>
         )}
       </header>
+
+      <RadarHealthBanner health={data.radarHealth} />
+      <WorkflowRunPanel />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <CountCard label="モデレーション待ち" value={data.counts.pendingCases} />
@@ -416,11 +556,18 @@ export function AdminDashboard() {
                 {c.decision && (
                   <p className="mt-1 font-mono text-xs text-ink-faint">{c.decision}</p>
                 )}
-                <div className="mt-2">
+                <div className="mt-2 flex gap-2">
+                  <ActionButton
+                    variant="success"
+                    disabled={!!busy}
+                    onClick={() => postJson(`/api/admin/radar/${c.id}`, { action: "approve" })}
+                  >
+                    承認して公開
+                  </ActionButton>
                   <ActionButton
                     variant="danger"
                     disabled={!!busy}
-                    onClick={() => postJson(`/api/admin/radar/${c.id}`, {})}
+                    onClick={() => postJson(`/api/admin/radar/${c.id}`, { action: "reject" })}
                   >
                     却下（公開しない）
                   </ActionButton>

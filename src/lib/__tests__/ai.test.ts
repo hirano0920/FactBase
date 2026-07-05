@@ -151,4 +151,49 @@ describe("classifyHeadlines", () => {
     const clusters = await classifyHeadlines(headlines);
     expect(clusters).toEqual([]);
   });
+
+  it("match_candidate_idを未指定なら既定でnullになる", async () => {
+    mockContent(
+      JSON.stringify({
+        clusters: [
+          {
+            title: "テストクラスタ",
+            member_indices: [0],
+            classification: "report",
+            category: "politics",
+            risk_flags: [],
+          },
+        ],
+      }),
+    );
+    const clusters = await classifyHeadlines(headlines);
+    expect(clusters[0].match_candidate_id).toBeNull();
+  });
+
+  it("match_candidate_idを指定した応答をそのまま反映する", async () => {
+    mockContent(
+      JSON.stringify({
+        clusters: [
+          {
+            title: "国旗損壊罪の続報",
+            member_indices: [0],
+            classification: "official",
+            category: "law",
+            risk_flags: [],
+            match_candidate_id: "cand_123",
+          },
+        ],
+      }),
+    );
+    const clusters = await classifyHeadlines(headlines, [], [{ id: "cand_123", title: "国旗損壊罪の新設をどう見る？" }]);
+    expect(clusters[0].match_candidate_id).toBe("cand_123");
+  });
+
+  it("未公開候補一覧をプロンプトのuserメッセージに含める", async () => {
+    mockContent(JSON.stringify({ clusters: [] }));
+    await classifyHeadlines(headlines, [], [{ id: "cand_123", title: "国旗損壊罪の新設をどう見る？" }]);
+    const userMessage = mocks.create.mock.calls[0][0].messages[1].content as string;
+    expect(userMessage).toContain("cand_123");
+    expect(userMessage).toContain("国旗損壊罪の新設をどう見る？");
+  });
 });

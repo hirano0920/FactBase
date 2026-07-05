@@ -3,6 +3,10 @@ import {
   decidePublish,
   dedupKey,
   hotScore,
+  matchesTrending,
+  buzzTitleMatch,
+  isPlausibleFollowUp,
+  extractBillTitle,
   clusterCoherence,
   COHERENCE_THRESHOLD,
   isOutOfScopeTopic,
@@ -179,6 +183,65 @@ describe("isBreakingNews / hasPrimarySource", () => {
   it("boj フィードは一次情報", () => {
     expect(hasPrimarySource({ ...base, feedNames: ["boj-whatsnew"] })).toBe(true);
   });
+
+  it("大規模災害（disasterフラグ）は速報LIVE対象", () => {
+    expect(
+      isBreakingNews({
+        ...base,
+        classification: "incident",
+        riskFlags: ["disaster"],
+        clusterTitle: "南海トラフ沿いで大地震が発生",
+      }),
+    ).toBe(true);
+  });
+
+  it("大規模火災・山火事はキーワードだけでも速報LIVE対象", () => {
+    expect(
+      isBreakingNews({
+        ...base,
+        classification: "incident",
+        riskFlags: [],
+        clusterTitle: "住宅街の対応をどう見る？",
+        memberTitles: ["市街地で大規模火災、数百世帯に避難指示"],
+      }),
+    ).toBe(true);
+  });
+
+  it("震度6弱以上のキーワードは元見出し側にあってもLIVE判定できる（nanoの中立化タイトル対策）", () => {
+    expect(
+      isBreakingNews({
+        ...base,
+        classification: "incident",
+        riskFlags: [],
+        clusterTitle: "関東地方の地震への対応をどう見る？",
+        memberTitles: ["関東で震度6強の地震 交通機関に乱れ"],
+      }),
+    ).toBe(true);
+  });
+
+  it("震度3など日常の地震報道はLIVE扱いしない", () => {
+    expect(
+      isBreakingNews({
+        ...base,
+        classification: "incident",
+        riskFlags: [],
+        clusterTitle: "北海道で震度3の地震",
+        memberTitles: ["北海道で震度3 津波の心配なし"],
+      }),
+    ).toBe(false);
+  });
+
+  it("震度5弱・5強は日常寄りのためLIVE扱いしない（震度6弱未満は対象外）", () => {
+    expect(
+      isBreakingNews({
+        ...base,
+        classification: "incident",
+        riskFlags: [],
+        clusterTitle: "東北で震度5強の地震",
+        memberTitles: ["東北で震度5強の地震、一部で停電"],
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("hotScore", () => {
@@ -186,6 +249,118 @@ describe("hotScore", () => {
     const hotNow = hotScore({ ...base, minutesSinceLatest: 5 });
     const hotOld = hotScore({ ...base, minutesSinceLatest: 300 });
     expect(hotNow).toBeGreaterThan(hotOld);
+  });
+
+  it("trending加点でスコアが上がる（テーマ選定の優先度に反映）", () => {
+    const plain = hotScore(base);
+    const trending = hotScore({ ...base, trending: true });
+    expect(trending).toBeGreaterThan(plain);
+  });
+
+  it("socialBuzz加点はtrendingより弱い（検索急増>継続関心の重み付け）", () => {
+    const plain = hotScore(base);
+    const social = hotScore({ ...base, socialBuzz: true });
+    const trending = hotScore({ ...base, trending: true });
+    expect(social).toBeGreaterThan(plain);
+    expect(trending).toBeGreaterThan(social);
+  });
+});
+
+describe("matchesTrending", () => {
+  it("急上昇ワードが見出しに含まれていれば真", () => {
+    expect(matchesTrending(["入管法改正案が閣議決定"], ["入管法改正"])).toBe(true);
+  });
+
+  it("含まれていなければ偽", () => {
+    expect(matchesTrending(["消費税減税法案、衆院で可決へ"], ["入管法改正"])).toBe(false);
+  });
+
+  it("急上昇ワードが空なら常に偽", () => {
+    expect(matchesTrending(["何でもいい見出し"], [])).toBe(false);
+  });
+});
+
+describe("buzzTitleMatch（はてブ人気エントリとの類似判定）", () => {
+  it("同じ出来事を指す記事タイトル同士は一致と判定する", () => {
+    expect(
+      buzzTitleMatch(
+        ["入管法改正案が衆院で可決", "入管法改正案が衆院通過"],
+        ["入管法改正案が衆院通過、支援団体から懸念の声"],
+      ),
+    ).toBe(true);
+  });
+
+  it("無関係なタイトルは一致しない", () => {
+    expect(
+      buzzTitleMatch(["消費税減税法案、衆院で可決へ"], ["猫の写真がかわいいと話題に"]),
+    ).toBe(false);
+  });
+
+  it("コーパスが空なら偽", () => {
+    expect(buzzTitleMatch(["何かの見出し"], [])).toBe(false);
+  });
+});
+
+describe("isPlausibleFollowUp（nano続報マッチの機械裏取り）", () => {
+  const issue = {
+    title: "入管法改正案の成立、あなたはどう見る？",
+    keywords: ["入管法改正案が衆院通過", "出入国管理及び難民認定法改正案"],
+  };
+
+  it("Issueキーワードが見出しに含まれていれば続報と認める", () => {
+    expect(
+      isPlausibleFollowUp("入管法改正の続報", ["「出入国管理及び難民認定法改正案」→ 参院で審議入り"], issue),
+    ).toBe(true);
+  });
+
+  it("タイトル類似が十分あれば続報と認める", () => {
+    expect(
+      isPlausibleFollowUp("入管法改正案が参院で可決", ["入管法改正案、参院本会議で可決・成立"], issue),
+    ).toBe(true);
+  });
+
+  it("無関係な出来事は続報と認めない（タイムライン汚染防止）", () => {
+    expect(
+      isPlausibleFollowUp("プロ野球の開幕戦が延期", ["雨天のため開幕戦が順延に"], issue),
+    ).toBe(false);
+  });
+
+  // TopicCandidate（未公開候補）はkeywordsを持たないため、match_candidate_idの裏取りでは
+  // keywords: [] を渡してタイトル類似のみで判定する。累積判定の核となる経路なので個別に検証する
+  describe("keywordsが空（未公開候補とのマッチング用途）", () => {
+    const candidate = { title: "国旗損壊罪の新設をどう見る？", keywords: [] as string[] };
+
+    it("言い回しが変わっても同じ出来事ならタイトル類似で続報と認める", () => {
+      expect(
+        isPlausibleFollowUp(
+          "国旗を傷つける行為への罰則、賛否は",
+          ["国旗損壊罪の新設を含む刑法改正案が衆院委員会で審議入り"],
+          candidate,
+        ),
+      ).toBe(true);
+    });
+
+    it("無関係な出来事はkeywordsが空でも続報と認めない", () => {
+      expect(
+        isPlausibleFollowUp("消費税減税法案、衆院で可決へ", ["消費税減税法案が衆院通過"], candidate),
+      ).toBe(false);
+    });
+  });
+});
+
+describe("extractBillTitle（議案フィードからの法案名抽出）", () => {
+  it("「」内の法案名を取り出す", () => {
+    expect(
+      extractBillTitle("衆議院第218回: 「国旗損壊罪を新設する刑法改正案」→ 委員会審査中"),
+    ).toBe("国旗損壊罪を新設する刑法改正案");
+  });
+
+  it("「」がなければnull", () => {
+    expect(extractBillTitle("衆議院第218回: 法案審議")).toBe(null);
+  });
+
+  it("短すぎる抽出結果はnull（誤マッチ防止）", () => {
+    expect(extractBillTitle("参議院第218回: 「予算」→ 可決")).toBe(null);
   });
 });
 

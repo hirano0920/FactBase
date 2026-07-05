@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireAdmin } from "@/lib/admin";
 import {
+  getRadarHealth,
   listFlaggedIssues,
   listHeldRadarCandidates,
   listPendingModerationCases,
@@ -14,15 +15,17 @@ export async function GET(req: NextRequest) {
   const session = await requireAdmin(req);
   if (session instanceof NextResponse) return session;
 
-  const [cases, flaggedIssues, recentRadar, heldRadar, openReports] = await Promise.all([
+  const [cases, flaggedIssues, recentRadar, heldRadar, openReports, radarHealth] = await Promise.all([
     listPendingModerationCases(),
     listFlaggedIssues(),
     listRecentRadarIssues(),
     listHeldRadarCandidates(),
     listUnresolvedReports(),
+    getRadarHealth(),
   ]);
 
   return NextResponse.json({
+    radarHealth,
     counts: {
       pendingCases: cases.length,
       underReviewIssues: flaggedIssues.length,

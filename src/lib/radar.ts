@@ -15,6 +15,10 @@ export interface ClusterInput {
   maxTrustWeight: number;
   /** nano分類が返した危険シグナル */
   riskFlags: string[];
+  /** Google Trends急上昇ワードと一致するか（検索需要が実際に急増しているシグナル） */
+  trending?: boolean;
+  /** はてなブックマーク人気エントリと一致するか（国内SNSでの継続的な関心シグナル） */
+  socialBuzz?: boolean;
 }
 
 /**
@@ -36,6 +40,7 @@ const SOFT_RISK_WEIGHTS: Record<string, number> = {
   crime_related: 20,
   foreign_conflict: 10,
   health_medical: 15,
+  disaster: 5, // 災害はLIVE追跡対象だが、被害規模の誤報リスク分だけ軽く減点
 };
 
 /** 政治・経済・法律等の議論スレに載せない話題（1つでも該当→reject） */
@@ -65,9 +70,13 @@ const IN_SCOPE_OVERRIDE = /予算|法案|政策|国会|省|内閣|外交|安保|
 export const PRIMARY_SOURCE_FEED =
   /^(kantei|cao|digital|boj-|mof|fsa|moj-|mhlw|mlit-|maff|mod-|mofa-|fed-|ecb-|courts|shugiin|sangiin|whitehouse|state-|defense-gov|eu-commission|un-|iaea|who-)/;
 
-/** 速報LIVE対象（戦争・テロ・重大事件）。報道のみでも可だが続報前提 */
+/**
+ * 速報LIVE対象（戦争・テロ・重大事件・大規模災害）。報道のみでも可だが続報前提。
+ * 災害系は「震度3」「震度5弱」「台風接近」のような日常〜中規模報道でLIVE乱発しないよう、
+ * 震度6弱以上・特別警報・避難指示など重大シグナルに限定する。
+ */
 const BREAKING_KEYWORDS =
-  /暗殺|テロ|爆発|砲撃|空爆|侵攻|開戦|銃撃|襲撃|mass\s*shooting|assassination|airstrike|invasion|terror|missile\s*strike|casualties|killed|deadly/i;
+  /暗殺|テロ|爆発|砲撃|空爆|侵攻|開戦|銃撃|襲撃|震度[6-7６-７]|大地震|巨大地震|津波警報|大津波|噴火|特別警報|避難指示|大規模火災|山火事|林野火災|mass\s*shooting|assassination|airstrike|invasion|terror|missile\s*strike|casualties|killed|deadly|major\s*earthquake|tsunami\s*warning|wildfire/i;
 
 /** 速報として扱う最大経過分（これより古い incident は見送り） */
 export const BREAKING_MAX_AGE_MIN = 360;
@@ -88,17 +97,55 @@ export function isBreakingNews(input: DecisionInput): boolean {
   if (input.distinctFeeds < 2) return false;
   if (input.minutesSinceLatest > BREAKING_MAX_AGE_MIN) return false;
   const flagged =
-    input.riskFlags.includes("foreign_conflict") || input.riskFlags.includes("crime_related");
-  const blob = input.clusterTitle ?? "";
+    input.riskFlags.includes("foreign_conflict") ||
+    input.riskFlags.includes("crime_related") ||
+    input.riskFlags.includes("disaster");
+  // nanoが中立化したタイトルにキーワードが残らないことがあるため、元見出しも判定対象にする
+  const blob = [input.clusterTitle ?? "", ...(input.memberTitles ?? [])].join("\n");
   return flagged || BREAKING_KEYWORDS.test(blob);
 }
+
+/**
+ * バズ加点。安全ゲート（複数媒体一致・一次情報・ハードブロック）は一切バイパスせず、
+ * ゲートを通過した候補同士の優先順位（日次上限の消費順）だけを動かす。
+ * Trends（検索急増=瞬間風速）を強く、はてブ（読まれ議論されている=継続関心）をやや弱く。
+ */
+const TRENDING_BONUS = 20;
+const SOCIAL_BUZZ_BONUS = 10;
 
 export function hotScore(c: ClusterInput): number {
   const volume = Math.min(c.eventCount * 10, 50);
   const spread = Math.min(c.distinctFeeds * 15, 45); // 複数媒体一致を重視
   const recency =
     c.minutesSinceLatest <= 30 ? 30 : c.minutesSinceLatest <= 120 ? 15 : 0;
-  return volume + spread + recency; // 0-125
+  const buzz = (c.trending ? TRENDING_BONUS : 0) + (c.socialBuzz ? SOCIAL_BUZZ_BONUS : 0);
+  return volume + spread + recency + buzz; // 0-155
+}
+
+/** クラスタの見出し群がGoogle Trends急上昇ワードのいずれかを含むか判定する */
+export function matchesTrending(titles: string[], trendingKeywords: string[]): boolean {
+  if (trendingKeywords.length === 0) return false;
+  const blob = titles.join(" ");
+  return trendingKeywords.some((kw) => blob.includes(kw));
+}
+
+/**
+ * はてブ人気エントリ等「タイトル同士」の一致判定。
+ * 急上昇ワード（短い検索語）と違い記事タイトルは部分文字列一致がほぼ成立しないため、
+ * 文字bigramのJaccard類似度で「同じ出来事を指しているか」を判定する。
+ */
+export const BUZZ_TITLE_SIMILARITY = 0.2;
+
+export function buzzTitleMatch(titles: string[], corpusTitles: string[]): boolean {
+  if (titles.length === 0 || corpusTitles.length === 0) return false;
+  const targetSets = titles.map(bigrams);
+  for (const corpus of corpusTitles) {
+    const corpusSet = bigrams(corpus);
+    for (const t of targetSets) {
+      if (jaccard(t, corpusSet) >= BUZZ_TITLE_SIMILARITY) return true;
+    }
+  }
+  return false;
 }
 
 export function trustScore(c: ClusterInput): number {
@@ -129,6 +176,8 @@ export interface DecisionInput extends ClusterInput {
   feedNames?: string[];
   /** クラスタタイトル（速報キーワード判定） */
   clusterTitle?: string;
+  /** クラスタ内の元見出し（nanoが中立化したタイトルで落ちる速報キーワードの補完） */
+  memberTitles?: string[];
 }
 
 const PUBLISH_THRESHOLD = 45;
@@ -234,6 +283,42 @@ export function clusterCoherence(titles: string[]): number {
 
 /** この類似度未満なら「nanoが無関係な見出しを誤って束ねた」とみなす */
 export const COHERENCE_THRESHOLD = 0.12;
+
+/**
+ * nanoの続報マッチ（match_issue_id）の機械裏取り。
+ * 新規クラスタにはclusterCoherenceの裏取りがあるのに続報マッチは無条件で信用していたため、
+ * 誤マッチで無関係な出来事が既存Issueのタイムラインを汚すリスクがあった。
+ * Issueタイトルは「〜をどう見る？」形式に中立化されており見出しと語彙が離れがちなので、
+ * キーワード包含（強いシグナル）を優先し、bigram類似はゆるい下限として使う。
+ */
+export const FOLLOW_UP_MATCH_SIMILARITY = 0.08;
+
+export function isPlausibleFollowUp(
+  clusterTitle: string,
+  memberTitles: string[],
+  issue: { title: string; keywords: string[] },
+): boolean {
+  const blob = [clusterTitle, ...memberTitles].join("\n");
+  // 1. Issueのキーワード（元クラスタ題・法案名）が見出し群に含まれていれば続報とみなす
+  if (issue.keywords.some((kw) => kw.length >= 2 && blob.includes(kw))) return true;
+  // 2. それ以外はタイトル同士のbigram類似で最低限の関連を要求する
+  const issueSet = bigrams(`${issue.title} ${issue.keywords.join(" ")}`);
+  return [clusterTitle, ...memberTitles].some(
+    (t) => jaccard(bigrams(t), issueSet) >= FOLLOW_UP_MATCH_SIMILARITY,
+  );
+}
+
+/**
+ * 議案フィード（shugiin-gian/sangiin-gian）のタイトルから法案名を取り出す。
+ * 例: 「衆議院第218回: 「国旗損壊罪を新設する刑法改正案」→ 委員会審査中」→「国旗損壊罪を新設する刑法改正案」
+ * 法案の審議状況変化はnanoを介さず、この法案名でIssue.keywordsと直接照合して
+ * タイムラインに追記する（審議進捗の確実なトラッキング）。
+ */
+export function extractBillTitle(feedTitle: string): string | null {
+  const m = feedTitle.match(/「(.+?)」/);
+  const title = m?.[1]?.trim() ?? "";
+  return title.length >= 4 ? title : null;
+}
 
 export interface FollowUpAggregate {
   confirmation: "OFFICIAL" | "REPORTED" | "MANUAL";

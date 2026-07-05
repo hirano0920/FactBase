@@ -40,7 +40,8 @@ export type VoteChoiceId = (typeof VOTE_CHOICES)[number]["id"];
 
 export const SITE = {
   name: "FactBase",
-  tagline: "一次情報で、日本の議論をクリーンに。",
+  fullName: "FactBase-日本の議論をもっと分かりやすく、クリーンに。",
+  tagline: "日本の議論をもっと分かりやすく、クリーンに。",
   description:
     "時事・政治・経済・金融・法律などを一次情報にもとづき、投票と議論ができるプラットフォーム。",
   url: "https://www.factbase.tokyo",
@@ -50,6 +51,8 @@ export const SITE = {
 export const COMMENT_LIMITS = {
   minLength: 50,
   maxLength: 500,
+  /** 同一争点での連投クールダウン（秒） */
+  sameThreadCooldownSec: 120,
 } as const;
 
 /** 未ログインのゲストが閲覧できるコメント数の上限。投票結果は制限なしで見える。 */
@@ -126,8 +129,8 @@ export const RADAR = {
   articleDailyArticleLimit: 10,
   /** @deprecated 旧名。articleDailyArticleLimit と同義 */
   sonnetDailyArticleLimit: 10,
-  /** SourceEventの保持日数（Layer 2は短期） */
-  eventRetentionDays: 30,
+  /** SourceEventの保持日数。OFFICIAL争点の監視期間(60日)と揃える（監視中の続報イベント消失防止） */
+  eventRetentionDays: 60,
   /** 品質報告の最低必要人数（小規模争点の下限） */
   qualityReportThreshold: 5,
   /** 争点の投票者数に対する必要報告割合（人気争点ほど多くの報告が必要＝sybil耐性） */
@@ -142,6 +145,8 @@ export const RADAR = {
   followUpMinIntervalOfficialMin: 120,
   /** 続報マッチング用にnanoへ渡すアクティブIssueの最大件数（プロンプト肥大化防止） */
   followUpMaxActiveIssuesForMatch: 30,
+  /** 候補・争点が保持するソース件数の上限（detect.tsの累積マージ・followup.tsの続報蓄積で共有） */
+  sourceCap: 40,
 } as const;
 
 /** 称号ランク（役に立った評価の累計数で決まる）。特典はバッジ表示・並び順やや優先のみ。 */

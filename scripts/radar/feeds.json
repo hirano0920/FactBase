@@ -58,6 +58,8 @@
     { "name": "gnews-law", "url": "https://news.google.com/rss/search?q=%E6%B3%95%E6%A1%88%20OR%20%E5%88%A4%E6%B1%BA%20when:6h&hl=ja&gl=JP&ceid=JP:ja", "trust": 60, "note": "Google News JP 法案・判決" },
     { "name": "gnews-rights", "url": "https://news.google.com/rss/search?q=%E4%BA%BA%E6%A8%A9%20OR%20%E5%B7%AE%E5%88%A5%20when:6h&hl=ja&gl=JP&ceid=JP:ja", "trust": 60, "note": "Google News JP 人権" },
     { "name": "gnews-international", "url": "https://news.google.com/rss/search?q=%E5%A4%96%E4%BA%A4%20OR%20%E5%9B%BD%E9%9A%9B%E6%83%85%E5%8B%A2%20when:6h&hl=ja&gl=JP&ceid=JP:ja", "trust": 60, "note": "Google News JP 外交" },
+    { "name": "gnews-immigration", "url": "https://news.google.com/rss/search?q=%E5%A4%96%E5%9B%BD%E4%BA%BA%20OR%20%E7%A7%BB%E6%B0%91%20OR%20%E5%85%A5%E7%AE%A1%20OR%20%E9%9B%A3%E6%B0%91%20when:6h&hl=ja&gl=JP&ceid=JP:ja", "trust": 60, "note": "Google News JP 外国人・移民・入管" },
+    { "name": "gnews-war", "url": "https://news.google.com/rss/search?q=%E6%88%A6%E4%BA%89%20OR%20%E4%BE%B5%E6%94%BB%20OR%20%E5%81%9C%E6%88%A6%20OR%20%E7%A9%BA%E7%88%86%20when:4h&hl=ja&gl=JP&ceid=JP:ja", "trust": 60, "note": "Google News JP 戦争・軍事衝突" },
 
     { "name": "gnews-en-world", "url": "https://news.google.com/rss/search?q=world%20news%20when:2h&hl=en&gl=US&ceid=US:en", "trust": 58, "note": "Google News EN 世界" },
     { "name": "gnews-en-middle-east", "url": "https://news.google.com/rss/search?q=Middle%20East%20when:2h&hl=en&gl=US&ceid=US:en", "trust": 58, "note": "Google News EN 中東" },

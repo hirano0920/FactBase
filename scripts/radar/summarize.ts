@@ -8,6 +8,7 @@
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { RADAR } from "../../src/lib/constants";
 import { generateArticle, violatesBan } from "../../src/lib/radar-article";
+import { fetchPrimaryExcerpts } from "./lib/primary-text";
 import { notifyRadarFailure } from "./notify";
 import { notifyRevalidate } from "./lib/notify-revalidate";
 
@@ -53,7 +54,14 @@ async function main() {
 
     console.log(`生成中: ${issue.title}`);
     try {
-      const article = await generateArticle({ issueTitle: issue.title, isReported, sources });
+      // OFFICIAL争点は公式ページ本文の抜粋を渡し「何が変わる」を実質のある内容で書かせる
+      const primaryExcerpts = isReported ? [] : await fetchPrimaryExcerpts(sources);
+      const article = await generateArticle({
+        issueTitle: issue.title,
+        isReported,
+        sources,
+        primaryExcerpts,
+      });
 
       // 機械チェック: 断定表現が混入していたら公開しない
       const banned = violatesBan(article);
@@ -98,8 +106,9 @@ async function main() {
 }
 
 main()
-  .catch((e) => {
+  .catch(async (e) => {
     console.error(e);
+    await notifyRadarFailure("summarize.ts 致命的エラー（ジョブ全体が停止）", e);
     process.exit(1);
   })
   .finally(() => prisma.$disconnect());
