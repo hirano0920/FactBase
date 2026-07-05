@@ -603,6 +603,16 @@
       "issue_slug": "radar-2026-07-04-7f55565d",
       "last_fetched": null,
       "active": true
+    },
+    {
+      "keyword": "日本の金融政策正常化と歴史的な円安の進行",
+      "category": [
+        "FINANCE"
+      ],
+      "keywords": [],
+      "issue_slug": "boj-normalization-yen-depreciation",
+      "last_fetched": null,
+      "active": true
     }
   ]
 }
