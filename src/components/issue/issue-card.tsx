@@ -4,22 +4,35 @@ import { ChartBarIcon, MessageCircleIcon } from "@/components/ui/icons";
 import { formatNumber, formatPercent } from "@/lib/utils";
 import type { Issue } from "@/types";
 
+interface IssueCardProps {
+  issue: Issue;
+  /** trueなら賛成/反対の内訳を隠す（ホーム画面用。結果を見る前にまず読んでもらう） */
+  hideResults?: boolean;
+  /** 指定時はリンクではなくホーム内展開 */
+  onSelect?: () => void;
+}
+
 /**
  * 争点カード。開かなくても「何が争点か・世論がどう割れているか・どれだけ議論されているか」が
- * 数秒でわかることを最優先にした設計。クリックしたくなるよう見出しとホバー時の続きを読む導線を強調。
+ * 数秒でわかることを最優先にした設計。
  */
-export function IssueCard({ issue }: { issue: Issue }) {
+export function IssueCard({ issue, hideResults = false, onSelect }: IssueCardProps) {
   const { percents, totalVoters } = issue.voteTally;
   const hasVotes = totalVoters > 0;
 
-  return (
-    <Link
-      href={`/issues/${issue.slug}`}
-      className="group block rounded-xl border border-border bg-surface-raised p-4 shadow-subtle transition-all hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-card no-underline sm:p-5"
-    >
+  const className =
+    "group block w-full rounded-xl border border-border bg-surface-raised p-4 text-left shadow-subtle transition-all hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-card no-underline sm:p-5";
+
+  const inner = (
+    <>
       <div className="mb-2.5 flex flex-wrap items-center gap-2">
         <CategoryBadge category={issue.category} />
         <StatusBadge status={issue.status} />
+        {issue.confirmation === "reported" && (
+          <span className="rounded-full border border-hot/40 bg-hot-muted px-2 py-0.5 text-[10px] font-bold text-hot">
+            🔴 LIVE
+          </span>
+        )}
       </div>
 
       <h3 className="text-lg font-extrabold leading-snug tracking-tight text-ink transition-colors group-hover:text-accent">
@@ -30,7 +43,23 @@ export function IssueCard({ issue }: { issue: Issue }) {
         {issue.summary.lead}
       </p>
 
-      {hasVotes ? (
+      {hideResults ? (
+        <div className="mt-4 flex items-center justify-between">
+          <span className="text-sm font-bold text-ink-secondary">
+            {hasVotes ? "あなたはどっち？" : "最初の一票を投じてみよう"}
+          </span>
+          <span className="flex items-center gap-3 text-xs font-semibold tabular-nums text-ink-faint">
+            <span className="flex items-center gap-1">
+              <ChartBarIcon style={{ width: 13, height: 13 }} />
+              {formatNumber(totalVoters)}
+            </span>
+            <span className="flex items-center gap-1">
+              <MessageCircleIcon style={{ width: 13, height: 13 }} />
+              {formatNumber(issue.commentCount)}
+            </span>
+          </span>
+        </div>
+      ) : hasVotes ? (
         <div className="mt-4">
           <div
             className="flex h-1.5 overflow-hidden rounded-full bg-surface-muted"
@@ -68,6 +97,20 @@ export function IssueCard({ issue }: { issue: Issue }) {
           →
         </span>
       </div>
+    </>
+  );
+
+  if (onSelect) {
+    return (
+      <button type="button" onClick={onSelect} className={className}>
+        {inner}
+      </button>
+    );
+  }
+
+  return (
+    <Link href={`/issues/${issue.slug}`} className={className}>
+      {inner}
     </Link>
   );
 }

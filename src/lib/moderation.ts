@@ -2,6 +2,7 @@
  * 送信時NGフィルタ（AI不要・¥0）
  * 政治系の誹謗中傷・差別・暴力表現をブロック
  */
+import { COMMENT_LIMITS } from "@/lib/constants";
 
 export type ModerationResult =
   | { allowed: true }
@@ -42,14 +43,21 @@ export function containsNgContent(trimmed: string): ModerationResult {
   return { allowed: true };
 }
 
-export function moderateOnSubmit(body: string): ModerationResult {
+/**
+ * minLength/maxLengthは省略時トップレベルコメントの制限（COMMENT_LIMITS）を使う。
+ * 返信（1階層のみ）はより短く気軽に投稿できるよう、呼び出し側からREPLY_LIMITSを渡す。
+ */
+export function moderateOnSubmit(
+  body: string,
+  limits: { minLength: number; maxLength: number } = COMMENT_LIMITS,
+): ModerationResult {
   const trimmed = body.trim();
 
-  if (trimmed.length < 50) {
-    return { allowed: false, code: "TOO_SHORT", reason: "50字以上で投稿してください" };
+  if (trimmed.length < limits.minLength) {
+    return { allowed: false, code: "TOO_SHORT", reason: `${limits.minLength}字以上で投稿してください` };
   }
-  if (trimmed.length > 500) {
-    return { allowed: false, code: "TOO_LONG", reason: "500字以内で投稿してください" };
+  if (trimmed.length > limits.maxLength) {
+    return { allowed: false, code: "TOO_LONG", reason: `${limits.maxLength}字以内で投稿してください` };
   }
 
   return containsNgContent(trimmed);

@@ -16,9 +16,10 @@
   --color-ink-muted: #6b7076;
   --color-ink-faint: #97a0a8;
 
-  /* デニムブルー：法律事務所然としたネイビーより一段やわらかい */
-  --color-accent: #3f6690;
-  --color-accent-hover: #315274;
+  /* インディゴ：スタートアップ的な彩度と現代感を出すため、落ち着いたデニムブルーから一段リッチに刷新 */
+  --color-accent: #4f46e5;
+  --color-accent-hover: #4338ca;
+  --color-accent-soft: #eef1ff;
 
   /* 差し色（テラコッタ）：ステップ番号・強調バッジなど「あたたかさ」担当。CTAには使わない */
   --color-warm: #d97b52;
@@ -31,6 +32,10 @@
   --color-against-muted: #f8ece9;
   --color-neutral: #6b7280;
   --color-neutral-muted: #f1eee6;
+
+  /* 「わからない」派の名前色専用（賛成=green/反対=redと並ぶ第三の色として黄系に） */
+  --color-undecided: #a16207;
+  --color-undecided-muted: #fef3c7;
 
   --color-link: #3f6690;
   --color-link-hover: #315274;
@@ -49,9 +54,10 @@
 
   --shadow-subtle: 0 1px 2px rgb(15 20 25 / 0.04);
   --shadow-card: 0 2px 6px rgb(15 20 25 / 0.05), 0 8px 20px rgb(15 20 25 / 0.04);
-  --radius-sm: 0.5rem;
-  --radius-md: 0.875rem;
-  --radius-lg: 1.25rem;
+  --shadow-glow: 0 8px 30px rgb(79 70 229 / 0.16);
+  --radius-sm: 0.625rem;
+  --radius-md: 1rem;
+  --radius-lg: 1.5rem;
 
   --spacing-page: 1.5rem;
   --width-content: 42rem;
@@ -75,8 +81,9 @@
   --color-ink-muted: #97928a;
   --color-ink-faint: #66625b;
 
-  --color-accent: #7aa3c9;
-  --color-accent-hover: #93b6d8;
+  --color-accent: #818cf8;
+  --color-accent-hover: #a5b4fc;
+  --color-accent-soft: #201f3d;
 
   --color-warm: #e2916a;
   --color-warm-muted: #3a2a20;
@@ -89,6 +96,9 @@
   --color-neutral: #9aa1ac;
   --color-neutral-muted: #26282c;
 
+  --color-undecided: #e3b341;
+  --color-undecided-muted: #3a2f10;
+
   --color-link: #7aa3c9;
   --color-link-hover: #93b6d8;
 
@@ -98,6 +108,7 @@
 
   --shadow-subtle: 0 0 0 1px rgb(255 255 255 / 0.04);
   --shadow-card: 0 0 0 1px rgb(255 255 255 / 0.05), 0 8px 24px rgb(0 0 0 / 0.35);
+  --shadow-glow: 0 8px 30px rgb(129 140 248 / 0.2);
 }
 
 @layer base {
@@ -214,20 +225,20 @@
     transform-origin: center;
   }
 
-  /* 投票確定時の紙吹雪の1粒 */
-  @keyframes confetti-fly {
+  /* 投票確定の瞬間、絵文字の背後に1回だけ広がって消えるリング。紙吹雪の代わりの控えめな演出 */
+  @keyframes ring-pulse-once {
     0% {
-      opacity: 1;
-      transform: translate(0, 0) rotate(0deg) scale(1);
+      transform: scale(0.6);
+      opacity: 0.5;
     }
     100% {
+      transform: scale(2.4);
       opacity: 0;
-      transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(0.4);
     }
   }
 
-  .animate-confetti {
-    animation: confetti-fly 0.9s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  .animate-ring-pulse-once {
+    animation: ring-pulse-once 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
   /* 投票バーが0からニュッと伸びる */
@@ -259,6 +270,73 @@
 
   .animate-emoji-float {
     animation: emoji-float 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  /* スクロールでふわっと表示（about等） */
+  @keyframes reveal-up-smooth {
+    from {
+      opacity: 0;
+      transform: translateY(28px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .reveal-pending {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+
+  .reveal-active {
+    animation: reveal-up-smooth 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @keyframes home-expand-in {
+    from {
+      opacity: 0;
+      transform: translateY(16px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes home-feed-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .home-expand-enter {
+    animation: home-expand-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .home-feed-enter {
+    animation: home-feed-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .reveal-pending {
+      opacity: 1;
+      transform: none;
+    }
+
+    .reveal-active {
+      animation: none;
+    }
+
+    .home-expand-enter,
+    .home-feed-enter {
+      animation: none;
+    }
   }
 }
 

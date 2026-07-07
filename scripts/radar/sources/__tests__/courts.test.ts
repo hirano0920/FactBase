@@ -73,6 +73,19 @@ describe("fetchCourtsKijitsu", () => {
     expect(a[0].title).toBe(b[0].title);
   });
 
+  it("前回と同じ指紋なら空配列（重複検知しない）", async () => {
+    const html = '<div class="module-sub-page-parts-default-5">開廷期日：7月10日</div></div>';
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, text: () => Promise.resolve(html) }),
+    );
+    const first = await fetchCourtsKijitsu();
+    const fp = first[0]?.title.match(/fp:([a-f0-9]+)/)?.[1];
+    expect(fp).toBeTruthy();
+    const second = await fetchCourtsKijitsu(fp);
+    expect(second).toEqual([]);
+  });
+
   it("内容が変われば指紋（タイトル）も変わる", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

@@ -27,6 +27,8 @@ const OPTIONAL = [
   "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY", // 現状コードは未使用（Checkoutのみ）
   "AZURE_OPENAI_API_KEY",
   "AZURE_OPENAI_BASE_URL",
+  "YOUTUBE_DATA_API_KEY", // 未設定でもRadarは動く（YouTubeソースのみスキップ）
+  "TAVILY_API_KEY", // 未設定でもRadarは動く（Tavily検索による収集拡張のみスキップ）
   "RADAR_INTERNAL_SECRET", // 未設定でもRadarは動くがrevalidate通知がスキップされる
 ];
 

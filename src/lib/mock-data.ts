@@ -1,117 +1,60 @@
 import type { Comment, Issue, RankingItem } from "@/types";
+import { DEMO_COMMENTS, DEMO_ISSUES } from "@/lib/demo-seed-content";
 
-export const MOCK_ISSUES: Issue[] = [
-  {
-    id: "1",
-    slug: "consumption-tax-reduction",
-    title: "消費税減税法案について",
-    category: "politics",
-    status: "active",
-    summary: {
-      lead:
-        "政府・与党が提出した消費税の一時的な引き下げを盛り込んだ法案が国会で審議されています。財源確保と家計支援のバランスが争点です。",
-      bullets: [
-        "現行10%から5%への一時引き下げが提案されている",
-        "財源は予備費と国債発行の組み合わせが示されている",
-        "野党は恒久減税と財源の明示を求めている",
-      ],
-      sources: [
-        { label: "e-Gov法令検索", url: "https://elaws.e-gov.go.jp/" },
-        { label: "国会会議録", url: "https://kokkai.ndl.go.jp/" },
-      ],
+function buildTally(counts: { for: number; against: number; undecided: number }) {
+  const total = counts.for + counts.against + counts.undecided;
+  const pct = (n: number) => (total === 0 ? 0 : Math.round((n / total) * 1000) / 10);
+  return {
+    ...counts,
+    totalVotes: total,
+    totalVoters: total,
+    percents: {
+      for: pct(counts.for),
+      against: pct(counts.against),
+      undecided: pct(counts.undecided),
     },
-    articleHtml: null,
-    articleGeneratedAt: null,
-    monitoringUntil: "2026-09-01T00:00:00Z",
-    voteTally: {
-      for: 5230,
-      against: 4891,
-      undecided: 2104,
-      totalVotes: 12225,
-      totalVoters: 12225,
-      percents: { for: 42.8, against: 40.0, undecided: 17.2 },
-    },
-    commentCount: 186,
-    createdAt: "2026-06-15T00:00:00Z",
-    confirmation: null,
-    voteLabels: null,
-    underReview: false,
-  },
-  {
-    id: "2",
-    slug: "defense-budget-increase",
-    title: "防衛費増額と財源確保",
-    category: "politics",
-    status: "trending",
-    summary: {
-      lead:
-        "防衛力強化のための歳出増をどう財源確保するかが国会で議論されています。",
-      bullets: [
-        "防衛費のGDP比2%超えが議論の前提",
-        "増税・国債・歳出削減の組み合わせが焦点",
-      ],
-      sources: [
-        { label: "財務省", url: "https://www.mof.go.jp/" },
-        { label: "国会会議録", url: "https://kokkai.ndl.go.jp/" },
-      ],
-    },
-    articleHtml: null,
-    articleGeneratedAt: null,
-    monitoringUntil: "2026-10-01T00:00:00Z",
-    voteTally: {
-      for: 3102,
-      against: 2844,
-      undecided: 1203,
-      totalVotes: 7149,
-      totalVoters: 7149,
-      percents: { for: 43.4, against: 39.8, undecided: 16.8 },
-    },
-    commentCount: 94,
-    createdAt: "2026-06-20T00:00:00Z",
-    confirmation: null,
-    voteLabels: null,
-    underReview: false,
-  },
-];
+  };
+}
 
-export const MOCK_COMMENTS: Comment[] = [
-  {
-    id: "c1",
-    issueId: "1",
-    userId: "u1",
-    userName: "政策ウォッチャー",
-    userBadge: "政治 Contributor",
-    stance: "for",
-    body:
-      "家計への即効性を考えると一時的な減税には意味があると思います。ただし財源の内訳は国会でより明確にされるべきです。財政法上の制約も併せて確認する必要があります。",
-    likeCount: 42,
-    dislikeCount: 0,
-    helpfulCount: 28,
-    fcResult: null,
-    createdAt: "2026-07-01T14:32",
-  },
-  {
-    id: "c2",
-    issueId: "1",
-    userId: "u2",
-    userName: "経済系大学院生",
-    userBadge: null,
-    stance: "against",
-    body:
-      "一時減税は需要喚起効果が限定的という研究もあります。恒久財源なしの減税は将来世代への負担になりうるので、反対の立場です。",
-    likeCount: 31,
-    dislikeCount: 0,
-    helpfulCount: 19,
-    fcResult: {
-      verdict: "opinion",
-      label: "意見・評価",
-      reason: "政策効果に関する評価であり、一次情報での真偽判定は困難です。",
-      sources: [],
-      checkedAt: "2026-07-02T09:00:00Z",
-    },
-    createdAt: "2026-07-01T16:10",
-  },
-];
+export const MOCK_ISSUES: Issue[] = DEMO_ISSUES.map((def, index) => ({
+  id: `demo-${index + 1}`,
+  slug: def.slug,
+  title: def.title,
+  category: def.category,
+  status: def.status,
+  summary: def.summary,
+  articleHtml: def.articleHtml,
+  articleGeneratedAt: def.articleGeneratedAt,
+  monitoringUntil: def.monitoringUntil,
+  voteTally: buildTally(def.votes),
+  commentCount: def.commentCount,
+  createdAt: def.createdAt,
+  confirmation: def.confirmation,
+  voteLabels: null,
+  underReview: false,
+}));
+
+const slugToId = Object.fromEntries(MOCK_ISSUES.map((i) => [i.slug, i.id]));
+
+export const MOCK_COMMENTS: Comment[] = DEMO_COMMENTS.map((def, index) => ({
+  id: `demo-c${index + 1}`,
+  issueId: slugToId[def.slug] ?? "",
+  userId: `demo-u${index + 1}`,
+  userName: def.userName,
+  userPlan: def.userPlan,
+  userCommentCount: def.userCommentCount,
+  userTotalLikes: def.userTotalLikes,
+  stance: def.stance,
+  body: def.body,
+  likeCount: def.likeCount,
+  dislikeCount: 0,
+  helpfulCount: def.helpfulCount,
+  fcResult: null,
+  createdAt: def.createdAt,
+  parentId: null,
+  replyCount: 0,
+  replies: [],
+}));
 
 export function getIssueBySlug(slug: string): Issue | undefined {
   return MOCK_ISSUES.find((i) => i.slug === slug);

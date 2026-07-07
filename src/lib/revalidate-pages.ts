@@ -13,6 +13,7 @@ export function revalidateListingPages(): void {
   revalidatePath("/");
   revalidatePath("/issues");
   revalidatePath("/ranking");
+  revalidatePath("/ranking/votes");
 }
 
 export function revalidateAfterIssueUpdate(slug?: string): void {

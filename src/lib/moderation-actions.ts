@@ -3,6 +3,7 @@
  */
 import { prisma } from "@/lib/prisma";
 import { invalidateOnCommentCreated, invalidateOnIssueChanged } from "@/lib/cache-invalidate";
+import { publishHeldRadarCandidate } from "@/lib/radar-publish-held";
 
 export type ModerationResolution =
   | "removed"
@@ -256,51 +257,6 @@ export async function approveRadarCandidate(candidateId: string) {
   if (!c) throw new Error("候補が見つかりません");
   if (c.status !== "HELD") throw new Error("HELD状態の候補のみ承認できます");
 
-  const sources = (c.sourceUrls as { title: string; url: string; feed: string }[] | null) ?? [];
-  const confirmation = c.classification === "official" || c.classification === "indicator"
-    ? ("OFFICIAL" as const)
-    : ("REPORTED" as const);
-  const categoryMap: Record<string, "POLITICS" | "ECONOMY" | "LAW" | "FINANCE" | "EDUCATION"> = {
-    politics: "POLITICS",
-    economy: "ECONOMY",
-    law: "LAW",
-    finance: "FINANCE",
-    education: "EDUCATION",
-  };
-
-  const slug = `radar-${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID().slice(0, 8)}`;
-  const issue = await prisma.issue.create({
-    data: {
-      slug,
-      title: c.title,
-      category: categoryMap[c.category ?? ""] ?? "POLITICS",
-      status: "TRENDING",
-      confirmation,
-      summaryJson: {
-        lead: `「${c.title}」について管理者確認のうえ公開されました。詳細まとめを自動生成中です。`,
-        bullets: [
-          `確認できること: ${sources.length}件の報道・発表（下記出典）`,
-          "詳細まとめを自動生成中（10〜30分）",
-          "続報・関連動向はタイムラインで更新されます",
-        ],
-        sources: sources.slice(0, 5).map((s) => ({
-          label: `${s.title.slice(0, 40)}（${s.feed}）`,
-          url: s.url,
-        })),
-      },
-      keywords: [c.title],
-      monitoringUntil: new Date(Date.now() + 60 * 86400_000),
-    },
-  });
-  await prisma.$transaction([
-    prisma.topicCandidate.update({
-      where: { id: candidateId },
-      data: { status: "PUBLISHED", issueId: issue.id, decision: `${c.decision ?? ""} / admin_approved` },
-    }),
-    prisma.issueTimeline.create({
-      data: { issueId: issue.id, label: "管理者承認により公開（人間確認済み）" },
-    }),
-  ]);
-  await invalidateOnIssueChanged(slug);
+  const { slug } = await publishHeldRadarCandidate(c);
   return { candidateId, slug };
 }

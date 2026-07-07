@@ -8,6 +8,7 @@ import { VotePanelLive } from "@/components/issue/vote-panel-live";
 import type { VoteChoiceId } from "@/lib/constants";
 import type { Comment, VoteLabels, VoteTally } from "@/types";
 import type { Plan } from "@prisma/client";
+import { canPostComment, canUseFactCheck } from "@/lib/plan-features";
 
 interface ViewerResponseGuest {
   isLoggedIn: false;
@@ -30,6 +31,9 @@ interface IssueViewerContextValue {
   bookmarked: boolean;
   comments: Comment[];
   nextCursor: string | null;
+  /** 直近で初めて投票した選択肢。投票直後に「その理由をコメントで」導線を出すために使う */
+  justVoted: VoteChoiceId | null;
+  markJustVoted: (choice: VoteChoiceId) => void;
 }
 
 const IssueViewerContext = createContext<IssueViewerContextValue | null>(null);
@@ -60,9 +64,20 @@ export function IssueViewerProvider({
   const [bookmarked, setBookmarked] = useState(false);
   const [comments, setComments] = useState(guestComments);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [justVoted, setJustVoted] = useState<VoteChoiceId | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+
+    // 争点ページ間のクライアント遷移で前の争点の投票・コメントが一瞬残るのを防ぐ
+    setLoaded(false);
+    setIsLoggedIn(false);
+    setPlan(null);
+    setUserVote(null);
+    setBookmarked(false);
+    setComments(guestComments);
+    setNextCursor(null);
+    setJustVoted(null);
 
     (async () => {
       try {
@@ -98,7 +113,7 @@ export function IssueViewerProvider({
     return () => {
       cancelled = true;
     };
-  }, [slug, issueId]);
+  }, [slug, issueId, guestComments]);
 
   const value = useMemo(
     () => ({
@@ -109,8 +124,10 @@ export function IssueViewerProvider({
       bookmarked,
       comments,
       nextCursor,
+      justVoted,
+      markJustVoted: setJustVoted,
     }),
-    [loaded, isLoggedIn, plan, userVote, bookmarked, comments, nextCursor],
+    [loaded, isLoggedIn, plan, userVote, bookmarked, comments, nextCursor, justVoted],
   );
 
   return (
@@ -119,13 +136,12 @@ export function IssueViewerProvider({
 }
 
 export function IssueBookmarkSlot({ slug }: { slug: string }) {
-  const { loaded, isLoggedIn, bookmarked } = useIssueViewer();
+  const { isLoggedIn, bookmarked } = useIssueViewer();
   return (
     <BookmarkButton
       slug={slug}
       initialBookmarked={bookmarked}
       isLoggedIn={isLoggedIn}
-      key={loaded ? "viewer-ready" : "viewer-guest"}
     />
   );
 }
@@ -137,7 +153,7 @@ interface IssueVoteSlotProps {
 }
 
 export function IssueVoteSlot({ issueId, initialTally, labels }: IssueVoteSlotProps) {
-  const { loaded, isLoggedIn, userVote } = useIssueViewer();
+  const { isLoggedIn, userVote, markJustVoted } = useIssueViewer();
   return (
     <VotePanelLive
       issueId={issueId}
@@ -145,7 +161,7 @@ export function IssueVoteSlot({ issueId, initialTally, labels }: IssueVoteSlotPr
       initialUserVote={userVote}
       isLoggedIn={isLoggedIn}
       labels={labels}
-      key={loaded ? "viewer-ready" : "viewer-guest"}
+      onFirstVote={markJustVoted}
     />
   );
 }
@@ -156,9 +172,9 @@ interface IssueCommentsSlotProps {
 }
 
 export function IssueCommentsSlot({ issueId, commentCount }: IssueCommentsSlotProps) {
-  const { loaded, isLoggedIn, plan, comments, nextCursor } = useIssueViewer();
-  const canComment = plan === "COMMENT" || plan === "FACTCHECK";
-  const canFactCheck = plan === "FACTCHECK";
+  const { isLoggedIn, plan, comments, nextCursor, justVoted } = useIssueViewer();
+  const canComment = canPostComment(isLoggedIn);
+  const canFactCheck = canUseFactCheck(plan);
 
   return (
     <CommentSection
@@ -169,7 +185,7 @@ export function IssueCommentsSlot({ issueId, commentCount }: IssueCommentsSlotPr
       canComment={canComment}
       canFactCheck={canFactCheck}
       isLoggedIn={isLoggedIn}
-      key={loaded ? "viewer-ready" : "viewer-guest"}
+      promptStance={justVoted}
     />
   );
 }

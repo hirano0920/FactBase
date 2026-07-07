@@ -10,7 +10,14 @@ vi.mock("@/lib/openai-client", () => ({
   }),
 }));
 
-import { factCheck, judgeModeration, judgeIssueQuality, classifyHeadlines } from "@/lib/ai";
+import {
+  factCheck,
+  judgeModeration,
+  judgeIssueQuality,
+  classifyHeadlines,
+  filterRelevantTopics,
+} from "@/lib/ai";
+import { AI_MODELS, RADAR } from "@/lib/constants";
 
 function mockContent(content: string) {
   mocks.create.mockResolvedValueOnce({ choices: [{ message: { content } }] });
@@ -195,5 +202,84 @@ describe("classifyHeadlines", () => {
     const userMessage = mocks.create.mock.calls[0][0].messages[1].content as string;
     expect(userMessage).toContain("cand_123");
     expect(userMessage).toContain("国旗損壊罪の新設をどう見る？");
+  });
+});
+
+describe("filterRelevantTopics", () => {
+  it("relevant=trueのトピックだけを正規化して返す（ゴシップは除外）", async () => {
+    mockContent(
+      JSON.stringify({
+        topics: [
+          { topic: "国旗損壊罪", relevant: true, category: "law", reason: "国会審議中の法案" },
+          { topic: "某アイドル熱愛", relevant: false, category: "", reason: "芸能ゴシップ" },
+        ],
+      }),
+    );
+    const topics = await filterRelevantTopics([
+      { term: "#国旗損壊", sustained: true },
+      { term: "某アイドル", sustained: false },
+    ]);
+    expect(topics).toHaveLength(1);
+    expect(topics[0].topic).toBe("国旗損壊罪");
+    expect(topics[0].category).toBe("law");
+  });
+
+  it("継続的話題フラグをプロンプトのuserメッセージに反映する", async () => {
+    mockContent(JSON.stringify({ topics: [] }));
+    await filterRelevantTopics([{ term: "解散総選挙", sustained: true }]);
+    const userMessage = mocks.create.mock.calls[0][0].messages[1].content as string;
+    expect(userMessage).toContain("解散総選挙");
+    expect(userMessage).toContain("継続的に話題");
+  });
+
+  it("入力が空ならnanoを呼ばず空配列", async () => {
+    const topics = await filterRelevantTopics([]);
+    expect(topics).toEqual([]);
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it("不正なJSONでも例外を投げず空配列にフォールバック", async () => {
+    mockContent("not json");
+    expect(await filterRelevantTopics([{ term: "国会" }])).toEqual([]);
+  });
+
+  it("gpt-5-mini（topicFilter）モデルで争点選別する", async () => {
+    mockContent(JSON.stringify({ topics: [] }));
+    await filterRelevantTopics([{ term: "国会" }]);
+    expect(mocks.create.mock.calls[0][0].model).toBe(AI_MODELS.topicFilter);
+  });
+
+  it(`候補語は最大${RADAR.topicFilterMaxTerms}件まで mini に渡す`, async () => {
+    mockContent(JSON.stringify({ topics: [] }));
+    const terms = Array.from({ length: RADAR.topicFilterMaxTerms + 10 }, (_, i) => ({
+      term: `争点候補${i}`,
+    }));
+    await filterRelevantTopics(terms);
+    const userMessage = mocks.create.mock.calls[0][0].messages[1].content as string;
+    expect(userMessage.match(/^- 争点候補/gm)?.length).toBe(RADAR.topicFilterMaxTerms);
+  });
+
+  it("question/choicesを返し、空ならデフォルト文言で補う", async () => {
+    mockContent(
+      JSON.stringify({
+        topics: [
+          {
+            topic: "国旗損壊罪",
+            relevant: true,
+            category: "law",
+            reason: "国会審議中",
+            question: "国旗損壊罪の新設、あなたはどう見る？",
+            choices: { for: "賛成", against: "反対", undecided: "わからない" },
+          },
+          { topic: "為替介入", relevant: true, category: "finance", reason: "" },
+        ],
+      }),
+    );
+    const topics = await filterRelevantTopics([{ term: "国旗損壊罪" }, { term: "為替介入" }]);
+    expect(topics[0].question).toBe("国旗損壊罪の新設、あなたはどう見る？");
+    expect(topics[0].choices).toEqual({ for: "賛成", against: "反対", undecided: "わからない" });
+    // choices省略時はデフォルト文言で補う
+    expect(topics[1].question).toContain("為替介入");
+    expect(topics[1].choices).toEqual({ for: "支持する", against: "支持しない", undecided: "わからない" });
   });
 });

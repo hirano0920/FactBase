@@ -4,7 +4,7 @@ import { getGlobalTimeline } from "@/lib/data";
 import { BURST } from "@/lib/constants";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
 /** サイドバー LIVE フィード用。全争点の最新タイムライン */
 export async function GET(req: NextRequest) {
@@ -14,7 +14,14 @@ export async function GET(req: NextRequest) {
 
   try {
     const entries = await getGlobalTimeline(10);
-    return NextResponse.json({ entries });
+    return NextResponse.json(
+      { entries },
+      {
+        headers: {
+          "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60",
+        },
+      },
+    );
   } catch (e) {
     console.error("[timeline/live] failed", e);
     return errors.internal();

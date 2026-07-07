@@ -6,15 +6,18 @@
  *   - ニュース見出しは「話題検知シグナル」。記事本文は取得も保存もしない
  *   - nano呼び出しは1実行あたり最大1回（新着見出しのクラスタリング）
  *   - 公開判断は decidePublish（ハードブロック > 複数媒体一致 > スコア閾値 > 日次上限）
- *   - 速報スレの本文はテンプレート生成（AIに自由記述させない＝出鱈目要約の構造的排除）
+ *   - REPORTED（🔴LIVE）は国家的緊急のみ（選挙・内閣成立・戦争・テロ・震度6強以上+甚大被害・
+ *     大津波警報・噴火警戒レベル4-5・原子力緊急事態）
+ *   - バズ報道錯綜（X/YouTube/Trends等）は publish せず promote のピーク公開へ
+ *   - OFFICIAL は一次情報本文を取得→記事生成してから公開（中身のない「準備中」スレは出さない）
  *   - 候補は一発判定ではなく累積判定: 未公開候補（HELD/スコア不足REJECTED）には
  *     新しい証拠をマージして再判定する。国会審議のようなスローバーン型と、
  *     日次上限後に来た重要トピックの翌日復活の両方をこれで拾う
  *   - 累積判定の同一性はnanoのmatch_candidate_id（+機械裏取り）で行い、dedupKeyの
  *     文字列一致だけには頼らない。nanoは実行のたびにcluster.titleの言い回しを変えうるため、
  *     文字列一致だけだと同じ出来事でも別候補として重複登録され証拠が積み上がらない
- *   - バズシグナル（Google Trends急上昇・はてブ人気エントリ）は優先順位付けのみに使い、
- *     安全ゲート（複数媒体一致・一次情報要求）は一切バイパスしない
+ *   - バズシグナル（Google Trends / Yahoo / YouTube）はRSS経路では優先順位付けのみ。
+ *     報道錯綜ネタは deferReportedBuzzToPromote によりバズ経路（discover→promote）へ譲る
  *   - 議案フィードのステータス変化はnanoを介さずIssue.keywordsと直接照合し、
  *     審議進捗（委員会可決→本会議可決→成立）を確実にタイムライン追記する
  */
@@ -35,19 +38,32 @@ import {
   COHERENCE_THRESHOLD,
   isOutOfScopeTopic,
   isBreakingNews,
+  isRoutineOfficialUpdate,
   isPlausibleFollowUp,
   hotScore,
   riskScore,
   matchesTrending,
   buzzTitleMatch,
   extractBillTitle,
+  shouldDeferToBuzzPipeline,
+  jstDayStart,
+  jstDateString,
 } from "../../src/lib/radar";
 import { RADAR } from "../../src/lib/constants";
 import type { FeedItem } from "./sources/common";
-import { fetchCourtsNews, fetchCourtsKijitsu } from "./sources/courts";
+import { fetchCourtsNews, fetchCourtsKijitsu, extractCourtsKijitsuFingerprint } from "./sources/courts";
 import { fetchShugiinBills, fetchSangiinBills } from "./sources/diet";
 import { fetchTrendingKeywords } from "./sources/trends";
-import { fetchHotentryTitles } from "./sources/buzz";
+import { fetchYouTubeTrendingTitles } from "./sources/youtube-trending";
+import { fetchYahooRealtimeBuzz } from "./sources/yahoo-realtime";
+import { fetchYahooNewsRankingTitles } from "./sources/yahoo-news-ranking";
+import { recordSightings, getSustainedTerms, pruneStaleSightings } from "./lib/trend-sightings";
+import { fetchPrimaryExcerpts } from "./lib/primary-text";
+import { fetchReportExcerpts } from "./lib/report-text";
+import { ensureEvidence, evidenceToArticleFacts, internationalNewsSources } from "./lib/enrich";
+import { resolveIssueTitle } from "./lib/issue-title";
+import { splitIncoherentPrimaryClusters } from "./lib/split-clusters";
+import { generateVerifiedArticle, violatesBan } from "../../src/lib/radar-article";
 import { notifyRadarFailure } from "./notify";
 import { notifyRevalidate } from "./lib/notify-revalidate";
 
@@ -151,23 +167,11 @@ function toIssueCategory(category: string): IssueCategory {
   return map[category] ?? "POLITICS";
 }
 
-/** 速報スレのsummaryJson（テンプレート生成・AIの自由記述なし） */
+/** REPORTED（🔴LIVE）速報スレの summaryJson（テンプレートのみ・AI自由記述なし） */
 function level1Summary(
   cluster: RadarCluster,
   sources: { title: string; url: string; feed: string }[],
-  mode: "official" | "breaking",
 ) {
-  if (mode === "official") {
-    return {
-      lead: `「${cluster.title}」に関する公式発表・一次情報が確認されています。詳細まとめを準備中です。`,
-      bullets: [
-        `確認できること: ${sources.length}件の公式発表・報道（下記出典）`,
-        "一次情報に基づく詳細まとめを自動生成中（10〜30分）",
-        "続報・関連動向はタイムラインで更新されます",
-      ],
-      sources: sources.slice(0, 5).map((s) => ({ label: `${s.title.slice(0, 40)}（${s.feed}）`, url: s.url })),
-    };
-  }
   return {
     lead: `「${cluster.title}」に関する速報が複数媒体で確認されています。事態は発展中の可能性があり、続報をタイムラインで追います。`,
     bullets: [
@@ -183,6 +187,8 @@ interface SourceRef {
   title: string;
   url: string;
   feed: string;
+  /** 実際の報道・発表日時（時系列セクションの自動判定・材料に使う） */
+  publishedAt?: string;
 }
 
 /**
@@ -253,17 +259,68 @@ async function main() {
   // どちらも同じFeedItem形式で返し、既存のfeedName+titleハッシュ重複排除にそのまま乗る。
   console.log("1/4 フィード取得…");
   const runStarted = new Date();
-  const [rssItems, courtsNews, courtsKijitsu, shugiin, sangiin, trendingKeywords, hotentryTitles] =
-    await Promise.all([
-      Promise.all(config.feeds.map(fetchFeed)).then((r) => r.flat()),
-      fetchCourtsNews(),
-      fetchCourtsKijitsu(),
-      fetchShugiinBills(),
-      fetchSangiinBills(),
-      fetchTrendingKeywords(),
-      fetchHotentryTitles(),
-    ]);
+  const lastKijitsuRow = await prisma.sourceEvent.findFirst({
+    where: { feedName: "courts-kijitsu" },
+    orderBy: { createdAt: "desc" },
+    select: { title: true },
+  });
+  const lastKijitsuFp = lastKijitsuRow
+    ? extractCourtsKijitsuFingerprint(lastKijitsuRow.title)
+    : null;
+  const [
+    rssItems,
+    courtsNews,
+    courtsKijitsu,
+    shugiin,
+    sangiin,
+    googleTrendsKeywords,
+    yahooRealtimeBuzz,
+    yahooNewsRankingTitles,
+    youtubeTrendingTitles,
+  ] = await Promise.all([
+    Promise.all(config.feeds.map(fetchFeed)).then((r) => r.flat()),
+    fetchCourtsNews(),
+    fetchCourtsKijitsu(lastKijitsuFp),
+    fetchShugiinBills(),
+    fetchSangiinBills(),
+    fetchTrendingKeywords(),
+    fetchYahooRealtimeBuzz(),
+    fetchYahooNewsRankingTitles(),
+    fetchYouTubeTrendingTitles(),
+  ]);
   const allItems: FeedItem[] = [...rssItems, ...courtsNews, ...courtsKijitsu, ...shugiin, ...sangiin];
+
+  // Google Trends/Yahoo!リアルタイム検索の出現を自前で積み上げ、瞬間バズと継続的な話題を区別する
+  // （両サービスとも「継続的に人気」を返す公式APIが無いため、cron間隔での定点観測で代替する）
+  const yahooRealtimeTerms = yahooRealtimeBuzz.map((b) => b.term);
+  await Promise.all([
+    recordSightings(prisma, "google_trends", googleTrendsKeywords),
+    recordSightings(prisma, "yahoo_realtime", yahooRealtimeTerms),
+    pruneStaleSightings(prisma),
+  ]);
+  const [sustainedGoogleTerms, sustainedYahooTerms] = await Promise.all([
+    getSustainedTerms(prisma, "google_trends"),
+    getSustainedTerms(prisma, "yahoo_realtime"),
+  ]);
+  // trending判定は「瞬間バズ含む全部」、sustained判定は「何時間も出続けている語」だけの部分集合
+  const trendingKeywords = Array.from(new Set([...googleTrendsKeywords, ...yahooRealtimeTerms]));
+  const sustainedKeywords = Array.from(new Set([...sustainedGoogleTerms, ...sustainedYahooTerms]));
+  const buzzTitles = Array.from(new Set([...yahooNewsRankingTitles, ...youtubeTrendingTitles]));
+
+  // バズ検知4ソースが同時に全滅＝スクレイピング系（Trends/Yahoo/YouTube）の構造変化が疑われる。
+  // RSS全滅と違い個々は静かに空配列へフォールバックするため、全滅は明示的に通知しないと
+  // 「バズ経路が丸ごと死んでいるのに気づかない」状態になる。
+  if (
+    googleTrendsKeywords.length === 0 &&
+    yahooRealtimeTerms.length === 0 &&
+    yahooNewsRankingTitles.length === 0 &&
+    youtubeTrendingTitles.length === 0
+  ) {
+    await notifyRadarFailure(
+      "バズ検知ソース全滅",
+      "Google Trends / Yahoo!リアルタイム / Yahoo!ニュース / YouTube が同時に0件（スクレイピング構造変化の可能性）",
+    );
+  }
 
   // 67フィード中0件は通常運用ではまず起きない（fetchFeedは個別失敗を握りつぶす設計なので、
   // これが起きるということは広範な障害＝DNS/ネットワーク遮断等が疑われる）
@@ -374,25 +431,53 @@ async function main() {
   const pendingCandidates = pendingCandidatesRaw.filter(isRevivableCandidate);
   const pendingCandidateMap = new Map(pendingCandidates.map((c) => [c.id, c]));
 
-  const clusters = await classifyWithRetry(
+  const clustersRaw = await classifyWithRetry(
     recent.map((e, i) => ({ index: i, feed: e.feedName, title: e.title })),
     activeIssuesRaw,
     pendingCandidates.map((c) => ({ id: c.id, title: c.title })),
   );
+  const clusters = splitIncoherentPrimaryClusters(clustersRaw, recent);
+  if (clusters.length !== clustersRaw.length) {
+    console.log(`  一次情報の誤結合を分割: ${clustersRaw.length}→${clusters.length}クラスタ`);
+  }
   console.log(`  ${clusters.length}クラスタ検出`);
 
   // 3. スコアリング → 公開判断
   console.log("3/4 スコアリング・公開判断…");
   // 候補の累積再判定（昨日の候補が今日公開されるケース）があるため、
   // 候補のcreatedAtではなく「今日実際に公開されたIssue数」を上限の分母にする
+  const todayStart = jstDayStart();
   const publishedToday = await prisma.issue.count({
     where: {
       confirmation: { in: ["OFFICIAL", "REPORTED"] },
-      createdAt: { gte: new Date(new Date().toISOString().slice(0, 10)) },
+      createdAt: { gte: todayStart },
+      slug: { not: { startsWith: "radar-buzz-" } },
+    },
+  });
+  const publishedReportedToday = await prisma.issue.count({
+    where: {
+      confirmation: "REPORTED",
+      createdAt: { gte: todayStart },
+      slug: { not: { startsWith: "radar-buzz-" } },
     },
   });
   const dailyLimit = Number(process.env.RADAR_AUTO_PUBLISH_PER_DAY ?? RADAR.autoPublishPerDay);
+  const reportedDailyLimit = Number(
+    process.env.RADAR_LIVE_EMERGENCY_PER_DAY ??
+      process.env.RADAR_RSS_REPORTED_PER_DAY ??
+      RADAR.liveEmergencyAutoPublishPerDay,
+  );
+  const articleDailyLimit = Number(
+    process.env.ARTICLE_DAILY_ARTICLE_LIMIT ??
+      process.env.SONNET_DAILY_ARTICLE_LIMIT ??
+      RADAR.articleDailyArticleLimit,
+  );
+  const articlesGeneratedToday = await prisma.issue.count({
+    where: { articleGeneratedAt: { gte: todayStart } },
+  });
   let publishedThisRun = 0;
+  let publishedReportedThisRun = 0;
+  let articlesThisRun = 0;
 
   // バズ（Google Trends=検索急増・はてブ=SNS継続関心）で話題性を判定し、
   // 話題性の高いクラスタから日次上限を消費させる
@@ -405,7 +490,8 @@ async function main() {
       if (members.length === 0) return null;
       const titles = [cluster.title, ...members.map((m) => m.title)];
       const trending = matchesTrending(titles, trendingKeywords);
-      const socialBuzz = buzzTitleMatch(titles, hotentryTitles);
+      const sustained = matchesTrending(titles, sustainedKeywords);
+      const socialBuzz = buzzTitleMatch(titles, buzzTitles);
       const priority = hotScore({
         eventCount: members.length,
         distinctFeeds: new Set(members.map((m) => m.feedName)).size,
@@ -416,8 +502,9 @@ async function main() {
         riskFlags: cluster.risk_flags ?? [],
         trending,
         socialBuzz,
+        sustained,
       });
-      return { cluster, members, trending, socialBuzz, priority };
+      return { cluster, members, trending, socialBuzz, sustained, priority };
     })
     .filter(
       (
@@ -427,12 +514,13 @@ async function main() {
         members: (typeof recent)[number][];
         trending: boolean;
         socialBuzz: boolean;
+        sustained: boolean;
         priority: number;
       } => x !== null,
     )
     .sort((a, b) => b.priority - a.priority);
 
-  for (const { cluster, members, trending, socialBuzz } of prioritized) {
+  for (const { cluster, members, trending, socialBuzz, sustained } of prioritized) {
 
     // AIが既存の公開済みIssueの続報だと判定した場合: 新規クラスタ化せず、
     // 該当SourceEventを紐付けてタイムラインに1行追記するだけに留める（軽量・即時）。
@@ -494,11 +582,23 @@ async function main() {
       console.log(`  [reject/out_of_scope] ${cluster.title} — スポーツ・エンタメ等`);
       continue;
     }
+    if (
+      isRoutineOfficialUpdate(cluster.title, members.map((m) => m.feedName)) ||
+      members.some((m) => isRoutineOfficialUpdate(m.title, [m.feedName]))
+    ) {
+      console.log(`  [reject/routine_admin] ${cluster.title} — 日程表等のルーティン更新`);
+      continue;
+    }
 
     // 既存の未公開候補があれば証拠をマージ（累積判定）。
     // 国会審議のように数日かけて媒体が増える話題は、ここで媒体数・イベント数が積み上がり
     // いずれ閾値を超えて公開される。日次上限でHELDになった候補も翌日ここで復活できる。
-    const newSources = members.map((m) => ({ title: m.title, url: m.url, feed: m.feedName }));
+    const newSources = members.map((m) => ({
+      title: m.title,
+      url: m.url,
+      feed: m.feedName,
+      publishedAt: m.publishedAt.toISOString(),
+    }));
     const prevSources = exists ? ((exists.sourceUrls as unknown as SourceRef[]) ?? []) : [];
     const sources = mergeSources(prevSources, newSources);
 
@@ -521,20 +621,30 @@ async function main() {
       classification: cluster.classification,
       publishedToday: publishedToday + publishedThisRun,
       dailyLimit,
+      publishedReportedToday: publishedReportedToday + publishedReportedThisRun,
+      reportedDailyLimit,
       feedNames: sources.map((s) => s.feed),
       clusterTitle: cluster.title,
       memberTitles: members.map((m) => m.title),
       trending,
       socialBuzz,
+      sustained,
     };
-    const decision = decidePublish(input);
+    let decision = decidePublish(input);
+    if (RADAR.deferReportedBuzzToPromote && shouldDeferToBuzzPipeline(input, decision)) {
+      decision = {
+        action: "hold",
+        score: decision.score,
+        reason: `defer_buzz_pipeline ${decision.reason}`,
+      };
+    }
     if (!coherent) {
       console.log(
         `  [low_coherence=${coherence.toFixed(2)}] ${cluster.title} — distinctFeedsを1に強制`,
       );
     }
 
-    const decisionLog = `${decision.action}: ${decision.reason} coherence=${coherence.toFixed(2)}${trending ? " trending" : ""}${socialBuzz ? " social_buzz" : ""}`;
+    const decisionLog = `${decision.action}: ${decision.reason} coherence=${coherence.toFixed(2)}${trending ? " trending" : ""}${socialBuzz ? " social_buzz" : ""}${sustained ? " sustained" : ""}`;
     const candidateData = {
       title: cluster.title,
       category: cluster.category,
@@ -562,27 +672,152 @@ async function main() {
       continue;
     }
 
-    // 4. Level 1速報スレを自動公開
-    const slug = `radar-${new Date().toISOString().slice(0, 10)}-${randomUUID().slice(0, 8)}`;
     const breaking = isBreakingNews(input);
-    const summaryMode = decision.confirmation === "OFFICIAL" ? "official" : "breaking";
     const monitoringDays = breaking ? 7 : 60;
-    // 議案フィード由来の法案名をkeywordsに保存 → 以後の審議状況変化は
-    // ステップ2aの直接トラッキングがnano抜きでタイムラインに追記できる
     const billTitles = members
       .filter((m) => m.feedName === "shugiin-gian" || m.feedName === "sangiin-gian")
       .map((m) => extractBillTitle(m.title))
       .filter((t): t is string => t !== null);
+    const slug = `radar-${jstDateString()}-${randomUUID().slice(0, 8)}`;
+
+    const titleInput = {
+      question: cluster.question,
+      clusterTitle: cluster.title,
+      sources,
+      confirmation: decision.confirmation as "OFFICIAL" | "REPORTED",
+      classification: cluster.classification,
+      category: cluster.category,
+    };
+
+    const holdForArticle = async (reason: string) => {
+      await prisma.topicCandidate.update({
+        where: { id: candidate.id },
+        data: {
+          status: "HELD",
+          issueId: null,
+          decision: `${candidate.decision ?? decisionLog} / ${reason}`,
+        },
+      });
+      console.log(`  [hold] ${cluster.title} — ${reason}`);
+    };
+
+    // OFFICIAL: 一次情報本文→記事生成が完了するまで公開しない（promote.ts と同じ原則）
+    if (decision.confirmation === "OFFICIAL") {
+      if (articlesGeneratedToday + articlesThisRun >= articleDailyLimit) {
+        await holdForArticle("daily_article_limit");
+        continue;
+      }
+      console.log(`  記事生成中（OFFICIAL）: ${cluster.title}`);
+      try {
+        const primaryExcerpts = await fetchPrimaryExcerpts(sources);
+        if (primaryExcerpts.length === 0) {
+          await holdForArticle("awaiting_primary_text");
+          continue;
+        }
+        const issueTitle = await resolveIssueTitle({
+          ...titleInput,
+          primaryExcerpts: primaryExcerpts.map((e) => ({
+            title: e.title,
+            text: e.text,
+          })),
+        });
+        if (!issueTitle) {
+          await holdForArticle("awaiting_concrete_title");
+          continue;
+        }
+        const issueKeywords = Array.from(new Set([cluster.title, issueTitle, ...billTitles]));
+        const evidence = await ensureEvidence(prisma, issueTitle, candidate);
+        const { dietSpeeches, background, laws } = evidenceToArticleFacts(evidence);
+        const internationalReportExcerpts = evidence
+          ? await fetchReportExcerpts(internationalNewsSources(evidence))
+          : [];
+        const { article, verified, unresolvedClaims } = await generateVerifiedArticle({
+          issueTitle,
+          isReported: false,
+          sources,
+          primaryExcerpts,
+          internationalReportExcerpts,
+          dietSpeeches,
+          background,
+          laws,
+        });
+        if (!verified) {
+          const reasons = unresolvedClaims.map((c) => `${c.text}(${c.reason})`).join(" / ");
+          await holdForArticle(`unverified_claim:${reasons.slice(0, 200)}`);
+          continue;
+        }
+        const banned = violatesBan(article);
+        if (banned) {
+          await holdForArticle(`banned_phrase:${banned}`);
+          continue;
+        }
+        const issue = await prisma.issue.create({
+          data: {
+            slug,
+            title: issueTitle,
+            category: toIssueCategory(cluster.category),
+            status: "TRENDING",
+            confirmation: "OFFICIAL",
+            summaryJson: {
+              lead: article.lead,
+              bullets: article.bullets,
+              sources: sources.slice(0, 5).map((s) => ({
+                label: `${s.title.slice(0, 40)}（${s.feed}）`,
+                url: s.url,
+              })),
+            } as unknown as Prisma.InputJsonValue,
+            articleHtml: article.articleHtml,
+            articleGeneratedAt: new Date(),
+            voteLabelsJson: cluster.choices as unknown as Prisma.InputJsonValue,
+            keywords: issueKeywords,
+            monitoringUntil: new Date(Date.now() + monitoringDays * 86400_000),
+          },
+        });
+        await prisma.$transaction([
+          prisma.topicCandidate.update({
+            where: { id: candidate.id },
+            data: { issueId: issue.id },
+          }),
+          prisma.issueTimeline.create({
+            data: {
+              issueId: issue.id,
+              label: `一次情報に基づく記事を公開（${input.distinctFeeds}件の公式ソース）`,
+            },
+          }),
+        ]);
+        await notifyRevalidate(slug, issue.id);
+        publishedThisRun += 1;
+        articlesThisRun += 1;
+        console.log(`  ✅ [publish/OFFICIAL]${trending ? " 🔥trending" : ""} /issues/${slug} — ${issueTitle}`);
+      } catch (e) {
+        console.error(`  ❌ OFFICIAL記事生成失敗: ${e}`);
+        await notifyRadarFailure(`detect.ts OFFICIAL記事生成失敗: ${cluster.title}`, e);
+        await holdForArticle("article_generation_failed");
+      }
+      continue;
+    }
+
+    // REPORTED（🔴LIVE）: 国家的緊急のみ。テンプレ速報→ summarize/followup が後追い
+    if (!breaking) {
+      await holdForArticle("defer_buzz_pipeline");
+      continue;
+    }
+    const issueTitle = await resolveIssueTitle(titleInput);
+    if (!issueTitle) {
+      await holdForArticle("awaiting_concrete_title");
+      continue;
+    }
+    const issueKeywords = Array.from(new Set([cluster.title, issueTitle, ...billTitles]));
     const issue = await prisma.issue.create({
       data: {
         slug,
-        title: cluster.question || cluster.title,
+        title: issueTitle,
         category: toIssueCategory(cluster.category),
         status: "TRENDING",
-        confirmation: decision.confirmation,
-        summaryJson: level1Summary(cluster, sources, summaryMode) as unknown as Prisma.InputJsonValue,
+        confirmation: "REPORTED",
+        summaryJson: level1Summary(cluster, sources) as unknown as Prisma.InputJsonValue,
         voteLabelsJson: cluster.choices as unknown as Prisma.InputJsonValue,
-        keywords: Array.from(new Set([cluster.title, ...billTitles])),
+        keywords: issueKeywords,
         monitoringUntil: new Date(Date.now() + monitoringDays * 86400_000),
       },
     });
@@ -594,15 +829,14 @@ async function main() {
       prisma.issueTimeline.create({
         data: {
           issueId: issue.id,
-          label: breaking
-            ? `🔴 速報LIVE開始（${input.distinctFeeds}媒体・続報をタイムラインで追跡）`
-            : `速報スレを自動公開（${input.distinctFeeds}媒体・一次情報を検知）`,
+          label: `🔴 LIVE緊急（${input.distinctFeeds}媒体・続報をタイムラインで追跡）`,
         },
       }),
     ]);
     await notifyRevalidate(slug, issue.id);
     publishedThisRun += 1;
-    console.log(`  ✅ [publish/${decision.confirmation}]${trending ? " 🔥trending" : ""} /issues/${slug} — ${cluster.title}`);
+    publishedReportedThisRun += 1;
+    console.log(`  ✅ [publish/LIVE]${trending ? " 🔥trending" : ""} /issues/${slug} — ${issueTitle}`);
   }
 
   console.log(

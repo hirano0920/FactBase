@@ -6,6 +6,7 @@ import { retrieveChunks } from "@/lib/rag";
 import { invalidateOnFcResultSaved } from "@/lib/cache-invalidate";
 import { consumeFcQuota } from "@/lib/fc-quota";
 import { acquireFcInflightSlot, releaseFcInflightSlot } from "@/lib/fc-inflight";
+import { canUseFactCheck, fcDailyLimit } from "@/lib/plan-features";
 import type { FcVerdict, Prisma } from "@prisma/client";
 
 export const runtime = "nodejs";
@@ -17,7 +18,7 @@ interface FcSourceLink {
 }
 
 /**
- * ワンタップFC。Pro(980円)プラン専用機能、30回/日。
+ * ワンタップFC。Plus 5回/日、Pro 20回/日。
  *   **キャッシュヒットでも1回分消費する**（運営コストはキャッシュヒットで¥0になるが、
  *   閲覧の「回数」自体をユーザーの体験としてカウントする方が意図がわかりやすいため）
  * - 判定は6カテゴリ + 表示ラベル + 必ず出典リンク
@@ -31,9 +32,11 @@ export async function POST(
   if (session instanceof NextResponse) return session;
 
   const plan = session.user.plan;
-  if (plan !== "FACTCHECK") {
-    return errors.forbidden("ワンタップファクトチェックはProプラン（980円/月）限定の機能です");
+  if (!canUseFactCheck(plan)) {
+    return errors.forbidden("ワンタップファクトチェックはPlus / Proプラン限定の機能です");
   }
+
+  const dailyLimit = fcDailyLimit(plan);
 
   const { id: commentId } = await params;
 
@@ -45,7 +48,7 @@ export async function POST(
   if (!quota.allowed) {
     return apiError(
       429,
-      "本日のファクトチェック回数（30回）を使い切りました。明日リセットされます",
+      `本日のファクトチェック回数（${dailyLimit}回）を使い切りました。明日リセットされます`,
       "FC_QUOTA_EXCEEDED",
     );
   }

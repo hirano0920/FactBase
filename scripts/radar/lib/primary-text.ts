@@ -23,9 +23,9 @@ export interface PrimaryExcerpt {
   text: string;
 }
 
-const UA = "Mozilla/5.0 (compatible; FactBaseRadar/1.0; +https://factbase.tokyo)";
-const MAX_PAGES = 2;
-const MAX_CHARS_PER_PAGE = 3000;
+export const UA = "Mozilla/5.0 (compatible; FactBaseRadar/1.0; +https://factbase.tokyo)";
+const MAX_PAGES = 4;
+const MAX_CHARS_PER_PAGE = 6000;
 
 /** 本文と関係ないナビ・フッター・広告等のブロックタグを丸ごと除去（開閉タグの中身ごと） */
 const BOILERPLATE_TAGS = ["nav", "header", "footer", "aside", "form"];
@@ -67,7 +67,7 @@ export async function extractPdfText(buffer: ArrayBuffer): Promise<string> {
   return text.replace(/\s+/g, " ").trim();
 }
 
-async function fetchPageText(url: string): Promise<string | null> {
+export async function fetchPageText(url: string, maxChars = MAX_CHARS_PER_PAGE): Promise<string | null> {
   try {
     const res = await fetch(url, {
       headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml,application/pdf,*/*;q=0.8" },
@@ -84,7 +84,7 @@ async function fetchPageText(url: string): Promise<string | null> {
     } else {
       return null;
     }
-    return text.length >= 100 ? text.slice(0, MAX_CHARS_PER_PAGE) : null;
+    return text.length >= 100 ? text.slice(0, maxChars) : null;
   } catch (e) {
     console.warn(`  ⚠️ primary-text (${url}): 取得失敗 (${e})`);
     return null;
@@ -93,7 +93,8 @@ async function fetchPageText(url: string): Promise<string | null> {
 
 /**
  * ソース一覧から一次情報フィード由来のURLを新しい順に最大MAX_PAGES件取得。
- * 取得失敗・本文が短すぎるページは黙ってスキップ（記事生成自体は止めない）。
+ * 取得失敗・本文が短すぎるページはログに残した上でスキップ（記事生成自体は止めない）が、
+ * 呼び出し側（summarize.ts/followup.ts）は取得0件を articleHtml 側の注記に反映すること。
  */
 export async function fetchPrimaryExcerpts(
   sources: { title: string; url: string; feed: string }[],
@@ -103,6 +104,9 @@ export async function fetchPrimaryExcerpts(
   for (const s of officials) {
     const text = await fetchPageText(s.url);
     if (text) excerpts.push({ title: s.title, url: s.url, text });
+  }
+  if (officials.length > 0 && excerpts.length === 0) {
+    console.warn(`  ⚠️ primary-text: 一次情報フィード${officials.length}件すべて本文取得失敗`);
   }
   return excerpts;
 }

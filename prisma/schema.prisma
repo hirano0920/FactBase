@@ -69,24 +69,27 @@ enum ConfirmationStatus {
 }
 
 model User {
-  id                   String    @id @default(cuid())
-  name                 String?
-  email                String?   @unique
-  emailVerified        DateTime?
-  image                String?
+  id                     String    @id @default(cuid())
+  name                   String?
+  email                  String?   @unique
+  emailVerified          DateTime?
+  image                  String?
   // 軽量プロフィール: 一言自己紹介・絵文字アバター（画像アップロードは不要な設計）
-  bio                  String?
-  avatarEmoji          String?
-  plan                 Plan      @default(FREE)
-  planUntil            DateTime?
+  bio                    String?
+  avatarEmoji            String?
+  plan                   Plan      @default(FREE)
+  planUntil              DateTime?
   // Stripe: 二重課金防止・解約導線・webhookのユーザー解決に必須
-  stripeCustomerId     String?   @unique
-  stripeSubscriptionId String?
+  stripeCustomerId       String?   @unique
+  stripeSubscriptionId   String?
   // 新規登録時のIP/国（90日1IP1アカウント・不正投票対策）
-  registrationIp       String?
-  registrationCountry  String?
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  registrationIp         String?
+  registrationCountry    String?
+  // サイト内続報通知バッジ（ブックマーク/投票した争点の更新）の既読カーソル。
+  // nullなら「一度も確認したことがない」＝createdAt以降の全更新を未読として扱う
+  notificationsCheckedAt DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
   accounts       Account[]
   sessions       Session[]
@@ -197,25 +200,31 @@ model SourceEvent {
 
 // Radarのトピック候補と公開判断ログ（透明性レポートの材料・長期保存）
 model TopicCandidate {
-  id             String      @id @default(cuid())
-  dedupKey       String      @unique // 正規化タイトル（同一トピックの再検知防止）
-  title          String
-  category       String? // politics/economy/law/finance/rights/international
-  classification String? // official/report/scandal/incident/indicator
-  eventCount     Int         @default(0)
-  distinctFeeds  Int         @default(0)
-  hotScore       Int         @default(0)
-  trustScore     Int         @default(0)
-  riskScore      Int         @default(0)
-  riskFlags      String[] // 検出された危険シグナル
-  decision       String? // 判断式の内訳（監査用）
-  status         RadarStatus @default(PENDING)
-  sourceUrls     Json // [{"title","url","feed"}]
-  issueId        String?     @unique
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  id              String      @id @default(cuid())
+  dedupKey        String      @unique // 正規化タイトル（同一トピックの再検知防止）
+  title           String
+  category        String? // politics/economy/law/finance/rights/international
+  classification  String? // official/report/scandal/incident/indicator
+  eventCount      Int         @default(0)
+  distinctFeeds   Int         @default(0)
+  hotScore        Int         @default(0)
+  trustScore      Int         @default(0)
+  riskScore       Int         @default(0)
+  riskFlags       String[] // 検出された危険シグナル
+  decision        String? // 判断式の内訳（監査用）
+  status          RadarStatus @default(PENDING)
+  sourceUrls      Json // [{"title","url","feed"}]
+  issueId         String?     @unique
+  // 能動調査パイプライン（discover.ts）由来の候補メタデータ。
+  // 従来のRSSクラスタ由来候補は discoverySource=null のまま。
+  discoverySource String? // "buzz" | "bill" | "rss"
+  topicTerm       String? // 正規化トピック語（証拠再取得・続報照合キー）
+  evidenceJson    Json? // 能動調査の証拠バンドル（国会会議録・法令・関連ニュース）
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
 
   @@index([status, createdAt])
+  @@index([discoverySource, createdAt])
 }
 
 // 争点の時系列更新（続報・本人反応・訂正）
@@ -229,6 +238,34 @@ model IssueTimeline {
   issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
 
   @@index([issueId, at])
+}
+
+// Google Trends/Yahoo!リアルタイム検索の出現履歴を自前で蓄積し、
+// 「1回だけ出た瞬間バズ」と「何時間も出続けている継続的な話題」を区別するための定点観測テーブル。
+// detect.ts が cron 実行のたびに upsert し、sightingCount と firstSeenAt〜lastSeenAt の幅で判定する。
+model TrendSighting {
+  id            String   @id @default(cuid())
+  term          String
+  source        String // "google_trends" | "yahoo_realtime"
+  firstSeenAt   DateTime @default(now())
+  lastSeenAt    DateTime @default(now())
+  sightingCount Int      @default(1)
+
+  @@unique([term, source])
+  @@index([lastSeenAt])
+}
+
+// Tavily発見結果のドメイン信頼度フィルタの運用管理版。
+// scripts/radar/lib/domain-trust.ts のハードコードdenylist（コード変更・デプロイが必須）を補完し、
+// 運用中に見つかった低品質ドメインを管理画面からデプロイ無しで追加・削除できるようにする。
+model DomainTrustRule {
+  id        String   @id @default(cuid())
+  hostname  String   @unique // 例: "example.com"（そのホスト名またはサブドメインをTavily採用対象から除外）
+  action    String   @default("DENY") // 現状はDENYのみ運用（将来の拡張余地として文字列管理）
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([action])
 }
 
 // モデレーション人間キュー（AIが判定保留した1割 + 異議申立）
@@ -286,11 +323,16 @@ model Comment {
   helpfulCount     Int              @default(0)
   isHidden         Boolean          @default(false) // 表示可否（moderationStatusから導出・クエリ用）
   moderationStatus ModerationStatus @default(VISIBLE)
+  // 返信スレッド（1階層のみ、返信への返信は無し）。トップレベルコメントはnull
+  parentId         String?
+  replyCount       Int              @default(0)
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 
   user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   issue    Issue            @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  parent   Comment?         @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies  Comment[]        @relation("CommentReplies")
   fcCache  FcCache?
   reports  Report[]
   helpfuls Helpful[]
@@ -298,6 +340,7 @@ model Comment {
   appeal   Appeal?
 
   @@index([issueId, createdAt])
+  @@index([parentId, createdAt])
 }
 
 model Helpful {

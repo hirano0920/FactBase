@@ -14,7 +14,7 @@ export default async function AccessDeniedPage() {
 
   return (
     <PageContainer>
-      <div className="grid gap-8 lg:grid-cols-[1fr_260px]">
+      <div className="grid gap-8 lg:grid-cols-[1fr_300px]">
         <div className="mx-auto max-w-md py-16 text-center">
           <h1 className="mb-3 text-2xl font-extrabold tracking-tight text-ink">
             日本国内からのみご利用いただけます

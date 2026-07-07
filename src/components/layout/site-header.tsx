@@ -3,45 +3,103 @@ import { auth, signOut } from "@/auth";
 import { SITE } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
-import { isAdminEmail } from "@/lib/admin-emails";
+import { NotificationBell } from "@/components/layout/notification-bell";
+import { FlameIcon, LockIcon, TrendingUpIcon } from "@/components/ui/icons";
 
-const NAV = [
-  { href: "/issues", label: "スレ一覧", emoji: "📁" },
-  { href: "/ranking", label: "Hotなスレ", emoji: "🔥" },
-  { href: "/ranking?period=week", label: "Hotな投票", emoji: "📈" },
-  { href: "/pricing", label: "Plus/Proプラン", emoji: "🔏" },
+const MOBILE_NAV = [
+  { href: "/ranking", label: "Hotなスレ" },
+  { href: "/ranking/votes", label: "Hotな投票" },
+] as const;
+
+const DESKTOP_NAV = [
+  { href: "/ranking", label: "Hotなスレ", Icon: FlameIcon },
+  { href: "/ranking/votes", label: "Hotな投票", Icon: TrendingUpIcon },
+  { href: "/pricing", label: "Plus/Pro", Icon: LockIcon },
 ] as const;
 
 const PLAN_LABELS = {
   FREE: null,
-  COMMENT: "コメント会員",
-  FACTCHECK: "FC会員",
+  COMMENT: "Plus",
+  FACTCHECK: "Pro",
 } as const;
 
 export async function SiteHeader() {
   const session = await auth();
   const user = session?.user ?? null;
   const planLabel = user ? PLAN_LABELS[user.plan] : null;
-  const showAdmin = user && isAdminEmail(user.email);
 
   return (
-    <header className="sticky top-0 z-50 border-b border-border bg-surface/90 backdrop-blur-md">
-      <div className="mx-auto flex h-14 max-w-wide items-center justify-between px-page">
+    <header className="sticky top-0 z-50 border-b border-border bg-surface/95 backdrop-blur-md">
+      {/* サイドバー列が消える lg 未満はコンパクトヘッダー */}
+      <div className="mx-auto flex h-12 max-w-wide items-center gap-2 px-3 lg:hidden">
+        <Link
+          href="/"
+          className="shrink-0 text-base font-extrabold tracking-tighter text-ink no-underline"
+        >
+          {SITE.displayName}
+        </Link>
+
+        <nav
+          className="flex min-w-0 flex-1 items-center justify-center gap-3 overflow-x-auto scrollbar-none"
+          aria-label="メイン"
+        >
+          {MOBILE_NAV.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className="shrink-0 whitespace-nowrap text-xs font-bold text-ink-secondary no-underline hover:text-ink"
+            >
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+
+        <div className="flex shrink-0 items-center gap-1">
+          {user ? (
+            <>
+              <NotificationBell isLoggedIn />
+              <form
+                action={async () => {
+                  "use server";
+                  await signOut({ redirectTo: "/" });
+                }}
+              >
+                <button
+                  type="submit"
+                  className="whitespace-nowrap px-1 text-xs font-bold text-ink-secondary hover:text-ink"
+                >
+                  退出
+                </button>
+              </form>
+            </>
+          ) : (
+            <Link
+              href="/login"
+              className="whitespace-nowrap rounded-full bg-gradient-to-r from-accent to-accent-hover px-3 py-1 text-xs font-bold text-white no-underline"
+            >
+              ログイン
+            </Link>
+          )}
+        </div>
+      </div>
+
+      {/* ワイド画面のみフルヘッダー */}
+      <div className="mx-auto hidden h-14 max-w-wide items-center justify-between px-page lg:flex">
         <Link
           href="/"
           className="text-lg font-extrabold tracking-tighter text-ink no-underline hover:text-accent"
         >
-          {SITE.name}
+          {SITE.displayName}
         </Link>
 
-        <nav className="hidden items-center gap-6 sm:flex" aria-label="メイン">
-          {NAV.map((item) => (
+        <nav className="flex items-center gap-6" aria-label="メイン">
+          {DESKTOP_NAV.map((item) => (
             <Link
               key={item.href}
               href={item.href}
               className="flex items-center gap-1.5 text-sm font-semibold text-ink-secondary no-underline transition-colors hover:text-ink"
             >
-              <span aria-hidden="true">{item.emoji}</span>
+              <item.Icon style={{ width: 16, height: 16 }} />
               {item.label}
             </Link>
           ))}
@@ -49,26 +107,19 @@ export async function SiteHeader() {
 
         <div className="flex items-center gap-2">
           <ThemeToggle />
+          {user && <NotificationBell isLoggedIn />}
           {user ? (
             <>
               {planLabel && (
-                <span className="hidden rounded-full border border-accent/25 bg-accent/5 px-2.5 py-0.5 text-xs font-medium text-accent sm:inline">
+                <span className="rounded-full border border-accent/25 bg-accent/5 px-2.5 py-0.5 text-xs font-medium text-accent">
                   {planLabel}
                 </span>
               )}
-              {showAdmin && (
-                <Link
-                  href="/admin"
-                  className="hidden rounded-md border border-amber-400/50 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 no-underline hover:bg-amber-100 sm:inline"
-                >
-                  管理
-                </Link>
-              )}
               <Link
                 href="/account"
-                className="hidden max-w-[10rem] truncate text-sm text-ink-secondary no-underline hover:text-ink sm:inline"
+                className="max-w-[10rem] truncate text-sm text-ink-secondary no-underline hover:text-ink"
               >
-                {user.name ?? "ログイン中"}
+                {user.name ?? "アカウント"}
               </Link>
               <form
                 action={async () => {
@@ -92,9 +143,9 @@ export async function SiteHeader() {
             <Link
               href="/login"
               className={cn(
-                "rounded-full bg-ink px-4 py-1.5",
-                "text-sm font-semibold text-surface no-underline",
-                "transition-transform hover:scale-[1.03] active:scale-[0.97]",
+                "rounded-full bg-gradient-to-r from-accent to-accent-hover px-4 py-1.5",
+                "text-sm font-semibold text-white no-underline",
+                "shadow-subtle transition-transform hover:scale-[1.03] hover:shadow-glow active:scale-[0.97]",
               )}
             >
               ログイン

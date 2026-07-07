@@ -6,14 +6,11 @@ import { LiveBadge } from "@/components/ui/live-badge";
 import { BURST } from "@/lib/constants";
 import type { GlobalTimelineEntry } from "@/lib/data";
 
-interface LiveTimelineFeedProps {
-  initialEntries: GlobalTimelineEntry[];
-}
-
 /**
- * サイドバー用 LIVE タイムライン。30秒ごとに poll し新着を先頭に追加表示。
+ * サイドバー用 LIVE タイムライン。
+ * SSRでは取得せず、描画後に遅延 fetch + 30秒 poll（ページ読み込みをブロックしない）。
  */
-export function LiveTimelineFeed({ initialEntries }: LiveTimelineFeedProps) {
+export function LiveTimelineFeed({ initialEntries = [] }: { initialEntries?: GlobalTimelineEntry[] }) {
   const [entries, setEntries] = useState(initialEntries);
   const [highlightIds, setHighlightIds] = useState<Set<string>>(new Set());
   const knownIds = useRef(new Set(initialEntries.map((e) => e.id)));
@@ -44,9 +41,11 @@ export function LiveTimelineFeed({ initialEntries }: LiveTimelineFeedProps) {
       }
     };
 
+    const initialTimer = setTimeout(poll, 1500);
     const timer = setInterval(poll, BURST.timelinePollMs);
     return () => {
       cancelled = true;
+      clearTimeout(initialTimer);
       clearInterval(timer);
     };
   }, []);

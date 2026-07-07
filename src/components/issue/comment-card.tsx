@@ -1,9 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
-import { VOTE_CHOICES, type VoteChoiceId } from "@/lib/constants";
+import { REPLY_LIMITS, VOTE_CHOICES, type VoteChoiceId } from "@/lib/constants";
 import { cn, formatNumber } from "@/lib/utils";
 import type { Comment, FcVerdictId } from "@/types";
+import { UserDisplayName } from "@/components/user/display-name";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { EmojiBurst } from "./emoji-burst";
@@ -13,11 +15,17 @@ interface CommentCardProps {
   canInteract?: boolean;
   canFactCheck?: boolean;
   fcLoading?: boolean;
+  /** 返信一覧を描画する時、どの返信がFC実行中かを判定するために使う（自分自身のfcLoadingとは別枠） */
+  fcPendingId?: string | null;
   onLike?: (id: string) => void;
   onDislike?: (id: string) => void;
   onHelpful?: (id: string) => void;
   onFactCheck?: (id: string) => void;
   onReport?: (id: string) => void;
+  /** トップレベルコメントにのみ渡す。渡すと「返信する」ボタンが出る（返信自体には渡さない＝1階層のみ） */
+  onReply?: (parentId: string, body: string) => Promise<string | null>;
+  /** ネストされた返信として小さめ・インデント表示にする */
+  isReply?: boolean;
 }
 
 function stanceLabel(stance: VoteChoiceId) {
@@ -78,15 +86,22 @@ export function CommentCard({
   canInteract = false,
   canFactCheck = false,
   fcLoading = false,
+  fcPendingId = null,
   onLike,
   onDislike,
   onHelpful,
   onFactCheck,
   onReport,
+  onReply,
+  isReply = false,
 }: CommentCardProps) {
   const fc = comment.fcResult;
   const verdictStyle = fc ? VERDICT_STYLES[fc.verdict] : null;
   const [burst, setBurst] = useState<{ kind: "like" | "dislike"; key: number } | null>(null);
+  const [replyOpen, setReplyOpen] = useState(false);
+  const [replyBody, setReplyBody] = useState("");
+  const [replySubmitting, setReplySubmitting] = useState(false);
+  const [replyError, setReplyError] = useState<string | null>(null);
 
   const fireLike = () => {
     setBurst({ kind: "like", key: Date.now() });
@@ -97,12 +112,40 @@ export function CommentCard({
     onDislike?.(comment.id);
   };
 
+  const replyBodyLen = replyBody.trim().length;
+  const replyLengthOk =
+    replyBodyLen >= REPLY_LIMITS.minLength && replyBodyLen <= REPLY_LIMITS.maxLength;
+
+  const submitReply = async () => {
+    if (!onReply || replySubmitting || !replyLengthOk) return;
+    setReplySubmitting(true);
+    setReplyError(null);
+    const error = await onReply(comment.id, replyBody);
+    setReplySubmitting(false);
+    if (error) {
+      setReplyError(error);
+      return;
+    }
+    setReplyBody("");
+    setReplyOpen(false);
+  };
+
   return (
-    <article className="border-b border-border py-6 last:border-b-0">
+    <article className={cn("border-b border-border py-6 last:border-b-0", isReply && "border-b-0 py-4")}>
       <header className="mb-3 flex flex-wrap items-center gap-2">
-        <span className="text-sm font-medium text-ink">{comment.userName}</span>
-        {comment.userBadge && <Badge variant="pro">{comment.userBadge}</Badge>}
-        <Badge variant="stance">{stanceLabel(comment.stance)}派</Badge>
+        <Link href={`/u/${comment.userId}`} className="no-underline hover:opacity-80">
+          <UserDisplayName
+            userId={comment.userId}
+            name={comment.userName}
+            plan={comment.userPlan}
+            commentCount={comment.userCommentCount}
+            totalLikes={comment.userTotalLikes}
+            variant="thread"
+            nameClassName="text-sm"
+            stance={comment.stance}
+          />
+        </Link>
+        {!isReply && <Badge variant="stance">{stanceLabel(comment.stance)}派</Badge>}
         <time className="text-xs text-ink-faint">{comment.createdAt.slice(0, 10)}</time>
       </header>
 
@@ -169,6 +212,16 @@ export function CommentCard({
             {formatNumber(comment.dislikeCount)}
           </span>
         </Button>
+        {onReply && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={!canInteract}
+            onClick={() => setReplyOpen((v) => !v)}
+          >
+            💬 返信する
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="sm"
@@ -202,6 +255,68 @@ export function CommentCard({
           </span>
         </Button>
       </footer>
+
+      {onReply && replyOpen && (
+        <div className="mt-3 rounded-md border border-border bg-surface-muted p-3">
+          <textarea
+            value={replyBody}
+            onChange={(e) => setReplyBody(e.target.value)}
+            rows={2}
+            maxLength={REPLY_LIMITS.maxLength + 50}
+            placeholder={`返信を${REPLY_LIMITS.minLength}字以上で入力`}
+            className="w-full resize-y rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm text-ink outline-none focus:border-accent"
+            autoFocus
+          />
+          <div className="mt-1.5 flex items-center justify-between">
+            <span className="text-xs text-ink-faint tabular-nums">
+              {replyBodyLen} / {REPLY_LIMITS.maxLength}字
+            </span>
+            <div className="flex gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setReplyOpen(false)}>
+                キャンセル
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={!replyLengthOk || replySubmitting}
+                onClick={submitReply}
+              >
+                {replySubmitting ? "送信中…" : "返信する"}
+              </Button>
+            </div>
+          </div>
+          {replyError && (
+            <p role="alert" className="mt-1.5 text-xs text-against">
+              {replyError}
+            </p>
+          )}
+        </div>
+      )}
+
+      {!isReply && comment.replies.length > 0 && (
+        <div className="mt-3 ml-3 space-y-1 border-l-2 border-border pl-4 sm:ml-6">
+          {comment.replies.map((reply) => (
+            <CommentCard
+              key={reply.id}
+              comment={reply}
+              isReply
+              canInteract={canInteract}
+              canFactCheck={canFactCheck}
+              fcLoading={fcPendingId === reply.id}
+              onLike={onLike}
+              onDislike={onDislike}
+              onHelpful={onHelpful}
+              onFactCheck={onFactCheck}
+              onReport={onReport}
+            />
+          ))}
+          {comment.replyCount > comment.replies.length && (
+            <p className="pt-1 text-xs text-ink-faint">
+              他{comment.replyCount - comment.replies.length}件の返信は表示されていません
+            </p>
+          )}
+        </div>
+      )}
     </article>
   );
 }

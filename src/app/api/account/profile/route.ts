@@ -6,7 +6,7 @@ import { containsNgContent } from "@/lib/moderation";
 
 export const runtime = "nodejs";
 
-/** 軽量プロフィール（表示名・一言・絵文字アバター）の更新。 */
+/** 軽量プロフィール（表示名・一言）の更新。 */
 export async function PATCH(req: NextRequest) {
   const session = await requireSession(req);
   if (session instanceof NextResponse) return session;
@@ -41,9 +41,8 @@ export async function PATCH(req: NextRequest) {
     data: {
       name: result.data.name,
       bio: result.data.bio || null,
-      avatarEmoji: result.data.avatarEmoji,
     },
-    select: { name: true, bio: true, avatarEmoji: true },
+    select: { name: true, bio: true },
   });
 
   return NextResponse.json(updated);

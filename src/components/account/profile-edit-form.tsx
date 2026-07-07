@@ -1,24 +1,17 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { AVATAR_EMOJIS, BIO_MAX_LENGTH, DISPLAY_NAME_MAX_LENGTH } from "@/lib/constants";
+import { BIO_MAX_LENGTH, DISPLAY_NAME_MAX_LENGTH } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 
 interface ProfileEditFormProps {
   initialName: string;
   initialBio: string;
-  initialAvatarEmoji: string | null;
 }
 
-export function ProfileEditForm({
-  initialName,
-  initialBio,
-  initialAvatarEmoji,
-}: ProfileEditFormProps) {
+export function ProfileEditForm({ initialName, initialBio }: ProfileEditFormProps) {
   const [name, setName] = useState(initialName);
   const [bio, setBio] = useState(initialBio);
-  const [avatarEmoji, setAvatarEmoji] = useState<string | null>(initialAvatarEmoji);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -31,7 +24,7 @@ export function ProfileEditForm({
       const res = await fetch("/api/account/profile", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, bio, avatarEmoji }),
+        body: JSON.stringify({ name, bio }),
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
@@ -44,46 +37,13 @@ export function ProfileEditForm({
     } finally {
       setPending(false);
     }
-  }, [name, bio, avatarEmoji]);
+  }, [name, bio]);
 
   return (
     <div className="space-y-5">
-      <div>
-        <p className="mb-2 text-xs font-bold text-ink-secondary">アバター</p>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setAvatarEmoji(null)}
-            aria-pressed={avatarEmoji === null}
-            aria-label="アバターなし（登録時の画像を使う）"
-            className={cn(
-              "flex h-11 w-11 items-center justify-center rounded-full border text-xs font-bold transition-transform hover:scale-105",
-              avatarEmoji === null
-                ? "border-ink bg-ink text-surface"
-                : "border-border text-ink-faint hover:bg-surface-muted",
-            )}
-          >
-            OFF
-          </button>
-          {AVATAR_EMOJIS.map((emoji) => (
-            <button
-              key={emoji}
-              type="button"
-              onClick={() => setAvatarEmoji(emoji)}
-              aria-pressed={avatarEmoji === emoji}
-              aria-label={`絵文字アバター ${emoji}`}
-              className={cn(
-                "flex h-11 w-11 items-center justify-center rounded-full border text-lg transition-transform hover:scale-110",
-                avatarEmoji === emoji
-                  ? "border-accent bg-accent/10 ring-2 ring-accent/30"
-                  : "border-border hover:bg-surface-muted",
-              )}
-            >
-              {emoji}
-            </button>
-          ))}
-        </div>
-      </div>
+      <p className="text-sm leading-relaxed text-ink-muted">
+        プロフィールは最初から公開です。コメントを重ねるほど tier が上がり、名前の横に表示されます。
+      </p>
 
       <div>
         <label htmlFor="display-name" className="mb-1.5 block text-xs font-bold text-ink-secondary">
@@ -100,7 +60,7 @@ export function ProfileEditForm({
 
       <div>
         <label htmlFor="bio" className="mb-1.5 block text-xs font-bold text-ink-secondary">
-          一言（プロフィールに表示されます）
+          一言（公開プロフィールに表示）
         </label>
         <input
           id="bio"

@@ -9,13 +9,13 @@ export const dynamic = "force-dynamic";
 /** 争点ページ LIVE タイムライン用 */
 export async function GET(
   req: NextRequest,
-  { params }: { params: Promise<{ issueId: string }> },
+  { params }: { params: Promise<{ slug: string }> },
 ) {
   const ip = getClientIp(req);
   const allowed = await checkRateLimit("timeline-issue", ip, BURST.commentsGetPerIpPerMin, 60);
   if (!allowed) return errors.rateLimited();
 
-  const { issueId } = await params;
+  const { slug: issueId } = await params;
   if (!issueId) return errors.validation("issueIdが必要です");
 
   try {

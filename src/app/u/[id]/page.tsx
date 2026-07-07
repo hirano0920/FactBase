@@ -1,18 +1,20 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { tierLabel } from "@/lib/badges";
-import { CATEGORIES } from "@/lib/constants";
+import {
+  reputationProgress,
+  likeTitleProgress,
+  REPUTATION_LADDERS,
+  LIKE_TITLES,
+} from "@/lib/reputation";
+import { getUserPublicStats } from "@/lib/user-stats";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { PageContainer, Section } from "@/components/layout/page-container";
+import { UserDisplayName } from "@/components/user/display-name";
 import type { Metadata } from "next";
 
 interface ProfilePageProps {
   params: Promise<{ id: string }>;
 }
-
-const CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
-  CATEGORIES.map((c) => [c.id.toUpperCase(), c.label]),
-);
 
 export async function generateMetadata({ params }: ProfilePageProps): Promise<Metadata> {
   const { id } = await params;
@@ -28,67 +30,102 @@ export default async function ProfilePage({ params }: ProfilePageProps) {
     select: {
       id: true,
       name: true,
-      image: true,
       bio: true,
-      avatarEmoji: true,
+      plan: true,
       createdAt: true,
-      badges: { select: { category: true, tier: true, helpfulCount: true } },
     },
   });
   if (!user) notFound();
 
+  const { visibleCommentCount: commentCount, totalLikes } = await getUserPublicStats(user.id);
+  const progress = reputationProgress(user.plan, commentCount);
+  const likeProgress = likeTitleProgress(totalLikes);
+  const ladder = REPUTATION_LADDERS[user.plan];
+
   return (
     <PageContainer>
-      <div className="grid gap-8 lg:grid-cols-[1fr_260px]">
+      <div className="grid gap-8 lg:grid-cols-[1fr_300px]">
         <div className="min-w-0 max-w-content">
-          <header className="mb-8 flex items-center gap-4">
-            {user.avatarEmoji ? (
-              <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full border border-border bg-surface-muted text-3xl">
-                {user.avatarEmoji}
-              </span>
-            ) : user.image ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={user.image} alt="" className="h-16 w-16 shrink-0 rounded-full" />
-            ) : (
-              <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-ink text-xl font-extrabold text-surface">
-                {(user.name ?? "?").slice(0, 1)}
-              </span>
+          <header className="mb-6 border-b border-border pb-6">
+            <UserDisplayName
+              userId={user.id}
+              name={user.name ?? "名無しの議論者"}
+              plan={user.plan}
+              commentCount={commentCount}
+              totalLikes={totalLikes}
+              variant="profile"
+              nameClassName="text-2xl"
+            />
+            {user.bio && (
+              <p className="mt-2 text-[15px] leading-relaxed text-ink-secondary">{user.bio}</p>
             )}
-            <div className="min-w-0">
-              <h1 className="text-2xl font-extrabold tracking-tight text-ink">
-                {user.name ?? "名無しの議論者"}
-              </h1>
-              {user.bio && (
-                <p className="mt-0.5 truncate text-sm text-ink-secondary">{user.bio}</p>
-              )}
-              <p className="mt-0.5 text-sm text-ink-faint">
-                {user.createdAt.toLocaleDateString("ja-JP")}から参加
-              </p>
-            </div>
+            <p className="mt-2 text-sm text-ink-faint">
+              {user.createdAt.toLocaleDateString("ja-JP")}から参加 · 有効コメント {commentCount} 件 ·
+              累計 like {totalLikes}
+            </p>
           </header>
 
           <Section>
-            <h2 className="mb-4 text-base font-bold text-ink">称号</h2>
-            {user.badges.length === 0 ? (
-              <p className="text-sm text-ink-faint">
-                まだ称号はありません。役に立つコメントを投稿すると、カテゴリ別に称号が付与されます。
-              </p>
-            ) : (
-              <ul className="grid gap-3 sm:grid-cols-2">
-                {user.badges.map((badge) => (
+            <h2 className="mb-3 text-base font-bold text-ink">tier（コメント数）</h2>
+            <ul className="space-y-2">
+              {ladder.map((tier) => {
+                const reached = commentCount >= tier.minComments;
+                return (
                   <li
-                    key={badge.category}
-                    className="flex items-center justify-between rounded-md border border-border bg-surface-raised px-4 py-3"
+                    key={tier.id}
+                    className={`flex items-center justify-between rounded-md border px-4 py-2.5 text-sm ${
+                      reached
+                        ? "border-accent/30 bg-accent/5"
+                        : "border-border bg-surface-raised text-ink-faint"
+                    }`}
                   >
-                    <span className="text-sm text-ink-secondary">
-                      {CATEGORY_LABELS[badge.category] ?? badge.category}
+                    <span className={reached ? tier.colorClass : ""}>
+                      {tier.emoji && <span className="mr-1">{tier.emoji}</span>}
+                      {tier.label}
                     </span>
-                    <span className="rounded-full border border-accent/25 bg-accent/5 px-2.5 py-0.5 text-xs font-medium text-accent">
-                      {tierLabel(badge.tier)} · {badge.helpfulCount}
+                    <span className="text-xs tabular-nums">
+                      {tier.minComments === 0 ? "開始" : `${tier.minComments}件〜`}
                     </span>
                   </li>
-                ))}
-              </ul>
+                );
+              })}
+            </ul>
+            {progress.next && progress.commentsToNext !== null && (
+              <p className="mt-3 text-sm text-ink-muted">
+                次の <span className={progress.next.colorClass}>{progress.next.label}</span> まであと{" "}
+                <strong>{progress.commentsToNext}</strong> コメント
+              </p>
+            )}
+          </Section>
+
+          <Section className="mt-6">
+            <h2 className="mb-3 text-base font-bold text-ink">like 称号</h2>
+            <ul className="space-y-2">
+              {[...LIKE_TITLES].reverse().map((title) => {
+                const reached = totalLikes >= title.minLikes;
+                return (
+                  <li
+                    key={title.id}
+                    className={`flex items-center justify-between rounded-md border px-4 py-2.5 text-sm ${
+                      reached
+                        ? "border-accent/30 bg-accent/5"
+                        : "border-border bg-surface-raised text-ink-faint"
+                    }`}
+                  >
+                    <span className={reached ? title.colorClass : ""}>
+                      <span className="mr-1">{title.emoji}</span>
+                      {title.label}
+                    </span>
+                    <span className="text-xs tabular-nums">{title.minLikes} like〜</span>
+                  </li>
+                );
+              })}
+            </ul>
+            {likeProgress.next && likeProgress.likesToNext !== null && (
+              <p className="mt-3 text-sm text-ink-muted">
+                次の <span className={likeProgress.next.colorClass}>{likeProgress.next.label}</span>{" "}
+                まであと <strong>{likeProgress.likesToNext}</strong> like
+              </p>
             )}
           </Section>
         </div>

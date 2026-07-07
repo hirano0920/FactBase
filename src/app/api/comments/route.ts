@@ -5,10 +5,23 @@ import { requireSession, checkRateLimit, errors, getClientIp } from "@/lib/api-h
 import { createComment } from "@/lib/comments";
 import { invalidateOnCommentCreated } from "@/lib/cache-invalidate";
 import { getComments } from "@/lib/data";
+import { canPostComment } from "@/lib/plan-features";
 import { prisma } from "@/lib/prisma";
-import { BURST, COMMENT_LIMITS, GUEST_COMMENT_LIMIT } from "@/lib/constants";
+import {
+  BURST,
+  COMMENT_LIMITS,
+  COMMENT_SORTS,
+  GUEST_COMMENT_LIMIT,
+  REPLY_LIMITS,
+  type CommentSortId,
+} from "@/lib/constants";
 
 export const runtime = "nodejs";
+
+function parseSort(req: NextRequest): CommentSortId {
+  const raw = req.nextUrl.searchParams.get("sort");
+  return (COMMENT_SORTS.some((s) => s.id === raw) ? raw : "new") as CommentSortId;
+}
 
 export async function GET(req: NextRequest) {
   const ip = getClientIp(req);
@@ -23,17 +36,18 @@ export async function GET(req: NextRequest) {
   const issueId = req.nextUrl.searchParams.get("issueId");
   if (!issueId) return errors.validation("issueIdが必要です");
   const cursor = req.nextUrl.searchParams.get("cursor") ?? undefined;
+  const sort = parseSort(req);
 
   try {
     // 未ログインはAPI経由での取得も含めて常にGUEST_COMMENT_LIMIT件まで
     // （クライアント側の制限だけだと直接APIを叩けば回避できてしまうため）
     const session = await auth();
     if (!session?.user) {
-      const page = await getComments(issueId, undefined, GUEST_COMMENT_LIMIT);
+      const page = await getComments(issueId, undefined, GUEST_COMMENT_LIMIT, sort);
       return NextResponse.json({ ...page, nextCursor: null, guestLimited: page.comments.length >= GUEST_COMMENT_LIMIT });
     }
 
-    const page = await getComments(issueId, cursor);
+    const page = await getComments(issueId, cursor, 20, sort);
     return NextResponse.json(page);
   } catch (e) {
     console.error("[comments] list failed", e);
@@ -43,17 +57,18 @@ export async function GET(req: NextRequest) {
 
 const createSchema = z.object({
   issueId: z.string().min(1),
-  stance: z.enum(["for", "against", "undecided"]),
-  body: z.string().min(COMMENT_LIMITS.minLength).max(COMMENT_LIMITS.maxLength),
+  // 返信はparentIdありでstance省略可（親のスタンスを引き継ぐ）
+  stance: z.enum(["for", "against", "undecided"]).optional(),
+  body: z.string().min(REPLY_LIMITS.minLength).max(COMMENT_LIMITS.maxLength),
+  parentId: z.string().min(1).optional(),
 });
 
 export async function POST(req: NextRequest) {
   const session = await requireSession(req);
   if (session instanceof NextResponse) return session;
 
-  const plan = session.user.plan;
-  if (plan !== "COMMENT" && plan !== "FACTCHECK") {
-    return errors.forbidden("コメントには500円プランへの登録が必要です");
+  if (!canPostComment(true)) {
+    return errors.forbidden("コメントするにはログインが必要です");
   }
 
   let body: unknown;
@@ -66,8 +81,20 @@ export async function POST(req: NextRequest) {
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) {
     return errors.validation(
-      `コメントは${COMMENT_LIMITS.minLength}字以上${COMMENT_LIMITS.maxLength}字以内で投稿してください`,
+      `コメントは${REPLY_LIMITS.minLength}字以上${COMMENT_LIMITS.maxLength}字以内で投稿してください`,
     );
+  }
+  const isReply = Boolean(parsed.data.parentId);
+  const minLen = isReply ? REPLY_LIMITS.minLength : COMMENT_LIMITS.minLength;
+  const maxLen = isReply ? REPLY_LIMITS.maxLength : COMMENT_LIMITS.maxLength;
+  const bodyLen = parsed.data.body.trim().length;
+  if (bodyLen < minLen || bodyLen > maxLen) {
+    return errors.validation(
+      `${isReply ? "返信" : "コメント"}は${minLen}字以上${maxLen}字以内で投稿してください`,
+    );
+  }
+  if (!isReply && !parsed.data.stance) {
+    return errors.validation("スタンスを選択してください");
   }
 
   const ok = await checkRateLimit("comment", session.user.id, 5, 60);
@@ -87,8 +114,9 @@ export async function POST(req: NextRequest) {
       userId: session.user.id,
       userCreatedAt: new Date(session.user.createdAt),
       issueId: issue.id,
-      stance: parsed.data.stance,
+      stance: parsed.data.stance ?? "for",
       body: parsed.data.body,
+      parentId: parsed.data.parentId,
     });
 
     if (!result.ok) {

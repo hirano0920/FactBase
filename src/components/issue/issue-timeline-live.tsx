@@ -9,12 +9,14 @@ import type { IssueTimelineEntry } from "@/lib/data";
 interface IssueTimelineLiveProps {
   issueId: string;
   initialEntries: IssueTimelineEntry[];
+  /** "reported"（未確認の進行中速報）のときだけ🔴LIVEを出す。"official"（公式発表確定済み）はタイムラインはあってもLIVEではない */
+  confirmation: "official" | "reported" | null;
 }
 
 /**
  * 争点ページの LIVE タイムライン。Radar 公開・まとめ更新などを poll で反映。
  */
-export function IssueTimelineLive({ issueId, initialEntries }: IssueTimelineLiveProps) {
+export function IssueTimelineLive({ issueId, initialEntries, confirmation }: IssueTimelineLiveProps) {
   const [entries, setEntries] = useState(initialEntries);
   const [highlightIds, setHighlightIds] = useState<Set<string>>(new Set());
   const knownIds = useRef(new Set(initialEntries.map((e) => e.id)));
@@ -58,7 +60,7 @@ export function IssueTimelineLive({ issueId, initialEntries }: IssueTimelineLive
     <Section>
       <div className="mb-4 flex items-center gap-2">
         <SectionTitle className="mb-0">タイムライン</SectionTitle>
-        <LiveBadge />
+        {confirmation === "reported" && <LiveBadge />}
       </div>
       <ol className="space-y-3">
         {entries.map((t) => (

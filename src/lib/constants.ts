@@ -40,6 +40,8 @@ export type VoteChoiceId = (typeof VOTE_CHOICES)[number]["id"];
 
 export const SITE = {
   name: "FactBase",
+  /** ヘッダーロゴ等の表示名 */
+  displayName: "FactBase.Tokyo",
   fullName: "FactBase-日本の議論をもっと分かりやすく、クリーンに。",
   tagline: "日本の議論をもっと分かりやすく、クリーンに。",
   description:
@@ -55,8 +57,34 @@ export const COMMENT_LIMITS = {
   sameThreadCooldownSec: 120,
 } as const;
 
+/** 返信（1階層のみ）は会話の続きなので、新規コメントより短く気軽に投稿できるようにする */
+export const REPLY_LIMITS = {
+  minLength: 2,
+  maxLength: 300,
+  /** 1コメントあたり最初に表示する返信数（一覧取得時のDB負荷を抑える。全件は「他N件」表示） */
+  visibleCount: 5,
+} as const;
+
+export const COMMENT_SORTS = [
+  { id: "new", label: "新着" },
+  { id: "helpful", label: "役に立った順" },
+] as const;
+
+export type CommentSortId = (typeof COMMENT_SORTS)[number]["id"];
+
+/** 賛成派・反対派の代表意見（対決表示）を出す最低コメント数。少数のうちは意味が無いため出さない */
+export const DEBATE_HIGHLIGHT_MIN_COMMENTS = 10;
+
 /** 未ログインのゲストが閲覧できるコメント数の上限。投票結果は制限なしで見える。 */
 export const GUEST_COMMENT_LIMIT = 5;
+
+/** ホームフィード1ページあたりのスレッド数 */
+export const HOME_FEED_PAGE_SIZE = 12;
+
+/** 2カラムレイアウト（メイン + サイドバー） */
+export const MAIN_SIDEBAR_GRID = "lg:grid-cols-[1fr_300px]" as const;
+
+export type IssueSortId = "created" | "comments" | "votes";
 
 /** プロフィールの一言自己紹介の最大文字数 */
 export const BIO_MAX_LENGTH = 80;
@@ -82,11 +110,10 @@ export const MODERATION = {
 } as const;
 
 /** ワンタップFCの1日あたり回数制限（プラン別） */
-/** ワンタップFCはPro(FACTCHECK/980円)専用。Plus(COMMENT/500円)はコメント投稿のみで対象外。 */
 export const FC_DAILY_LIMITS = {
   FREE: 0,
-  COMMENT: 0, // Plus・500円: FCなし
-  FACTCHECK: 30, // Pro・980円
+  COMMENT: 5, // Plus・500円
+  FACTCHECK: 20, // Pro・980円
 } as const;
 
 /** バーストトラフィック時のレート制限・同時実行上限（10万PV級を想定） */
@@ -125,6 +152,18 @@ export const ISSUE_PAGE_REVALIDATE_SEC = 3600;
 export const RADAR = {
   /** 1日の自動公開上限（低品質スレ乱発とAIコスト暴走の防止） */
   autoPublishPerDay: 8,
+  /**
+   * RSS経路（detect.ts）の🔴LIVE（REPORTED）1日上限。国家的緊急のみが対象。
+   * 通常のバズ争点は promote.ts がピーク時間帯に記事付きで公開する。
+   */
+  liveEmergencyAutoPublishPerDay: 5,
+  /** @deprecated 旧名。liveEmergencyAutoPublishPerDay と同義 */
+  rssReportedAutoPublishPerDay: 5,
+  /**
+   * detect.ts が「4ソースで既にバズっている報道錯綜」をREPORTED速報で先取り公開しない。
+   * promote.ts 側で能動調査＋記事付き公開させる（品質優先）。
+   */
+  deferReportedBuzzToPromote: true,
   /** AI記事の1日上限（GPT-5 / OpenAI） */
   articleDailyArticleLimit: 10,
   /** @deprecated 旧名。articleDailyArticleLimit と同義 */
@@ -147,6 +186,78 @@ export const RADAR = {
   followUpMaxActiveIssuesForMatch: 30,
   /** 候補・争点が保持するソース件数の上限（detect.tsの累積マージ・followup.tsの続報蓄積で共有） */
   sourceCap: 40,
+  // --- 能動調査パイプライン（discover.ts、①②③）---
+  /** discover.ts（PENDING作成＋深掘り）の起動時間帯（JST）。1日7回・2.5〜4時間間隔。
+   * 各 promote ピークの約90分前に加え、昼後・夕方の中間スイープで1日のバズを取りこぼさない。
+   * 1時間おきの再実行は意味が薄いため間隔を空ける。時間外は完全 no-op（nano/API も呼ばない）。 */
+  discoverWindowsJst: [
+    { hour: 6, minute: 0 }, // → 7:30 ピーク
+    { hour: 10, minute: 0 }, // → 12:00 ピーク
+    { hour: 13, minute: 30 }, // 午後スイープ
+    { hour: 16, minute: 0 }, // 夕方前スイープ
+    { hour: 18, minute: 0 }, // → 19:30 ピーク
+    { hour: 21, minute: 0 }, // 夜スイープ
+    { hour: 0, minute: 0 }, // 24:00 JST（夜バズ → 翌朝 7:30）
+  ],
+  /** discover起動時間帯とみなす許容幅（分）。cron 15分間隔のジッターを吸収 */
+  discoverWindowToleranceMin: 10,
+  /** 1 discover 実行あたり深掘りするバズ争点の上限（buzzScore 降順で選ぶ） */
+  researchTopicsPerRun: 8,
+  /** 法案トラッキング用の別枠（promote 対象外。buzz 枠を食わない） */
+  researchBillTopicsPerRun: 3,
+  /**
+   * detect.ts（RSS経路）が「報道多数だが一次情報なし／バズ前」で見送った候補を discover が
+   * 引き取って能動調査する1実行あたりの上限。バズ争点の枠（researchTopicsPerRun）とは別枠にして、
+   * 通常のバズ調査を圧迫せずに「バズる前の重要報道」の取りこぼしだけを救済する。 */
+  researchCarryOverPerRun: 3,
+  /** 引き取り対象とする detect 候補の鮮度（時間）。これより古い見送り候補は救済しない */
+  carryOverLookbackHours: 24,
+  /** discover起動時間帯外の能動調査（0=完全スキップ） */
+  discoverResearchOutsideWindow: 0,
+  /** filterRelevantTopics（discover②）が nano/mini に渡す候補語の上限 */
+  topicFilterMaxTerms: 120,
+  /** 1トピックあたり取得する国会会議録の発言件数 */
+  kokkaiRecords: 5,
+  /** 1トピックあたり取得する関連法令の件数 */
+  lawRecords: 3,
+  /** 1トピックあたり取得する国内メディア関連ニュースの件数 */
+  newsRecords: 8,
+  /** 1トピックあたり取得する海外/英字メディア関連ニュースの件数 */
+  internationalNewsRecords: 5,
+  /**
+   * 1トピックあたりTavily検索で追加発見するURLの件数（TAVILY_API_KEY未設定時は0件扱いで自動スキップ）。
+   * Google News検索で拾えない一次情報・専門メディア・海外の穴を埋める発見専用の追加ソース。
+   * 発見範囲が広がる分の品質担保はWriter/Verify間の主張裏取り検証（radar-article.ts）が担う。
+   */
+  tavilyResultsPerTopic: 6,
+  // --- バズ駆動記事の公開（promote.ts、④）---
+  /** 1ピーク時間帯あたりに公開する記事数（2〜3本/回の狙い） */
+  buzzArticlesPerWindow: 3,
+  /**
+   * 1ピーク時間帯・1カテゴリからの最大公開数。buzzScore純粋順だと単発のメガバズ争点が
+   * 同じピーク枠を独占し、政治・国際・法律等の他カテゴリを機械的に押し出すことがあるため、
+   * 政治・経済・国際・戦争・人権等を広く拾うという方針に合わせて偏りを抑える。
+   */
+  maxSameCategoryPerPromoteWindow: 2,
+  /** ピーク時間帯とみなす許容幅（分）。cronのジッターを吸収しつつ隣接15分枠と重複させない */
+  peakWindowToleranceMin: 10,
+  /** 1日の記事化ピーク時間帯（JST）。通勤・昼休み・夜の可処分時間 */
+  peakWindowsJst: [
+    { hour: 7, minute: 30 },
+    { hour: 12, minute: 0 },
+    { hour: 19, minute: 30 },
+  ],
+  /** buzzScore（4ソース + Newsクラスタ）の公開最低ライン。effectiveScore≥2 */
+  minBuzzScoreForPromotion: 2,
+  /** 同一争点とみなすニュースランキング見出し数（effectiveScore +1） */
+  minNewsClusterHeadlines: 3,
+  /** YouTube 収集タイトル上限 */
+  youtubeTrendingMaxTitles: 80,
+  /** News 見出しドリブン YouTube 検索のシード数 */
+  youtubeNewsSeedQueries: 8,
+  // --- 記事生成の調査エンリッチ（summarize.ts/followup.ts、detect.ts系にもdiscover.ts相当の調査を後付け）---
+  /** この時間内に調査済みならTopicCandidate.evidenceJsonを再利用し、外部APIを叩き直さない */
+  enrichRefreshHours: 12,
 } as const;
 
 /** 称号ランク（役に立った評価の累計数で決まる）。特典はバッジ表示・並び順やや優先のみ。 */
@@ -162,5 +273,7 @@ export type BadgeTier = (typeof BADGE_TIERS)[number]["tier"];
 export const AI_MODELS = {
   article: "gpt-5",
   utility: "gpt-5-nano",
+  /** discover.ts の争点選別（filterRelevantTopics）。Azure Foundry のデプロイ名は RADAR_TOPIC_FILTER_MODEL で上書き */
+  topicFilter: "gpt-5-mini",
   embedding: "text-embedding-3-small",
 } as const;

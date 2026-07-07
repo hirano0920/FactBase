@@ -1,10 +1,13 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { reputationProgress, likeTitleProgress, REPUTATION_LADDERS, LIKE_TITLES } from "@/lib/reputation";
+import { getUserPublicStats } from "@/lib/user-stats";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { PageContainer, Section } from "@/components/layout/page-container";
 import { DeleteAccountButton } from "@/components/account/delete-account-button";
 import { ProfileEditForm } from "@/components/account/profile-edit-form";
+import { UserDisplayName } from "@/components/user/display-name";
 import { PLAN_PRICES, PLANS } from "@/lib/constants";
 import Link from "next/link";
 import type { Metadata } from "next";
@@ -12,9 +15,9 @@ import type { Metadata } from "next";
 export const metadata: Metadata = { title: "アカウント設定" };
 
 const PLAN_DISPLAY = {
-  FREE: "無料",
-  COMMENT: `Plusプラン（¥${PLAN_PRICES[PLANS.COMMENT]}/月）`,
-  FACTCHECK: `Proプラン（¥${PLAN_PRICES[PLANS.FACTCHECK]}/月）`,
+  FREE: "無料（Newbie）",
+  COMMENT: `Plus（¥${PLAN_PRICES[PLANS.COMMENT]}/月）`,
+  FACTCHECK: `Pro（¥${PLAN_PRICES[PLANS.FACTCHECK]}/月）`,
 } as const;
 
 export default async function AccountPage() {
@@ -23,12 +26,18 @@ export default async function AccountPage() {
 
   const profile = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { bio: true, avatarEmoji: true },
+    select: { bio: true },
   });
+
+  const { visibleCommentCount: commentCount, totalLikes } = await getUserPublicStats(
+    session.user.id,
+  );
+  const progress = reputationProgress(session.user.plan, commentCount);
+  const likeProgress = likeTitleProgress(totalLikes);
 
   return (
     <PageContainer>
-      <div className="grid gap-8 lg:grid-cols-[1fr_260px]">
+      <div className="grid gap-8 lg:grid-cols-[1fr_300px]">
         <div className="min-w-0 max-w-content">
           <header className="mb-8">
             <h1 className="text-2xl font-extrabold tracking-tight text-ink">アカウント設定</h1>
@@ -36,11 +45,35 @@ export default async function AccountPage() {
 
           <div className="space-y-6">
             <Section>
-              <h2 className="mb-4 text-base font-bold text-ink">プロフィール</h2>
+              <h2 className="mb-4 text-base font-bold text-ink">公開プロフィール</h2>
+              <div className="mb-4 rounded-md border border-border bg-surface-muted/50 px-4 py-3">
+                <UserDisplayName
+                  userId={session.user.id}
+                  name={session.user.name ?? "名無し"}
+                  plan={session.user.plan}
+                  commentCount={commentCount}
+                  totalLikes={totalLikes}
+                  variant="profile"
+                  nameClassName="text-base"
+                />
+                {profile?.bio && (
+                  <p className="mt-1 text-sm text-ink-muted">{profile.bio}</p>
+                )}
+                <p className="mt-2 text-xs text-ink-faint">
+                  有効コメント {commentCount} 件 · 累計 like {totalLikes}
+                  {progress.next && progress.commentsToNext !== null
+                    ? ` · 次の tier（${progress.next.label}）まであと ${progress.commentsToNext} 件`
+                    : " · tier 最高到達"}
+                  {likeProgress.next && likeProgress.likesToNext !== null
+                    ? ` · 次の称号（${likeProgress.next.label}）まであと ${likeProgress.likesToNext} like`
+                    : likeProgress.current
+                      ? " · like 称号最高到達"
+                      : ""}
+                </p>
+              </div>
               <ProfileEditForm
                 initialName={session.user.name ?? ""}
                 initialBio={profile?.bio ?? ""}
-                initialAvatarEmoji={profile?.avatarEmoji ?? null}
               />
               <Link
                 href={`/u/${session.user.id}`}
@@ -70,6 +103,21 @@ export default async function AccountPage() {
                 プランを変更する →
               </Link>
             </Section>
+
+            {session.user.isAdmin && (
+              <Section>
+                <h2 className="mb-2 text-base font-bold text-ink">運営ツール</h2>
+                <p className="mb-4 text-sm text-ink-muted">
+                  争点の非公開・通報・異議申立の確認はこちらから。
+                </p>
+                <Link
+                  href="/admin"
+                  className="inline-flex items-center rounded-md border border-border bg-surface-raised px-4 py-2.5 text-sm font-semibold text-ink no-underline transition hover:bg-surface-muted"
+                >
+                  管理ダッシュボードを開く →
+                </Link>
+              </Section>
+            )}
 
             <Section className="border-against/20">
               <h2 className="mb-3 text-base font-bold text-ink">退会</h2>

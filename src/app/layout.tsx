@@ -4,6 +4,8 @@ import { BottomNav } from "@/components/layout/bottom-nav";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
 import { ThemeProvider } from "@/components/theme-provider";
+import { SITE } from "@/lib/constants";
+import { Suspense } from "react";
 import "./globals.css";
 
 const notoSans = Noto_Sans_JP({
@@ -14,17 +16,16 @@ const notoSans = Noto_Sans_JP({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://factbase.tokyo"),
+  metadataBase: new URL(SITE.url),
   title: {
-    default: "FactBase — 一次情報で、日本の議論をクリーンに",
-    template: "%s | FactBase",
+    default: SITE.fullName,
+    template: `%s | ${SITE.name}`,
   },
-  description:
-    "時事・政治・経済・金融・法律などの一次情報にもとづき、冷静に投票・議論できるプラットフォーム。誹謗中傷のない、透明な議論の場。",
+  description: SITE.description,
   openGraph: {
     type: "website",
     locale: "ja_JP",
-    siteName: "FactBase",
+    siteName: SITE.fullName,
   },
 };
 
@@ -41,10 +42,24 @@ export default function RootLayout({
     >
       <body className="min-h-screen flex flex-col">
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
-          <SiteHeader />
-          <main className="flex-1 pb-16 sm:pb-0">{children}</main>
+          <Suspense
+            fallback={
+              <header className="sticky top-0 z-50 border-b border-border bg-surface/95 backdrop-blur-md">
+                <div className="mx-auto flex h-12 max-w-wide items-center px-3 lg:h-14 lg:px-page">
+                  <span className="text-base font-extrabold tracking-tighter text-ink lg:text-lg">
+                    {SITE.displayName}
+                  </span>
+                </div>
+              </header>
+            }
+          >
+            <SiteHeader />
+          </Suspense>
+          <main className="flex-1 pb-16 lg:pb-0">{children}</main>
           <SiteFooter />
-          <BottomNav />
+          <Suspense fallback={null}>
+            <BottomNav />
+          </Suspense>
         </ThemeProvider>
       </body>
     </html>

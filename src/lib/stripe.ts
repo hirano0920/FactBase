@@ -7,7 +7,11 @@ export function getStripe(): Stripe {
   if (!globalForStripe.stripe) {
     const key = process.env.STRIPE_SECRET_KEY;
     if (!key) throw new Error("STRIPE_SECRET_KEY is not set");
-    globalForStripe.stripe = new Stripe(key);
+    globalForStripe.stripe = new Stripe(key, {
+      // デフォルトのNode httpエージェント（持続的TCP接続）はCloudflare Workersで
+      // ハングする。Workersがネイティブにサポートするfetchベースに切り替える。
+      httpClient: Stripe.createFetchHttpClient(),
+    });
   }
   return globalForStripe.stripe;
 }

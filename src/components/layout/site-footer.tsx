@@ -2,7 +2,7 @@ import Link from "next/link";
 import { SITE } from "@/lib/constants";
 
 const FOOTER_LINKS = [
-  { href: "/about", label: "About" },
+  { href: "/about", label: "FactBaseを知る" },
   { href: "/transparency", label: "透明性" },
   { href: "/security", label: "セキュリティ" },
   { href: "/pricing", label: "料金" },
@@ -22,7 +22,11 @@ export function SiteFooter() {
             <p className="mt-2 text-sm leading-relaxed text-ink-muted">
               {SITE.tagline}
               <br />
-              中国製AIは使用しません。サーバーは日本国内。
+              サーバーは日本国内。使用AIの詳細は
+              <Link href="/transparency" className="text-ink-secondary hover:text-ink">
+                透明性ページ
+              </Link>
+              へ。
             </p>
           </div>
 

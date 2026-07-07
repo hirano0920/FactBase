@@ -42,3 +42,11 @@ next-env.d.ts
 # prisma
 prisma/*.db
 prisma/*.db-journal
+
+# OpenNext
+.open-next
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example

@@ -1,8 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getClientCountryFromHeaders, isDomesticAccessForMiddleware, isGeoFenceEnabled } from "@/lib/geo";
 
-/** Webhook・ヘルスチェック等は国判定の対象外 */
-const GEO_EXEMPT_PREFIXES = ["/api/stripe/webhook", "/api/health", "/access-denied"];
+/** Webhook・認証コールバック・ヘルスチェック等は国判定の対象外 */
+const GEO_EXEMPT_PREFIXES = [
+  "/auth",
+  "/api/stripe/webhook",
+  "/api/health",
+  "/access-denied",
+];
 
 export function middleware(req: NextRequest) {
   if (!isGeoFenceEnabled()) return NextResponse.next();
@@ -39,6 +44,7 @@ export function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    // API（OAuthコールバック等）はミドルウェア対象外 — 応答遅延・固まり防止
+    "/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

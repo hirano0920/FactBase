@@ -1,8 +1,9 @@
 import { auth } from "@/auth";
-import { PageContainer } from "@/components/layout/page-container";
 import { CheckoutButton } from "@/components/pricing/checkout-button";
+import { PlusTrialPromo } from "@/components/pricing/plus-trial-promo";
 import { ManagePlanButton } from "@/components/pricing/manage-plan-button";
-import { PLAN_PRICES, PLANS } from "@/lib/constants";
+import { PageContainer } from "@/components/layout/page-container";
+import { FC_DAILY_LIMITS, PLAN_PRICES, PLANS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
 export const metadata = {
@@ -17,8 +18,8 @@ const PLANS_DISPLAY = [
     icon: "🆓",
     price: "¥0",
     tagline: "まずはここから",
-    features: ["争点・記事の閲覧", "投票・共感"],
-    locked: ["コメント投稿", "ワンタップFC", "広告なし"],
+    features: ["スレッド・記事の閲覧", "投票", "ログインでコメント投稿"],
+    locked: ["ワンタップFC", "広告非表示"],
   },
   {
     id: PLANS.COMMENT,
@@ -26,9 +27,12 @@ const PLANS_DISPLAY = [
     name: "FactBase Plus",
     icon: "💬",
     price: PLAN_PRICES[PLANS.COMMENT],
-    tagline: "議論に参加する",
-    features: ["無料のすべて", "コメント投稿", "広告なし"],
-    locked: ["ワンタップFC"],
+    tagline: "主張をすぐ検証",
+    features: [
+      "無料のすべて",
+      `ワンタップFC（1日${FC_DAILY_LIMITS.COMMENT}回）`,
+    ],
+    locked: ["広告非表示"],
     highlighted: true,
   },
   {
@@ -38,10 +42,14 @@ const PLANS_DISPLAY = [
     icon: "👑",
     price: PLAN_PRICES[PLANS.FACTCHECK],
     tagline: "本気で見極める",
-    features: ["Plusのすべて", "ワンタップファクトチェック", "広告なし"],
+    features: [
+      "無料のすべて",
+      `ワンタップFC（1日${FC_DAILY_LIMITS.FACTCHECK}回）`,
+      "広告非表示",
+    ],
     locked: [],
     premium: true,
-    footnote: "※ワンタップファクトチェックは1日30回まで",
+    footnote: `※ワンタップFCはPlus 1日${FC_DAILY_LIMITS.COMMENT}回 / Pro 1日${FC_DAILY_LIMITS.FACTCHECK}回`,
   },
 ] as const;
 
@@ -59,12 +67,15 @@ export default async function PricingPage({ searchParams }: PricingPageProps) {
       <header className="mb-10 text-center">
         <p className="mb-2 text-xs font-extrabold tracking-widest text-warm">✨ FACTBASE PLUS/PRO</p>
         <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">
-          もっと深く、もっと自由に。
+          議論は無料。検証はPlus / Pro。
         </h1>
         <p className="mx-auto mt-3 max-w-md text-ink-muted">
-          閲覧と投票は無料。有料プランは3日間無料で試せます。
+          投票・コメントはログインすれば無料。ワンタップFCと広告非表示は
+          <strong className="text-ink"> Plus / Pro</strong>（3日間無料体験あり）。
         </p>
       </header>
+
+      <PlusTrialPromo className="mb-8" />
 
       {status === "success" && (
         <p className="mb-8 rounded-md border border-for/30 bg-for-muted px-4 py-3 text-center text-sm text-for">
@@ -94,9 +105,14 @@ export default async function PricingPage({ searchParams }: PricingPageProps) {
                     : "border-border bg-surface-raised",
               )}
             >
-              {premium && (
+              {plan.dbPlan !== "FREE" && (
                 <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-warm px-3 py-1 text-xs font-extrabold text-white shadow-card">
-                  👑 おすすめ
+                  3日間無料
+                </span>
+              )}
+              {premium && (
+                <span className="absolute -top-3 right-4 rounded-full border border-warm/30 bg-surface-raised px-2 py-0.5 text-[10px] font-bold text-warm-hover">
+                  おすすめ
                 </span>
               )}
 
@@ -134,6 +150,17 @@ export default async function PricingPage({ searchParams }: PricingPageProps) {
                 ))}
               </ul>
 
+              {plan.dbPlan === "FREE" && (
+                <p className="mt-4 text-xs text-ink-faint">※無料プランは広告が表示されます</p>
+              )}
+              {plan.dbPlan === "COMMENT" && (
+                <p className="mt-4 text-xs text-ink-faint">※Plusプランは広告が表示されます</p>
+              )}
+
+              {plan.dbPlan !== "FREE" && (
+                <p className="mt-4 text-center text-xs font-bold text-warm-hover">3日間無料体験付き</p>
+              )}
+
               {plan.dbPlan !== "FREE" && (
                 <div className="mt-6">
                   <CheckoutButton
@@ -142,12 +169,6 @@ export default async function PricingPage({ searchParams }: PricingPageProps) {
                     isCurrent={currentPlan === plan.dbPlan}
                   />
                 </div>
-              )}
-
-              {"footnote" in plan && plan.footnote && (
-                <p className={cn("mt-3 text-[11px]", premium ? "text-surface/50" : "text-ink-faint")}>
-                  {plan.footnote}
-                </p>
               )}
             </div>
           );

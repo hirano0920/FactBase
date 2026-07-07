@@ -1,23 +1,20 @@
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
-import Twitter from "next-auth/providers/twitter";
-import { PrismaAdapter } from "@auth/prisma-adapter";
 import { headers } from "next/headers";
-import { prisma } from "@/lib/prisma";
 import { isAdminEmail } from "@/lib/admin-emails";
+import {
+  checkRegistrationIpNeon,
+  ensureOAuthUser,
+  findUserByOAuth,
+} from "@/lib/auth-store";
 import { kv } from "@/lib/redis";
 import {
   getClientCountryFromHeaders,
   getClientIpFromHeaders,
   isDomesticAccessForRegistration,
   registrationCtxKey,
-  registrationIpKey,
 } from "@/lib/geo";
-import {
-  checkRegistrationIp,
-  isRegistrationIpGuardEnabled,
-  registrationIpLockTtlSec,
-} from "@/lib/registration-guard";
+import { isRegistrationIpGuardEnabled } from "@/lib/registration-guard";
 import type { Plan } from "@prisma/client";
 
 declare module "next-auth" {
@@ -35,13 +32,11 @@ declare module "next-auth" {
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  adapter: PrismaAdapter(prisma),
-  session: { strategy: "database" },
+  basePath: "/auth",
+  trustHost: true,
+  session: { strategy: "jwt", maxAge: 30 * 24 * 3600 },
   providers: [
     Google({
-      allowDangerousEmailAccountLinking: false,
-    }),
-    Twitter({
       allowDangerousEmailAccountLinking: false,
     }),
   ],
@@ -53,15 +48,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async signIn({ account }) {
       if (!account) return false;
 
-      const existing = await prisma.account.findUnique({
-        where: {
-          provider_providerAccountId: {
-            provider: account.provider,
-            providerAccountId: account.providerAccountId,
-          },
-        },
-        select: { id: true },
-      });
+      const existing = await findUserByOAuth(account.provider, account.providerAccountId);
       if (existing) return true;
 
       const h = await headers();
@@ -73,7 +60,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
       if (isRegistrationIpGuardEnabled()) {
         const ip = getClientIpFromHeaders(h);
-        const ipCheck = await checkRegistrationIp(ip);
+        const ipCheck = await checkRegistrationIpNeon(ip);
         if (ipCheck === "ip_limit") {
           console.warn(`[auth] registration blocked for ip=${ip}`);
           return "/login?error=IpLimit";
@@ -90,46 +77,40 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
       return true;
     },
-    session({ session, user }) {
-      session.user.id = user.id;
-      const dbUser = user as typeof user & { plan: Plan; createdAt: Date };
-      session.user.plan = dbUser.plan;
-      session.user.createdAt = dbUser.createdAt;
-      session.user.isAdmin = isAdminEmail(session.user.email);
-      return session;
-    },
-  },
-  events: {
-    async linkAccount({ user, account }) {
-      const ctxKey = registrationCtxKey(account.provider, account.providerAccountId);
-      const raw = await kv.get(ctxKey);
-      if (!raw) return;
-
-      let ip: string;
-      let country: string | null;
-      try {
-        ({ ip, country } = JSON.parse(raw) as { ip: string; country: string | null });
-      } catch {
-        await kv.set(ctxKey, "", { ex: 1 });
-        return;
-      }
-
-      try {
-        await prisma.user.update({
-          where: { id: user.id },
-          data: {
-            registrationIp: ip,
-            registrationCountry: country,
-          },
-        });
-        if (ip !== "unknown") {
-          await kv.set(registrationIpKey(ip), user.id!, { ex: registrationIpLockTtlSec() });
+    async jwt({ token, account, profile }) {
+      if (account && profile) {
+        let registration: { ip: string; country: string | null } | undefined;
+        const ctxKey = registrationCtxKey(account.provider, account.providerAccountId);
+        const raw = await kv.get(ctxKey);
+        if (raw) {
+          try {
+            registration = JSON.parse(raw) as { ip: string; country: string | null };
+          } catch {
+            /* ignore */
+          } finally {
+            await kv.set(ctxKey, "", { ex: 1 });
+          }
         }
-      } catch (e) {
-        console.error("[auth] registrationIp persist failed", e);
-      } finally {
-        await kv.set(ctxKey, "", { ex: 1 });
+
+        const dbUser = await ensureOAuthUser(account, profile, registration);
+        token.sub = dbUser.id;
+        token.plan = dbUser.plan;
+        token.createdAt = dbUser.createdAt.toISOString();
+        token.isAdmin = isAdminEmail(dbUser.email);
       }
+      return token;
+    },
+    session({ session, token }) {
+      if (session.user && token.sub) {
+        const createdAt =
+          typeof token.createdAt === "string" ? new Date(token.createdAt) : new Date();
+        session.user.id = token.sub;
+        session.user.plan =
+          typeof token.plan === "string" ? (token.plan as Plan) : "FREE";
+        session.user.createdAt = createdAt;
+        session.user.isAdmin = token.isAdmin === true;
+      }
+      return session;
     },
   },
 });

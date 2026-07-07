@@ -1,13 +1,13 @@
 # FactBase Radar — 検知〜速報公開〜GPT-5まとめの定期実行。
-# 15分間隔 = 1日96回。publicリポジトリならGitHub Actionsは無料（無制限分数）なのでこの間隔にしている。
-# privateリポジトリの場合はActions分数が課金対象（1回2〜3分 × 96回/日 ≈ 200〜300分/日）。
-# 無料枠(Free: 2,000分/月, Pro: 3,000分/月)を超える可能性があるので、privateのままなら
-# */30 に戻すか、リポジトリをpublicにするか判断すること。
+# publicリポジトリならGitHub Actionsは無料（無制限分数）。
+# 日中(JST 06:00-24:00)は15分間隔、深夜(JST 00:00-06:00)は誰も見ていない前提で
+# 30分間隔に間引いている（cronはUTC基準: JST 00:00-06:00 = UTC 15:00-20:59）。
 name: FactBase Radar
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/15 21-23,0-14 * * *" # JST 06:00-24:00（日中・活発時間帯）
+    - cron: "*/30 15-20 * * *" # JST 00:00-06:00（深夜・間引き）
   workflow_dispatch: {}
 
 concurrency:
@@ -29,6 +29,18 @@ jobs:
       - run: npm ci
       - run: npx prisma generate
 
+      - name: "Discover: buzz-driven topic research (Diet/law/news)"
+        env:
+          DATABASE_URL: ${{ secrets.DIRECT_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          RADAR_TOPIC_FILTER_MODEL: ${{ secrets.RADAR_TOPIC_FILTER_MODEL }}
+          RADAR_ALERT_WEBHOOK_URL: ${{ secrets.RADAR_ALERT_WEBHOOK_URL }}
+          YOUTUBE_DATA_API_KEY: ${{ secrets.YOUTUBE_DATA_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+        run: npx tsx scripts/radar/discover.ts
+
       - name: Detect & publish breaking issues
         env:
           DATABASE_URL: ${{ secrets.DIRECT_URL }}
@@ -40,6 +52,8 @@ jobs:
           RADAR_ALERT_WEBHOOK_URL: ${{ secrets.RADAR_ALERT_WEBHOOK_URL }}
           RADAR_INTERNAL_SECRET: ${{ secrets.RADAR_INTERNAL_SECRET }}
           AUTH_URL: ${{ secrets.AUTH_URL }}
+          YOUTUBE_DATA_API_KEY: ${{ secrets.YOUTUBE_DATA_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
         run: npx tsx scripts/radar/detect.ts
 
       - name: Generate Level-2 summaries (GPT-5)
@@ -52,6 +66,7 @@ jobs:
           RADAR_ALERT_WEBHOOK_URL: ${{ secrets.RADAR_ALERT_WEBHOOK_URL }}
           RADAR_INTERNAL_SECRET: ${{ secrets.RADAR_INTERNAL_SECRET }}
           AUTH_URL: ${{ secrets.AUTH_URL }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
         run: npx tsx scripts/radar/summarize.ts
 
       - name: "Follow-up: link new events & refresh live articles"
@@ -64,4 +79,16 @@ jobs:
           RADAR_ALERT_WEBHOOK_URL: ${{ secrets.RADAR_ALERT_WEBHOOK_URL }}
           RADAR_INTERNAL_SECRET: ${{ secrets.RADAR_INTERNAL_SECRET }}
           AUTH_URL: ${{ secrets.AUTH_URL }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
         run: npx tsx scripts/radar/followup.ts
+
+      - name: "Promote: publish buzz-driven articles at peak times"
+        env:
+          DATABASE_URL: ${{ secrets.DIRECT_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          RADAR_ALERT_WEBHOOK_URL: ${{ secrets.RADAR_ALERT_WEBHOOK_URL }}
+          RADAR_INTERNAL_SECRET: ${{ secrets.RADAR_INTERNAL_SECRET }}
+          AUTH_URL: ${{ secrets.AUTH_URL }}
+        run: npx tsx scripts/radar/promote.ts

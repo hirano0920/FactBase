@@ -15,7 +15,7 @@ export function CheckoutButton({ plan, isLoggedIn, isCurrent }: CheckoutButtonPr
 
   const handleClick = useCallback(async () => {
     if (!isLoggedIn) {
-      window.location.href = "/login";
+      window.location.href = "/login?redirect=/pricing&intent=checkout";
       return;
     }
     setPending(true);
@@ -50,7 +50,7 @@ export function CheckoutButton({ plan, isLoggedIn, isCurrent }: CheckoutButtonPr
   return (
     <div>
       <Button variant="primary" size="md" fullWidth disabled={pending} onClick={handleClick}>
-        {pending ? "手続き中…" : "このプランにする"}
+        {pending ? "手続き中…" : "3日間無料で試す"}
       </Button>
       {error && (
         <p role="alert" className="mt-2 text-xs text-against">

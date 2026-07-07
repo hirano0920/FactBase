@@ -6,7 +6,7 @@
  */
 import OpenAI from "openai";
 import { z } from "zod";
-import { AI_MODELS } from "@/lib/constants";
+import { AI_MODELS, RADAR } from "@/lib/constants";
 import { createOpenAIClient } from "@/lib/openai-client";
 import type { FcVerdict } from "@prisma/client";
 
@@ -312,9 +312,16 @@ politics / economy / law / finance / rights / education / international
 - disaster: 大規模災害（震度6弱以上の地震・津波・噴火・特別警報級の台風豪雨・大規模火災/山火事等。震度5以下や日常の天気は対象外）
 - health_medical: 医療・健康
 
-# question（投票設問）
-クラスタごとに、当事者以外の一般ユーザーも自分の意見を持てる中立的な投票設問タイトルを作る（40字以内）。
-見出しの丸写しではなく「〜、あなたはどう見る？」のように当事者意識を持てる問いかけ調を優先する。
+# question（争点タイトル＝一覧で最初に見える見出し）
+55字以内・必ず日本語。
+1) **何が起きたか**（数値・法案名・決定内容）を入れる
+2) **一般の人の「自分ごと」**が伝わるフックを入れる（生活・お金・安全・仕事・税金・子ども等への影響）
+ wire見出しだけで終わらない。「だから何？」とならないこと。
+- 悪:「EU、2030年再エネ50%目標を表明——支持？」→ 専門家向け、一般人はスルー
+- 良:「欧州の再エネ半分宣言——日本の電気代に波及？」
+- 良:「日銀利上げ、住宅ローンはどうなる？」
+- 良:「入管法改正可決——在日外国人増で生活変わる？」
+抽象語だけ（「EU公式発表」「声明をどう見る」）は禁止。
 
 choicesは常にfor/against/undecidedの3キーで返すが、文言は実際の対立軸に合わせてAIが自由に作ってよい
 （「賛成/反対」に無理にはめ込まない）。
@@ -415,4 +422,234 @@ export async function classifyHeadlines(
   return parsed.clusters.filter(
     (c) => c.title && Array.isArray(c.member_indices) && c.member_indices.length > 0,
   );
+}
+
+/**
+ * Radar 能動調査の関連性判定（②）。
+ * バズ検知した急上昇ワード群を受け取り、政治・法律・行政・社会問題として調査に値するものだけを通す。
+ * ゴシップ・スポーツ・純芸能・広告は捨てる。表記ゆれ（国旗損壊/国旗損壊罪/日の丸）は
+ * 検索に使いやすい正規トピック語に統合する。これが「バズってても関係ない話題はスルー」の実体。
+ */
+const TOPIC_FILTER_PROMPT = `あなたは日本の政治・経済・法律・行政・社会問題に特化したニュース編集デスクです。
+ネットで急上昇・話題になっている検索ワード群を受け取ります。この中から
+「一次情報（国会審議・法令・政府発表・裁判等）を調べて整理する価値がある社会的争点」だけを選び、
+検索に使いやすい正規トピック語に整えてください。
+
+# 通す（relevant=true）
+時事問題、政治・選挙・政治家の問題、国会・法律・法令、行政・政策、
+経済・財政・金融・為替・税金、外交・安保・国際情勢・戦争/紛争、
+歴史問題、人権問題、外国人・移民・入管の問題、司法/裁判、
+災害/事故で公共的対応が問われるもの。
+→ これらに関わる争点は、SNSでバズっていても報道で読まれていても積極的に拾う。
+
+# 捨てる（relevant=false）
+芸能人のゴシップ・熱愛・結婚離婚、スポーツの試合結果、アニメ/ゲーム/グッズ、テレビ番組の感想、
+天気、商品セール・広告、個人の炎上で公共性のないもの。判断に迷うレベルの弱いものも false。
+
+# 正規トピック語（topic）
+- 表記ゆれ・ハッシュタグ・略称を、検索でヒットしやすい簡潔な名詞句に直す（例:「#国旗損壊」→「国旗損壊罪」）。
+- 同じ出来事を指す複数ワードは1つのtopicに統合してよい（入力の複数termを1件にまとめる）。
+- 固有名詞のみで文脈が不明なものは、分かる範囲で争点名にする。不明なら relevant=false。
+
+# category（relevant=trueのみ。いずれか1つ）
+politics / economy / law / finance / rights / education / international / society
+
+# question・choices（relevant=trueのみ）
+当事者以外の一般ユーザーも自分の意見を持てる中立的な投票設問を作る（40字以内・必ず日本語）。
+「あなたはどう見る？」だけに偏らず、争点に合わせて言い回しを変える（例:「〜、賛成ですか？」「〜、妥当だと思いますか？」「〜への対応、十分ですか？」）。
+choicesは常にfor/against/undecidedの3キーで返すが、文言は実際の対立軸に合わせて自由に作ってよい
+（賛成/反対が不自然な話題は、実際に対立する2つの立場をfor/againstに当て、undecidedは
+「どちらとも言えない」「判断に必要な情報がまだ足りない」等にする）。
+断定・煽り・一方の立場に不利な言葉選びは禁止。
+
+必ずJSONのみ:
+{"topics": [{"topic": "正規トピック語", "relevant": true, "category": "law", "reason": "判断理由(40字以内)",
+  "question": "投票設問", "choices": {"for": "...", "against": "...", "undecided": "..."}}]}`;
+
+const TOPIC_FILTER_SCHEMA = z.object({
+  topics: z
+    .array(
+      z.object({
+        topic: z.string(),
+        relevant: z.boolean(),
+        category: z.string().optional().default(""),
+        reason: z.string().optional().default(""),
+        question: z.string().optional().default(""),
+        choices: z
+          .object({ for: z.string(), against: z.string(), undecided: z.string() })
+          .optional()
+          .default({ for: "", against: "", undecided: "" }),
+      }),
+    )
+    .optional()
+    .default([]),
+});
+
+export interface RelevantTopic {
+  topic: string;
+  relevant: boolean;
+  category: string;
+  reason: string;
+  question: string;
+  choices: { for: string; against: string; undecided: string };
+}
+
+/**
+ * 急上昇ワード群 → 調査に値する正規トピックだけを返す（discover 時間帯のみ・1実行1回）。
+ * sustained（継続的に話題）フラグはプロンプトのヒントとして併記する。
+ * モデルは gpt-5-mini（RADAR_TOPIC_FILTER_MODEL）。detect の classifyHeadlines は nano のまま。
+ */
+export async function filterRelevantTopics(
+  terms: { term: string; sustained?: boolean }[],
+): Promise<RelevantTopic[]> {
+  const capped = terms.slice(0, RADAR.topicFilterMaxTerms);
+  if (capped.length === 0) return [];
+  const list = capped
+    .map((t) => `- ${t.term}${t.sustained ? "（継続的に話題）" : ""}`)
+    .join("\n");
+  const res = await getOpenAIRadar().chat.completions.create({
+    model: process.env.RADAR_TOPIC_FILTER_MODEL || AI_MODELS.topicFilter,
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: TOPIC_FILTER_PROMPT },
+      { role: "user", content: `# 急上昇・話題の検索ワード\n${list}` },
+    ],
+  });
+  const parsed = safeParseJson(res.choices[0]?.message?.content ?? "{}", TOPIC_FILTER_SCHEMA);
+  return parsed.topics
+    .filter((t) => t.relevant && t.topic.trim().length >= 2)
+    .map((t) => ({
+      topic: t.topic.trim(),
+      relevant: true,
+      category: t.category.trim(),
+      reason: t.reason.trim(),
+      question: t.question.trim() || `${t.topic.trim()}、賛成ですか？`,
+      choices: {
+        for: t.choices.for.trim() || "支持する",
+        against: t.choices.against.trim() || "支持しない",
+        undecided: t.choices.undecided.trim() || "わからない",
+      },
+    }));
+}
+
+const ISSUE_TITLE_PROMPT = `あなたはFactBaseの編集デスクです。争点一覧に載るタイトル（55字以内・日本語）を1つ作ります。
+
+# 読者
+政治に詳しくない一般ユーザー（90%）。スクロール中に「自分に関係あるか」で止まるか決める。
+
+# 最重要
+1. **何が起きたか**を具体的に（数値・政策名・決定）
+2. **だから何？＝自分ごと**を1フレーズで（生活・電気代・物価・税金・ローン・給料・医療・子ども・安全・仕事・貿易・円など）
+3. 事実以外の憶測・デマ・煽りは禁止。一次資料・見出しにある内容だけ
+
+# 例
+- 悪:「EU、2030年までに再エネ50%目標を表明——支持？」→ 正確だが「自分に関係ない」
+- 良:「欧州の再エネ半分宣言——日本の電気代に波及？」
+- 良:「日銀利上げ、住宅ローン負担は増える？」
+- 良:「入管法改正可決——地域の生活・治安は変わる？」
+- 悪:「EUのエネルギー政策声明、妥当？」→ 中身不明
+
+# 形式
+- 「出来事＋自分ごとフック」の1行。末尾の？で問いかけてよい
+- 「声明」「発表」「公式」だけで終わらない
+- JSONのみ: {"title": "..."}`;
+
+const ISSUE_TITLE_SCHEMA = z.object({ title: z.string().optional().default("") });
+
+export interface PrimaryExcerptForTitle {
+  title: string;
+  text: string;
+}
+
+export interface ComposeIssueTitleInput {
+  clusterTitle: string;
+  question: string;
+  sourceTitles: string[];
+  classification: string;
+  category: string;
+  /** OFFICIAL争点では一次資料本文を渡す（タイトルの具体性に必須） */
+  primaryExcerpts?: PrimaryExcerptForTitle[];
+}
+
+/** 見出し・一次資料から、具体的な日本語争点タイトルを生成（nano・1争点1回） */
+export async function composeIssueTitle(input: ComposeIssueTitleInput): Promise<string> {
+  const sources = input.sourceTitles.slice(0, 5).join("\n");
+  const excerptBlock =
+    input.primaryExcerpts && input.primaryExcerpts.length > 0
+      ? `\n\n一次資料抜粋（タイトル作成の主材料）:\n${input.primaryExcerpts
+          .slice(0, 3)
+          .map((e, i) => `【${i + 1}】${e.title}\n${e.text.slice(0, 600)}`)
+          .join("\n---\n")}`
+      : "";
+  const res = await getOpenAIRadar().chat.completions.create({
+    model: process.env.RADAR_CLASSIFY_MODEL || AI_MODELS.utility,
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: ISSUE_TITLE_PROMPT },
+      {
+        role: "user",
+        content: `分類: ${input.classification} / ${input.category}
+クラスタ題: ${input.clusterTitle}
+既存の設問: ${input.question || "（なし）"}
+参考見出し:
+${sources}${excerptBlock}`,
+      },
+    ],
+  });
+  const parsed = safeParseJson(res.choices[0]?.message?.content ?? "{}", ISSUE_TITLE_SCHEMA);
+  return parsed.title.trim();
+}
+
+const CLAIM_VERIFY_PROMPT = `あなたは記事の事実確認の照合係です。記事が主張ごとに「根拠にした資料抜粋」とペアで渡されます。
+各主張について、対応する資料抜粋に本当にその内容が書かれているかだけを機械的に判定してください。
+
+# 判定基準
+- 言い換え・要約による表現の違いは許容する（同じ事実を指していればsupported=true）
+- 資料抜粋に無い固有名詞・数値・日付・断定的な結論が主張に含まれていればsupported=false
+- 資料抜粋が主張と無関係、または主張の方が資料より強い/踏み込んだ内容ならsupported=false
+- 文章の巧拙・重要性・書き方の良し悪しは判定に含めない。「書かれているか否か」だけを見る
+
+必ずJSONのみ:
+{"results": [{"id": "...", "supported": true}]}`;
+
+const CLAIM_VERIFY_SCHEMA = z.object({
+  results: z
+    .array(z.object({ id: z.string(), supported: z.boolean().optional().default(false) }))
+    .optional()
+    .default([]),
+});
+
+export interface ClaimToVerify {
+  id: string;
+  claim: string;
+  sourceExcerpt: string;
+}
+
+export interface ClaimVerifyResult {
+  id: string;
+  supported: boolean;
+}
+
+/**
+ * 記事内の主張が、根拠として提示した資料抜粋に実際に書かれているかを機械的に照合する（nano・バッチ1回）。
+ * 執筆(GPT-5)とは別プロセスで、閉じたyes/no判定だけを行う「検証エージェント」。
+ * 同じモデルに書かせて同じモデルに自己採点させる循環を避けるため、判定は常にnanoの独立呼び出しにする。
+ */
+export async function verifyClaimsAgainstSources(items: ClaimToVerify[]): Promise<ClaimVerifyResult[]> {
+  if (items.length === 0) return [];
+  const list = items
+    .map((c) => `【${c.id}】\n主張: ${c.claim}\n資料抜粋: ${c.sourceExcerpt.slice(0, 800)}`)
+    .join("\n---\n");
+  const res = await getOpenAIRadar().chat.completions.create({
+    model: process.env.RADAR_CLASSIFY_MODEL || AI_MODELS.utility,
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: CLAIM_VERIFY_PROMPT },
+      { role: "user", content: list },
+    ],
+  });
+  const parsed = safeParseJson(res.choices[0]?.message?.content ?? "{}", CLAIM_VERIFY_SCHEMA);
+  const byId = new Map(parsed.results.map((r) => [r.id, r.supported]));
+  // 応答に含まれないid（パース崩れ等）は安全側でsupported=falseにする
+  return items.map((c) => ({ id: c.id, supported: byId.get(c.id) ?? false }));
 }

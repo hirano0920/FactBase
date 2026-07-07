@@ -8,6 +8,7 @@ import {
   globalTimelineVerKey,
   issuesListCacheKey,
   kv,
+  rankingBySortCacheKey,
   rankingCacheKey,
   rankingWeeklyCacheKey,
   timelineVerKey,
@@ -25,6 +26,8 @@ export async function invalidateRankingCaches(): Promise<void> {
   await Promise.all([
     safe(kv.del(rankingCacheKey())),
     safe(kv.del(rankingWeeklyCacheKey())),
+    safe(kv.del(rankingBySortCacheKey("comments"))),
+    safe(kv.del(rankingBySortCacheKey("votes"))),
   ]);
 }
 
@@ -83,11 +86,12 @@ export async function invalidateOnTimelineUpdated(issueId: string, slug?: string
   safeRevalidate(slug);
 }
 
-/** 争点公開・品質報告で underReview 等 */
+/** 争点公開・品質報告・非公開など */
 export async function invalidateOnIssueChanged(slug?: string): Promise<void> {
   await Promise.all([
     invalidateIssuesListCache(),
     invalidateRankingCaches(),
+    safe(kv.incr(globalTimelineVerKey())),
     slug ? safe(invalidateCachedIssue(slug)) : Promise.resolve(),
   ]);
   safeRevalidate(slug);

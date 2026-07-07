@@ -11,6 +11,8 @@ interface VotePanelLiveProps {
   initialUserVote: VoteChoiceId | null;
   isLoggedIn: boolean;
   labels?: import("@/types").VoteLabels | null;
+  /** その争点で初めて投票した瞬間にだけ呼ばれる（投票直後のコメント導線用） */
+  onFirstVote?: (choice: VoteChoiceId) => void;
 }
 
 /**
@@ -25,6 +27,7 @@ export function VotePanelLive({
   initialUserVote,
   isLoggedIn,
   labels,
+  onFirstVote,
 }: VotePanelLiveProps) {
   const [tally, setTally] = useState<VoteTally>(initialTally);
   const [userVote, setUserVote] = useState<VoteChoiceId | null>(initialUserVote);
@@ -35,6 +38,9 @@ export function VotePanelLive({
 
   useEffect(() => {
     mounted.current = true;
+    setTally(initialTally);
+    setUserVote(initialUserVote);
+    setError(null);
     const source = new EventSource(
       `/api/votes/stream?issueId=${encodeURIComponent(issueId)}`,
     );
@@ -50,7 +56,7 @@ export function VotePanelLive({
       mounted.current = false;
       source.close();
     };
-  }, [issueId]);
+  }, [issueId, initialTally, initialUserVote]);
 
   const handleVote = useCallback(
     async (choice: VoteChoiceId) => {
@@ -77,6 +83,7 @@ export function VotePanelLive({
         if (isFirstVote) {
           setCelebrate(true);
           setTimeout(() => mounted.current && setCelebrate(false), 1000);
+          onFirstVote?.(choice);
         }
       } catch {
         setError("通信に失敗しました。接続を確認してお試しください");
@@ -84,7 +91,7 @@ export function VotePanelLive({
         if (mounted.current) setPending(false);
       }
     },
-    [issueId, isLoggedIn, pending, userVote],
+    [issueId, isLoggedIn, onFirstVote, pending, userVote],
   );
 
   return (

@@ -45,7 +45,11 @@ class UpstashKv implements KvStore {
   }
 
   async get(key: string) {
-    return this.redis.get<string>(key);
+    const raw = await this.redis.get<unknown>(key);
+    if (raw == null) return null;
+    // Upstash は JSON 値をオブジェクトで返すことがある。JSON.parse 二重適用で落ちるのを防ぐ
+    if (typeof raw === "string") return raw;
+    return JSON.stringify(raw);
   }
 
   async set(key: string, value: string, opts?: { ex?: number }) {
@@ -167,10 +171,19 @@ export const voteSeedLockKey = (issueId: string) => `vote:seed:${issueId}`;
 export const issueSlugKey = (slug: string) => `issue:slug:${slug}`;
 export const rankingCacheKey = () => "cache:ranking:hot";
 export const rankingWeeklyCacheKey = () => "cache:ranking:weekly";
+/** /ranking ページ専用: 「Hotなスレ」(コメント数基準) / 「Hotな投票」(投票数基準) */
+export const rankingBySortCacheKey = (sortBy: "comments" | "votes") => `cache:ranking:by:${sortBy}`;
 export const issuesListCacheKey = () => "cache:issues:list";
 export const commentsVerKey = (issueId: string) => `cache:comments:ver:${issueId}`;
-export const commentsCacheKey = (issueId: string, ver: number, cursor: string, limit: number) =>
-  `cache:comments:${issueId}:${ver}:${cursor}:${limit}`;
+export const commentsCacheKey = (
+  issueId: string,
+  ver: number,
+  cursor: string,
+  limit: number,
+  sort: string = "new",
+) => `cache:comments:${issueId}:${ver}:${sort}:${cursor}:${limit}`;
+export const debateHighlightsCacheKey = (issueId: string, ver: number) =>
+  `cache:comments:highlights:${issueId}:${ver}`;
 export const timelineVerKey = (issueId: string) => `cache:timeline:ver:${issueId}`;
 export const timelineCacheKey = (issueId: string, ver: number) => `cache:timeline:${issueId}:${ver}`;
 export const globalTimelineVerKey = () => "cache:timeline:global:ver";
@@ -187,5 +200,15 @@ export async function getCacheVersion(verKey: string): Promise<number> {
     return 0;
   }
 }
+/** KV から JSON を安全に復元 */
+export function parseKvJson<T>(raw: string | null): T | null {
+  if (raw == null) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
 export const rateKey = (scope: string, id: string, windowSec: number) =>
   `rate:${scope}:${id}:${Math.floor(Date.now() / 1000 / windowSec)}`;

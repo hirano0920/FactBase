@@ -305,6 +305,12 @@ export function AdminDashboard() {
         <h1 className="text-2xl font-extrabold text-ink">管理ダッシュボード</h1>
         <p className="mt-2 text-sm text-ink-muted">
           争点の非公開・品質報告・コメント通報・異議申立をここで処理します。
+          <Link href="/admin/radar-pipeline" className="ml-2 text-link underline">
+            Radar トピック選定を見る →
+          </Link>
+          <Link href="/admin/domain-trust" className="ml-2 text-link underline">
+            ドメイン信頼度フィルタ →
+          </Link>
         </p>
         {toast && (
           <p className="mt-3 rounded-md border border-for/30 bg-for-muted px-3 py-2 text-sm text-for">

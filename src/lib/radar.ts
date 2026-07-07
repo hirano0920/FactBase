@@ -4,6 +4,8 @@
  * ハードブロック該当は点数に関係なく必ずHELD（人間確認必須）。
  */
 
+import { assembleBuzzScore } from "./buzz-cross-match";
+
 export interface ClusterInput {
   /** クラスタ内の見出し数 */
   eventCount: number;
@@ -15,10 +17,15 @@ export interface ClusterInput {
   maxTrustWeight: number;
   /** nano分類が返した危険シグナル */
   riskFlags: string[];
-  /** Google Trends急上昇ワードと一致するか（検索需要が実際に急増しているシグナル） */
+  /** Google Trends急上昇ワード・Yahoo!リアルタイム検索と一致するか（瞬間的な話題急増シグナル） */
   trending?: boolean;
-  /** はてなブックマーク人気エントリと一致するか（国内SNSでの継続的な関心シグナル） */
+  /** はてなブックマーク人気エントリ・Yahoo!ニュースランキングと一致するか（読まれている・議論されているシグナル） */
   socialBuzz?: boolean;
+  /**
+   * 同じ語が何時間も出現し続けている「継続的な話題」か（TrendSightingの定点観測で判定）。
+   * trendingが「今バズっているか」の瞬間値なのに対し、こちらは「ずっと話題であり続けているか」を表す。
+   */
+  sustained?: boolean;
 }
 
 /**
@@ -71,12 +78,42 @@ export const PRIMARY_SOURCE_FEED =
   /^(kantei|cao|digital|boj-|mof|fsa|moj-|mhlw|mlit-|maff|mod-|mofa-|fed-|ecb-|courts|shugiin|sangiin|whitehouse|state-|defense-gov|eu-commission|un-|iaea|who-)/;
 
 /**
- * 速報LIVE対象（戦争・テロ・重大事件・大規模災害）。報道のみでも可だが続報前提。
- * 災害系は「震度3」「震度5弱」「台風接近」のような日常〜中規模報道でLIVE乱発しないよう、
- * 震度6弱以上・特別警報・避難指示など重大シグナルに限定する。
+ * 🔴 LIVE（REPORTED速報）を許すのは「国家的緊急」のみ。
+ * それ以外（X/YouTubeでバズる政治ネタ等）は discover→promote のピーク公開に一本化する。
  */
-const BREAKING_KEYWORDS =
-  /暗殺|テロ|爆発|砲撃|空爆|侵攻|開戦|銃撃|襲撃|震度[6-7６-７]|大地震|巨大地震|津波警報|大津波|噴火|特別警報|避難指示|大規模火災|山火事|林野火災|mass\s*shooting|assassination|airstrike|invasion|terror|missile\s*strike|casualties|killed|deadly|major\s*earthquake|tsunami\s*warning|wildfire/i;
+const LIVE_ELECTION =
+  /衆院選|参院選|総選挙|統一地方選|都知事選|都議選|知事選|市長選|選挙(?:の|を)?(?:結果|開票|速報)|開票(?:が|に)?|当選(?:確実|判明)|投票(?:が|の)?終了|出口調査/i;
+
+const LIVE_CABINET =
+  /内閣(?:が|の)?(?:成立|発足|総辞職)|新内閣|組閣|総理(?:大臣)?に指名|首相に指名|閣僚人事/i;
+
+const LIVE_WAR =
+  /侵攻|開戦|宣戦|全面攻撃|軍事侵攻|空爆|砲撃|ミサイル(?:攻撃|発射)|invasion|airstrike|missile\s*strike/i;
+
+const LIVE_TERROR =
+  /テロ(?:リスト|攻撃|発)|(?:連続)?(?:爆発|爆破)|爆弾|自爆|銃撃|発砲|襲撃|暗殺|assassination|terror(?:ist)?\s*attack|mass\s*shooting/i;
+
+/** 大津波警報・津波警報（注意報は含めない＝甚大被害が想定される警報級のみ） */
+const LIVE_TSUNAMI =
+  /大津波警報|津波警報|巨大津波|tsunami\s*warning|major\s*tsunami/i;
+
+/** 噴火警戒レベル4-5相当・噴火速報・大規模噴火（レベル1-3の平常/注意は含めない） */
+const LIVE_ERUPTION =
+  /噴火警戒レベル\s*[45]|噴火速報|爆発的噴火|大規模噴火|全島避難|volcan(?:o|ic)\s*eruption|major\s*eruption/i;
+
+/** 原子力災害（原子力緊急事態・炉心溶融・放射性物質の大量放出） */
+const LIVE_NUCLEAR =
+  /原子力緊急事態|原発事故|炉心溶融|メルトダウン|放射性物質(?:の)?(?:大量)?(?:漏|放出)|nuclear\s*emergency|meltdown/i;
+
+/** 震度6強以上（6弱は含めない＝ユーザー要件どおり6強以上） */
+const LIVE_QUAKE_MAG =
+  /震度[6-7６-７]強|震度[7７]|震度７|M(?:6\.[5-9]|[7-9]\d*)|マグニチュード(?:6\.[5-9]|[7-9])/i;
+
+/** 甚大な被害の示唆（地震LIVEは震度とセットで要求。震度7/M7+は単独可） */
+const LIVE_QUAKE_DAMAGE =
+  /甚大(?:な)?被害|死者|死亡(?:が)?確認|全壊|半壊|倒壊|被災者|行方不明|大規模(?:被害|避難)|casualties|killed|deadly|major\s*earthquake/i;
+
+const LIVE_QUAKE_MAG7 = /震度[7７]|震度７|M[7-9]\.|マグニチュード[7-9]/i;
 
 /** 速報として扱う最大経過分（これより古い incident は見送り） */
 export const BREAKING_MAX_AGE_MIN = 360;
@@ -87,39 +124,112 @@ export function isOutOfScopeTopic(clusterTitle: string, memberTitles: string[]):
   return OUT_OF_SCOPE_PATTERNS.some((p) => p.test(blob));
 }
 
+/** 争点化しないルーティンな官公庁更新（日程表・統計掲載等） */
+export const ROUTINE_OFFICIAL_PATTERNS: RegExp[] = [
+  /開廷期日情報/,
+  /最高裁判所開廷期日/,
+  /会議日程.*更新/,
+  /休廷|休業日.*お知らせ/,
+  /統計年報を掲載/,
+  /fp:[a-f0-9]{10}\)/,
+];
+
+/** 裁判所日程表など、投票・議論の争点にならない一次情報 ping */
+export function isRoutineOfficialUpdate(title: string, feedNames: string[] = []): boolean {
+  if (feedNames.some((f) => f === "courts-kijitsu")) return true;
+  const blob = title.trim();
+  if (!blob) return false;
+  return ROUTINE_OFFICIAL_PATTERNS.some((p) => p.test(blob));
+}
+
+/** フィードに出す前に記事本文が必要か（🔴 LIVE 速報テンプレは例外） */
+export function isIssueReadyForPublicFeed(issue: {
+  articleHtml: string | null;
+  confirmation: "official" | "reported" | null;
+}): boolean {
+  if (issue.articleHtml) return true;
+  return issue.confirmation === "reported";
+}
+
+export function isPendingArticlePlaceholder(summary: { lead?: string; bullets?: string[] }): boolean {
+  const blob = [summary.lead ?? "", ...(summary.bullets ?? [])].join("\n");
+  return /自動生成中|準備中です|詳細まとめを準備/.test(blob);
+}
+
 export function hasPrimarySource(input: DecisionInput): boolean {
   if (input.classification === "official" || input.classification === "indicator") return true;
   return (input.feedNames ?? []).some((f) => PRIMARY_SOURCE_FEED.test(f));
 }
 
-export function isBreakingNews(input: DecisionInput): boolean {
-  if (input.classification !== "incident") return false;
-  if (input.distinctFeeds < 2) return false;
-  if (input.minutesSinceLatest > BREAKING_MAX_AGE_MIN) return false;
-  const flagged =
-    input.riskFlags.includes("foreign_conflict") ||
-    input.riskFlags.includes("crime_related") ||
-    input.riskFlags.includes("disaster");
-  // nanoが中立化したタイトルにキーワードが残らないことがあるため、元見出しも判定対象にする
-  const blob = [input.clusterTitle ?? "", ...(input.memberTitles ?? [])].join("\n");
-  return flagged || BREAKING_KEYWORDS.test(blob);
+/**
+ * 「元々SNS/Trendsで話題になっている」ことそのものを一次情報の代替根拠とみなす。
+ * ユーザー要求（Trendsで既にバズっている話題を選び、情報錯綜を整理する）の核心。
+ * 複数媒体一致（distinctFeeds>=2、通常gateで既に要求済み）はここでも維持し、
+ * 単一ソースの怪しい話が「バズってる」の一言で素通りしないようにする。
+ */
+export function isBuzzworthy(input: DecisionInput): boolean {
+  return (
+    (input.trending === true || input.socialBuzz === true || input.sustained === true) &&
+    input.distinctFeeds >= 2
+  );
 }
 
 /**
- * バズ加点。安全ゲート（複数媒体一致・一次情報・ハードブロック）は一切バイパスせず、
- * ゲートを通過した候補同士の優先順位（日次上限の消費順）だけを動かす。
+ * detect.ts がバズ経路（discover→promote）向けの報道錯綜ネタを先取り公開しないための判定。
+ * 公式・LIVE緊急は従来どおり detect が即時処理する。
+ */
+export function shouldDeferToBuzzPipeline(
+  input: DecisionInput,
+  decision: PublishDecision,
+): boolean {
+  if (decision.action !== "publish") return false;
+  if (decision.confirmation !== "REPORTED") return false;
+  if (hasPrimarySource(input)) return false;
+  if (isBreakingNews(input)) return false;
+  return true;
+}
+
+export function isBreakingNews(input: DecisionInput): boolean {
+  if (input.distinctFeeds < 2) return false;
+  if (input.minutesSinceLatest > BREAKING_MAX_AGE_MIN) return false;
+  const blob = [input.clusterTitle ?? "", ...(input.memberTitles ?? [])].join("\n");
+
+  if (LIVE_ELECTION.test(blob)) return true;
+  if (LIVE_CABINET.test(blob)) return true;
+  if (LIVE_TERROR.test(blob)) return true;
+  if (LIVE_WAR.test(blob)) return true;
+
+  // 大災害（地震以外）: 大津波警報・噴火警戒レベル4-5・原子力緊急事態も国家的緊急としてLIVE対象
+  if (LIVE_TSUNAMI.test(blob)) return true;
+  if (LIVE_ERUPTION.test(blob)) return true;
+  if (LIVE_NUCLEAR.test(blob)) return true;
+
+  if (LIVE_QUAKE_MAG7.test(blob)) return true;
+  if (LIVE_QUAKE_MAG.test(blob) && LIVE_QUAKE_DAMAGE.test(blob)) return true;
+
+  return false;
+}
+
+/**
+ * バズ加点。複数媒体一致・ハードブロックのゲートは一切バイパスしないが、
+ * 「一次情報が無い」ことによるrejectだけは isBuzzworthy() 経由でバイパスできる
+ * （= 元々SNS/Trendsで話題になっている報道錯綜ネタを拾うための唯一の抜け道）。
  * Trends（検索急増=瞬間風速）を強く、はてブ（読まれ議論されている=継続関心）をやや弱く。
  */
-const TRENDING_BONUS = 20;
-const SOCIAL_BUZZ_BONUS = 10;
+const TRENDING_BONUS = 35;
+const SOCIAL_BUZZ_BONUS = 20;
+const SUSTAINED_BONUS = 25;
 
 export function hotScore(c: ClusterInput): number {
   const volume = Math.min(c.eventCount * 10, 50);
   const spread = Math.min(c.distinctFeeds * 15, 45); // 複数媒体一致を重視
   const recency =
     c.minutesSinceLatest <= 30 ? 30 : c.minutesSinceLatest <= 120 ? 15 : 0;
-  const buzz = (c.trending ? TRENDING_BONUS : 0) + (c.socialBuzz ? SOCIAL_BUZZ_BONUS : 0);
-  return volume + spread + recency + buzz; // 0-155
+  const buzz =
+    (c.trending ? TRENDING_BONUS : 0) +
+    (c.socialBuzz ? SOCIAL_BUZZ_BONUS : 0) +
+    (c.sustained ? SUSTAINED_BONUS : 0);
+  return volume + spread + recency + buzz; // 0-180
 }
 
 /** クラスタの見出し群がGoogle Trends急上昇ワードのいずれかを含むか判定する */
@@ -134,19 +244,7 @@ export function matchesTrending(titles: string[], trendingKeywords: string[]): b
  * 急上昇ワード（短い検索語）と違い記事タイトルは部分文字列一致がほぼ成立しないため、
  * 文字bigramのJaccard類似度で「同じ出来事を指しているか」を判定する。
  */
-export const BUZZ_TITLE_SIMILARITY = 0.2;
-
-export function buzzTitleMatch(titles: string[], corpusTitles: string[]): boolean {
-  if (titles.length === 0 || corpusTitles.length === 0) return false;
-  const targetSets = titles.map(bigrams);
-  for (const corpus of corpusTitles) {
-    const corpusSet = bigrams(corpus);
-    for (const t of targetSets) {
-      if (jaccard(t, corpusSet) >= BUZZ_TITLE_SIMILARITY) return true;
-    }
-  }
-  return false;
-}
+export { BUZZ_TITLE_SIMILARITY, buzzTitleMatch } from "./buzz-title";
 
 export function trustScore(c: ClusterInput): number {
   return Math.max(20, Math.min(100, c.maxTrustWeight));
@@ -172,6 +270,10 @@ export interface DecisionInput extends ClusterInput {
   publishedToday: number;
   /** 日次自動公開上限 */
   dailyLimit: number;
+  /** 本日すでにRSS経路で公開したREPORTED件数（detect.ts→promote.ts優先のため別枠） */
+  publishedReportedToday?: number;
+  /** RSS経路REPORTEDの1日上限（未指定なら dailyLimit と同じ） */
+  reportedDailyLimit?: number;
   /** クラスタ内フィード名（一次情報判定） */
   feedNames?: string[];
   /** クラスタタイトル（速報キーワード判定） */
@@ -186,7 +288,7 @@ export function decidePublish(input: DecisionInput): PublishDecision {
   const hot = hotScore(input);
   const trust = trustScore(input);
   const risk = riskScore(input);
-  // 正規化: hot(0-125) × trust(0.2-1.0) − risk
+  // 正規化: hot(0-180) × trust(0.2-1.0) − risk
   const score = Math.round((hot * trust) / 100 - risk);
   const detail = `hot=${hot} trust=${trust} risk=${risk} score=${score}`;
 
@@ -206,6 +308,16 @@ export function decidePublish(input: DecisionInput): PublishDecision {
     return { action: "reject", score, reason: `out_of_scope:${outOfScope.join(",")} ${detail}` };
   }
 
+  const routineTitle = input.clusterTitle ?? "";
+  const routineFeeds = input.feedNames ?? [];
+  const routineMembers = input.memberTitles ?? [];
+  if (
+    isRoutineOfficialUpdate(routineTitle, routineFeeds) ||
+    routineMembers.some((t) => isRoutineOfficialUpdate(t, routineFeeds))
+  ) {
+    return { action: "reject", score, reason: `routine_admin_update ${detail}` };
+  }
+
   // 2. 単一媒体のみのスクープ系は誤報リスクが高い→複数媒体一致まで待つ
   if (input.distinctFeeds < 2 && input.classification !== "official") {
     return { action: "reject", score, reason: `single_source ${detail}` };
@@ -216,10 +328,14 @@ export function decidePublish(input: DecisionInput): PublishDecision {
     return { action: "reject", score, reason: `below_threshold ${detail}` };
   }
 
-  // 3b. 一次情報 or 速報LIVE のみ公開（報道だけの日常ネタは見送り）
+  // 3b. 一次情報 or LIVE緊急のみ。バズ報道錯綜は promote（ピーク公開）へ譲る
   const primary = hasPrimarySource(input);
   const breaking = isBreakingNews(input);
+  const buzzing = isBuzzworthy(input);
   if (!primary && !breaking) {
+    if (buzzing) {
+      return { action: "reject", score, reason: `defer_buzz_pipeline ${detail}` };
+    }
     return { action: "reject", score, reason: `no_primary_source ${detail}` };
   }
 
@@ -228,9 +344,34 @@ export function decidePublish(input: DecisionInput): PublishDecision {
     return { action: "hold", score, reason: `daily_limit ${detail}` };
   }
 
-  // 5. 公開。公式系はOFFICIAL、速報のみREPORTED（続報LIVE用）
+  // 4b. RSS経路REPORTED（LIVE緊急含む）の別枠上限
+  if (!primary) {
+    const reportedLimit = input.reportedDailyLimit ?? input.dailyLimit;
+    const reportedToday = input.publishedReportedToday ?? 0;
+    if (reportedToday >= reportedLimit) {
+      return { action: "hold", score, reason: `reported_daily_limit ${detail}` };
+    }
+  }
+
+  // 5. 公開。公式系はOFFICIAL、LIVE緊急のみREPORTED
   const confirmation = primary ? "OFFICIAL" : "REPORTED";
-  return { action: "publish", confirmation, score, reason: `${primary ? "primary" : "breaking"} ${detail}` };
+  const via = primary ? "primary" : "breaking";
+  return { action: "publish", confirmation, score, reason: `${via} ${detail}` };
+}
+
+/**
+ * JSTの当日0:00を表すインスタンス。
+ * `new Date(new Date().toISOString().slice(0,10))` はUTC0:00＝JST9:00で日付が変わるため、
+ * 「本日の公開件数」等の日次集計がJSTの朝9時にリセットされてしまう。日次上限はJST基準で数える。
+ */
+export function jstDayStart(now: Date = new Date()): Date {
+  const jst = new Date(now.getTime() + 9 * 3_600_000);
+  return new Date(Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), jst.getUTCDate()) - 9 * 3_600_000);
+}
+
+/** slug用のJST日付文字列（YYYY-MM-DD）。UTC日付だと深夜JSTの記事が前日slugになる */
+export function jstDateString(now: Date = new Date()): string {
+  return new Date(now.getTime() + 9 * 3_600_000).toISOString().slice(0, 10);
 }
 
 /** タイトル正規化（同一トピック再検知の防止キー） */
@@ -356,4 +497,68 @@ export function shouldRegenerateFollowUp(agg: FollowUpAggregate, now: Date): boo
     );
   }
   return false;
+}
+
+/**
+ * バズ駆動パイプライン（discover.ts/promote.ts）専用のバズ強度スコア。
+ * 「Google Trends・Yahoo!リアルタイム・Yahooニュースランキング・YouTubeトレンドの
+ * 何個に載っているか」のクロス照合＝本物のバズかどうかの主判定にする（片方だけは弱いシグナル）。
+ * 検索語系（Trends/Yahooリアルタイム）は短い語なので部分一致、
+ * ニュース見出し系はbigram類似（buzzTitleMatch）で判定する。
+ */
+export interface BuzzSourceHit {
+  inGoogleTrends: boolean;
+  inYahooRealtime: boolean;
+  inNewsRanking: boolean;
+  inYouTubeTrending: boolean;
+  /** ニュースランキング内で同一争点見出しが閾値以上（速報クラスタ） */
+  inNewsCluster: boolean;
+  /** 4ソースの素点 0-4 */
+  score: number;
+  /** promote/深掘り優先用。score + Newsクラスタボーナス（上限4） */
+  effectiveScore: number;
+  /** クラスタに含まれる見出し数（ログ用） */
+  newsClusterCount: number;
+}
+
+export interface BuzzSourceInputs {
+  googleTerms: string[];
+  yahooRealtimeTerms: string[];
+  newsRankingTitles: string[];
+  youtubeTrendingTitles: string[];
+}
+
+export function computeBuzzScore(topic: string, sources: BuzzSourceInputs): BuzzSourceHit {
+  return assembleBuzzScore(topic, sources);
+}
+
+/** evidenceJson.buzzSources 用ラベル */
+export function buzzSourceLabels(hit: BuzzSourceHit): string[] {
+  return [
+    hit.inGoogleTrends && "google_trends",
+    hit.inYahooRealtime && "yahoo_realtime",
+    hit.inNewsRanking && "yahoo_news_ranking",
+    hit.inYouTubeTrending && "youtube_trending",
+    hit.inNewsCluster && "news_cluster",
+  ].filter((s): s is string => Boolean(s));
+}
+
+/** promote・深掘り優先で使うスコア */
+export function buzzEffectiveScore(hit: BuzzSourceHit): number {
+  return hit.effectiveScore;
+}
+
+/** discover.ts/promote.tsのnano分類カテゴリ → IssueCategory（detect.tsのtoIssueCategoryと同じ対応） */
+export function toIssueCategory(category: string): "POLITICS" | "LAW" | "ECONOMY" | "FINANCE" | "EDUCATION" {
+  const map: Record<string, "POLITICS" | "LAW" | "ECONOMY" | "FINANCE" | "EDUCATION"> = {
+    politics: "POLITICS",
+    economy: "ECONOMY",
+    law: "LAW",
+    finance: "FINANCE",
+    education: "EDUCATION",
+    rights: "POLITICS",
+    international: "POLITICS",
+    society: "POLITICS",
+  };
+  return map[category] ?? "POLITICS";
 }

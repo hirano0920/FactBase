@@ -9,7 +9,7 @@ export const metadata = {
 export default function TransparencyPage() {
   return (
     <PageContainer>
-      <div className="grid gap-8 lg:grid-cols-[1fr_260px]">
+      <div className="grid gap-8 lg:grid-cols-[1fr_300px]">
         <div className="min-w-0 max-w-content">
           <header className="mb-8">
             <h1 className="text-3xl font-extrabold tracking-tight text-ink">透明性</h1>

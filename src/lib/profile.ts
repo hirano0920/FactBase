@@ -3,7 +3,6 @@ import { AVATAR_EMOJIS, BIO_MAX_LENGTH, DISPLAY_NAME_MAX_LENGTH } from "@/lib/co
 export interface ProfileInput {
   name: string;
   bio: string;
-  avatarEmoji: string | null;
 }
 
 export type ProfileValidationResult =
@@ -12,7 +11,6 @@ export type ProfileValidationResult =
 
 /**
  * プロフィール編集フォームの入力を検証・正規化する純関数。
- * API route・テストの両方から使う。
  */
 export function validateProfileInput(input: Record<string, unknown>): ProfileValidationResult {
   const name = typeof input.name === "string" ? input.name.trim() : "";
@@ -28,13 +26,8 @@ export function validateProfileInput(input: Record<string, unknown>): ProfileVal
     return { ok: false, message: `一言は${BIO_MAX_LENGTH}字以内で入力してください` };
   }
 
-  let avatarEmoji: string | null = null;
-  if (input.avatarEmoji !== null && input.avatarEmoji !== undefined && input.avatarEmoji !== "") {
-    if (typeof input.avatarEmoji !== "string" || !AVATAR_EMOJIS.includes(input.avatarEmoji as never)) {
-      return { ok: false, message: "アバターは用意された絵文字から選んでください" };
-    }
-    avatarEmoji = input.avatarEmoji;
-  }
-
-  return { ok: true, data: { name, bio, avatarEmoji } };
+  return { ok: true, data: { name, bio } };
 }
+
+/** @deprecated アバター機能廃止。後方互換のため残す */
+export const DEPRECATED_AVATAR_EMOJIS = AVATAR_EMOJIS;

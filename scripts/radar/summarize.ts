@@ -7,8 +7,11 @@
  */
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { RADAR } from "../../src/lib/constants";
-import { generateArticle, violatesBan } from "../../src/lib/radar-article";
+import { jstDayStart } from "../../src/lib/radar";
+import { generateVerifiedArticle, violatesBan } from "../../src/lib/radar-article";
 import { fetchPrimaryExcerpts } from "./lib/primary-text";
+import { fetchReportExcerpts } from "./lib/report-text";
+import { ensureEvidence, evidenceToArticleFacts, internationalNewsSources, pollingNewsSources } from "./lib/enrich";
 import { notifyRadarFailure } from "./notify";
 import { notifyRevalidate } from "./lib/notify-revalidate";
 
@@ -21,7 +24,7 @@ async function main() {
       RADAR.articleDailyArticleLimit,
   );
   const generatedToday = await prisma.issue.count({
-    where: { articleGeneratedAt: { gte: new Date(new Date().toISOString().slice(0, 10)) } },
+    where: { articleGeneratedAt: { gte: jstDayStart() } },
   });
   if (generatedToday >= dailyLimit) {
     console.log(`本日の記事生成上限（${dailyLimit}）に到達済み — skip`);
@@ -46,24 +49,71 @@ async function main() {
   for (const issue of pending) {
     const candidate = await prisma.topicCandidate.findUnique({
       where: { issueId: issue.id },
+      select: {
+        id: true,
+        evidenceJson: true,
+        updatedAt: true,
+        topicTerm: true,
+        title: true,
+        sourceUrls: true,
+        decision: true,
+      },
     });
-    const sources = (candidate?.sourceUrls as { title: string; url: string; feed: string }[]) ?? [];
+    const sources =
+      (candidate?.sourceUrls as { title: string; url: string; feed: string; publishedAt?: string }[]) ?? [];
     if (sources.length === 0) continue;
 
-    const isReported = issue.confirmation === "REPORTED";
+    let isReported = issue.confirmation === "REPORTED";
 
     console.log(`生成中: ${issue.title}`);
     try {
-      // OFFICIAL争点は公式ページ本文の抜粋を渡し「何が変わる」を実質のある内容で書かせる
-      const primaryExcerpts = isReported ? [] : await fetchPrimaryExcerpts(sources);
-      const article = await generateArticle({
+      let primaryExcerpts = isReported ? [] : await fetchPrimaryExcerpts(sources);
+      if (!isReported && primaryExcerpts.length === 0) {
+        console.warn(`  ⚠️ OFFICIALだが一次本文なし → REPORTEDにフォールバック: ${issue.title}`);
+        isReported = true;
+      }
+      const reportExcerpts = isReported ? await fetchReportExcerpts(sources) : [];
+
+      // detect.ts系（RSSクラスタ経由）はdiscover.tsのような能動調査を経ていないため、
+      // ここでdiscover.ts相当の調査（国会会議録・関連法令・Wikipedia背景・国内外報道）を後付けする。
+      // 検索語はnanoで正規化されていないissue.titleをそのまま使う（ヒットしなくても記事生成は続行）。
+      const evidence = await ensureEvidence(prisma, issue.title, candidate);
+      const { dietSpeeches, background, laws, estatStats } = evidenceToArticleFacts(evidence);
+      const [internationalReportExcerpts, pollingExcerpts] = evidence
+        ? await Promise.all([
+            fetchReportExcerpts(internationalNewsSources(evidence)),
+            fetchReportExcerpts(pollingNewsSources(evidence)),
+          ])
+        : [[], []];
+
+      const { article, verified, unresolvedClaims } = await generateVerifiedArticle({
         issueTitle: issue.title,
         isReported,
         sources,
         primaryExcerpts,
+        reportExcerpts,
+        internationalReportExcerpts,
+        pollingExcerpts,
+        dietSpeeches,
+        background,
+        laws,
+        estatStats,
       });
 
-      // 機械チェック: 断定表現が混入していたら公開しない
+      // 機械チェック1: 主張の裏取り（Writer=GPT-5とは独立のnano照合）が最終試行後も不合格ならHELD
+      if (!verified) {
+        const reasons = unresolvedClaims.map((c) => `${c.text}(${c.reason})`).join(" / ");
+        console.warn(`  ⚠️ 主張の裏取り不合格「${reasons}」→ 公開せずHELD`);
+        if (candidate) {
+          await prisma.topicCandidate.update({
+            where: { id: candidate.id },
+            data: { status: "HELD", decision: `${candidate.decision} / unverified_claim:${reasons.slice(0, 200)}` },
+          });
+        }
+        continue;
+      }
+
+      // 機械チェック2: 断定表現が混入していたら公開しない
       const banned = violatesBan(article);
       if (banned) {
         console.warn(`  ⚠️ 断定表現検出「${banned}」→ 公開せずHELD`);

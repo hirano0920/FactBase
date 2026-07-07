@@ -6,7 +6,6 @@ import { cn, formatNumber, formatPercent } from "@/lib/utils";
 import type { VoteChoiceId } from "@/lib/constants";
 import type { VoteLabels, VoteTally } from "@/types";
 import { Button } from "@/components/ui/button";
-import { VoteConfetti } from "@/components/issue/vote-confetti";
 
 interface VotePanelProps {
   tally: VoteTally;
@@ -75,10 +74,16 @@ export function VotePanel({
         </div>
       ) : (
         <div className="relative animate-pop-in">
-          {celebrate && <VoteConfetti burstId={Date.now()} />}
-
           <p className={cn("mb-3 text-center text-base font-extrabold", callout.color ?? "text-ink")}>
-            <span className="animate-flicker mr-1.5 inline-block">{callout.emoji}</span>
+            <span className="relative mr-1.5 inline-block">
+              {celebrate && (
+                <span
+                  aria-hidden="true"
+                  className="absolute -inset-1 animate-ring-pulse-once rounded-full border-2 border-current"
+                />
+              )}
+              <span className="animate-flicker inline-block">{callout.emoji}</span>
+            </span>
             {callout.text}
           </p>
 

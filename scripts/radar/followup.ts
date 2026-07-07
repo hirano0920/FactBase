@@ -2,7 +2,7 @@
  * FactBase Radar — 続報反映（articleHtml再生成 + タイムライン追記）。
  *
  * 実行: npx tsx scripts/radar/followup.ts （detect.ts → summarize.ts の後、同cron内3本目）
- * 対象: detect.ts が match_issue_id でSourceEventを紐付け済みの、公開済み・記事生成済みIssue。
+ * 対象: SourceEvent が issueId に紐づいた公開済み・記事生成済み Issue（detect 続報 / promote バズ記事）。
  * 頻度制御は src/lib/radar.ts の shouldRegenerateFollowUp（純関数）に集約:
  *   - LIVE(REPORTED): 新着distinctFeed>=1件で最短30分間隔
  *   - OFFICIAL: 新着に一次情報級(trustWeight>=85)があり最短2時間間隔
@@ -10,9 +10,11 @@
  */
 import { PrismaClient, type Prisma, type ConfirmationStatus } from "@prisma/client";
 import { RADAR } from "../../src/lib/constants";
-import { shouldRegenerateFollowUp } from "../../src/lib/radar";
-import { generateArticle, violatesBan } from "../../src/lib/radar-article";
+import { shouldRegenerateFollowUp, jstDayStart } from "../../src/lib/radar";
+import { generateVerifiedArticle, violatesBan } from "../../src/lib/radar-article";
 import { fetchPrimaryExcerpts } from "./lib/primary-text";
+import { fetchReportExcerpts } from "./lib/report-text";
+import { ensureEvidence, evidenceToArticleFacts, internationalNewsSources, pollingNewsSources } from "./lib/enrich";
 import { notifyRadarFailure } from "./notify";
 import { notifyRevalidate } from "./lib/notify-revalidate";
 
@@ -33,7 +35,7 @@ const FOLLOW_UP_LABEL_PREFIX = "続報反映:";
 
 async function main() {
   const dailyLimit = Number(process.env.FOLLOWUP_DAILY_LIMIT ?? RADAR.followUpDailyLimit);
-  const todayStart = new Date(new Date().toISOString().slice(0, 10));
+  const todayStart = jstDayStart();
   const generatedToday = await prisma.issueTimeline.count({
     where: { label: { startsWith: FOLLOW_UP_LABEL_PREFIX }, at: { gte: todayStart } },
   });
@@ -89,34 +91,76 @@ async function main() {
       const issue = await prisma.issue.findUnique({ where: { id: row.id } });
       if (!issue || !issue.articleHtml || !issue.articleGeneratedAt) continue;
 
-      const candidate = await prisma.topicCandidate.findUnique({ where: { issueId: issue.id } });
-      const baseSources = (candidate?.sourceUrls as { title: string; url: string; feed: string }[]) ?? [];
+      const candidate = await prisma.topicCandidate.findUnique({
+        where: { issueId: issue.id },
+        select: {
+          id: true,
+          evidenceJson: true,
+          updatedAt: true,
+          topicTerm: true,
+          title: true,
+          sourceUrls: true,
+        },
+      });
+      const baseSources =
+        (candidate?.sourceUrls as
+          | { title: string; url: string; feed: string; publishedAt?: string }[]
+          | null) ?? [];
       const newEvents = await prisma.sourceEvent.findMany({
         where: { issueId: issue.id, createdAt: { gt: issue.articleGeneratedAt } },
         orderBy: { createdAt: "asc" },
       });
       const cumulativeSources = [
         ...baseSources,
-        ...newEvents.map((e) => ({ title: e.title, url: e.url, feed: e.feedName })),
+        ...newEvents.map((e) => ({
+          title: e.title,
+          url: e.url,
+          feed: e.feedName,
+          publishedAt: e.publishedAt.toISOString(),
+        })),
       ].slice(-RADAR.sourceCap);
 
       const summaryJson = issue.summaryJson as { lead?: string } | null;
       console.log(`続報反映中: ${issue.title}（新着${newEvents.length}件）`);
 
       // OFFICIAL争点の続報には新着イベント分の公式ページ本文だけを渡す（既報分は前回記事に反映済み）
-      const primaryExcerpts =
-        issue.confirmation === "REPORTED"
-          ? []
-          : await fetchPrimaryExcerpts(
-              newEvents.map((e) => ({ title: e.title, url: e.url, feed: e.feedName })),
-            );
-      const article = await generateArticle({
+      // REPORTED争点の続報には新着イベント分の報道本文を渡し、各社の食い違いを更新させる
+      const newSourceRefs = newEvents.map((e) => ({ title: e.title, url: e.url, feed: e.feedName }));
+      const isReported = issue.confirmation === "REPORTED";
+      const primaryExcerpts = isReported ? [] : await fetchPrimaryExcerpts(newSourceRefs);
+      const reportExcerpts = isReported ? await fetchReportExcerpts(newSourceRefs) : [];
+
+      // 初回生成時（summarize.ts）と同じ調査基盤を続報時も維持する。
+      // ensureEvidenceは鮮度内ならevidenceJsonを再利用するため、続報のたびに外部APIを叩き直さない。
+      const evidence = await ensureEvidence(prisma, issue.title, candidate);
+      const { dietSpeeches, background, laws, estatStats } = evidenceToArticleFacts(evidence);
+      const [internationalReportExcerpts, pollingExcerpts] = evidence
+        ? await Promise.all([
+            fetchReportExcerpts(internationalNewsSources(evidence)),
+            fetchReportExcerpts(pollingNewsSources(evidence)),
+          ])
+        : [[], []];
+
+      const { article, verified, unresolvedClaims } = await generateVerifiedArticle({
         issueTitle: issue.title,
-        isReported: issue.confirmation === "REPORTED",
+        isReported,
         sources: cumulativeSources,
         primaryExcerpts,
+        reportExcerpts,
+        internationalReportExcerpts,
+        pollingExcerpts,
+        dietSpeeches,
+        background,
+        laws,
+        estatStats,
         previousArticle: { lead: summaryJson?.lead ?? "", articleHtml: issue.articleHtml },
       });
+
+      if (!verified) {
+        const reasons = unresolvedClaims.map((c) => `${c.text}(${c.reason})`).join(" / ");
+        console.warn(`  ⚠️ 主張の裏取り不合格「${reasons}」→ 更新せず既存記事を維持`);
+        continue;
+      }
 
       const banned = violatesBan(article);
       if (banned) {
@@ -143,7 +187,7 @@ async function main() {
         prisma.issueTimeline.create({
           data: {
             issueId: issue.id,
-            label: `${FOLLOW_UP_LABEL_PREFIX} ${(article.followUpNote || "新着情報を反映しました").slice(0, 60)}`,
+            label: `${FOLLOW_UP_LABEL_PREFIX} ${(article.followUpNote || "新着情報を反映しました").slice(0, 140)}`,
           },
         }),
       ]);

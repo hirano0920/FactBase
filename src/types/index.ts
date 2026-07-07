@@ -1,4 +1,5 @@
-import type { CategoryId, IssueStatus, Plan, VoteChoiceId } from "@/lib/constants";
+import type { Plan } from "@prisma/client";
+import type { CategoryId, IssueStatus, VoteChoiceId } from "@/lib/constants";
 
 export interface IssueSummary {
   lead: string;
@@ -41,7 +42,9 @@ export interface Comment {
   issueId: string;
   userId: string;
   userName: string;
-  userBadge: string | null;
+  userPlan: Plan;
+  userCommentCount: number;
+  userTotalLikes: number;
   stance: VoteChoiceId;
   body: string;
   likeCount: number;
@@ -49,6 +52,12 @@ export interface Comment {
   helpfulCount: number;
   fcResult: FactCheckResult | null;
   createdAt: string;
+  /** 返信の場合は親コメントID。トップレベルコメントはnull */
+  parentId: string | null;
+  /** 返信総数（repliesが視認上限で切れている場合の実数） */
+  replyCount: number;
+  /** 1階層のみの返信（トップレベルコメントにのみ含まれる。返信自身のrepliesは常に空） */
+  replies: Comment[];
 }
 
 export type FcVerdictId =

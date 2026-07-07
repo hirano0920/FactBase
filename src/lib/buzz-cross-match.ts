@@ -1,0 +1,246 @@
+/**
+ * バズ4ソースの横断一致。見出し全文の bigram だけでは「高市」「NATO」「トランプ」等が
+ * ソース間で表記ゆれすると score=1 のままになるため、争点アンカー語で照合する。
+ */
+import { buzzTitleMatch } from "./buzz-title";
+import { IN_SCOPE_BUZZ_HINTS } from "./buzz-scope";
+import { RADAR } from "./constants";
+import type { BuzzSourceHit, BuzzSourceInputs } from "./radar";
+import type { BuzzTermInput } from "./buzz-prefilter";
+
+const MATCH_STOPWORDS = new Set([
+  "について",
+  "による",
+  "として",
+  "ことが",
+  "問題",
+  "発言",
+  "記者",
+  "会見",
+  "報道",
+  "速報",
+  "最新",
+  "関連",
+  "政府",
+  "日本",
+  "東京",
+  "昨日",
+  "今日",
+  "明日",
+  "首相",
+  "大臣",
+  "政権",
+  "与党",
+  "野党",
+]);
+
+const ENTITY_PATTERNS: RegExp[] = [
+  /[一-龥々]{2,8}(?:首相|大臣|大統領|長官|総裁|王国)/g,
+  /[一-龥々]{2,5}氏/g,
+  /(?:米|中|日|韓|欧|英|露|印|独|仏)国/g,
+  /\b[A-Za-z][A-Za-z0-9]{1,11}\b/g,
+];
+
+function normalizeToken(raw: string): string {
+  return raw.trim().replace(/\s+/g, "").toLowerCase();
+}
+
+function isStrongMatchToken(token: string): boolean {
+  const t = token.trim();
+  if (t.length < 2) return false;
+  if (MATCH_STOPWORDS.has(t)) return false;
+  if (/^[a-z0-9]{2,12}$/i.test(t)) return t.length >= 3;
+  if (/氏$/.test(t)) return true;
+  if (/(?:首相|大臣|大統領|長官|総裁|王国)$/.test(t)) return true;
+  if (IN_SCOPE_BUZZ_HINTS.test(t)) return t.length >= 2;
+  return t.length >= 4;
+}
+
+/** トピック/見出しからソース横断照合に使う語を抽出 */
+export function extractBuzzMatchTokens(text: string): string[] {
+  const t = text.trim();
+  if (!t) return [];
+
+  const found = new Set<string>();
+  for (const pattern of ENTITY_PATTERNS) {
+    pattern.lastIndex = 0;
+    for (const m of t.matchAll(pattern)) {
+      const tok = normalizeToken(m[0]);
+      if (tok.length >= 2) found.add(tok);
+    }
+  }
+
+  const hintRe = new RegExp(IN_SCOPE_BUZZ_HINTS.source, "gi");
+  for (const m of t.matchAll(hintRe)) {
+    const tok = normalizeToken(m[0]);
+    if (tok.length >= 2) found.add(tok);
+  }
+
+  if (t.length <= 24 && !/[「」『』]/.test(t)) {
+    found.add(normalizeToken(t));
+  }
+
+  return [...found].filter(isStrongMatchToken);
+}
+
+export function buzzMatchesSearchTerms(topic: string, terms: string[]): boolean {
+  if (terms.length === 0) return false;
+  const topicNorm = topic.trim();
+  const topicTokens = extractBuzzMatchTokens(topicNorm);
+
+  return terms.some((term) => {
+    const t = term.trim();
+    if (!t) return false;
+    if (topicNorm.includes(t) || t.includes(topicNorm)) return true;
+
+    const termTokens = extractBuzzMatchTokens(t);
+    if (termTokens.length === 0) {
+      return topicNorm.includes(t) || t.includes(topicNorm);
+    }
+
+    return topicTokens.some((a) =>
+      termTokens.some((b) => {
+        if (a === b) return true;
+        if (a.length >= 3 && b.length >= 3 && (a.includes(b) || b.includes(a))) return true;
+        return false;
+      }),
+    );
+  });
+}
+
+export function buzzMatchesTitleCorpus(topic: string, corpusTitles: string[]): boolean {
+  if (corpusTitles.length === 0) return false;
+  const tokens = extractBuzzMatchTokens(topic).filter(
+    (tok) =>
+      tok.length >= 3 ||
+      /氏$|大統領|首相|大臣/.test(tok) ||
+      IN_SCOPE_BUZZ_HINTS.test(tok),
+  );
+  if (tokens.length === 0) return false;
+
+  return corpusTitles.some((title) => {
+    const titleNorm = title.trim();
+    if (!titleNorm) return false;
+    return tokens.some((tok) => {
+      if (titleNorm.includes(tok)) return true;
+      if (/^[a-z0-9]+$/i.test(tok)) {
+        return titleNorm.toLowerCase().includes(tok.toLowerCase());
+      }
+      return false;
+    });
+  });
+}
+
+function titleMatchesBuzzTopic(topic: string, title: string): boolean {
+  return (
+    buzzTitleMatch([topic], [title]) ||
+    buzzMatchesTitleCorpus(topic, [title]) ||
+    buzzMatchesTitleCorpus(title, [topic])
+  );
+}
+
+/** ニュースランキング内で同一争点とみなせる見出し数 */
+export function countNewsClusterHeadlines(topic: string, newsTitles: string[]): number {
+  if (newsTitles.length === 0) return 0;
+  return newsTitles.filter((title) => titleMatchesBuzzTopic(topic, title)).length;
+}
+
+export function assembleBuzzScore(topic: string, sources: BuzzSourceInputs): BuzzSourceHit {
+  const inGoogleTrends = buzzMatchesSearchTerms(topic, sources.googleTerms);
+  const inYahooRealtime = buzzMatchesSearchTerms(topic, sources.yahooRealtimeTerms);
+  const inNewsRanking =
+    buzzTitleMatch([topic], sources.newsRankingTitles) ||
+    buzzMatchesTitleCorpus(topic, sources.newsRankingTitles);
+  const inYouTubeTrending =
+    buzzTitleMatch([topic], sources.youtubeTrendingTitles) ||
+    buzzMatchesTitleCorpus(topic, sources.youtubeTrendingTitles);
+  const score =
+    Number(inGoogleTrends) +
+    Number(inYahooRealtime) +
+    Number(inNewsRanking) +
+    Number(inYouTubeTrending);
+
+  const newsClusterCount = countNewsClusterHeadlines(topic, sources.newsRankingTitles);
+  const inNewsCluster = newsClusterCount >= RADAR.minNewsClusterHeadlines;
+  const effectiveScore = Math.min(4, score + (inNewsCluster ? 1 : 0));
+
+  return {
+    inGoogleTrends,
+    inYahooRealtime,
+    inNewsRanking,
+    inYouTubeTrending,
+    inNewsCluster,
+    score,
+    effectiveScore,
+    newsClusterCount,
+  };
+}
+
+export interface BuzzAnchorCandidate {
+  anchor: string;
+  variants: string[];
+  hit: BuzzSourceHit;
+  /** promote/深掘り優先用 effectiveScore */
+  score: number;
+  inputCount: number;
+}
+
+function pickRepresentativeAnchor(token: string, variants: string[]): string {
+  const withToken = variants.filter((v) => v.includes(token) || token.includes(v));
+  const pool = withToken.length > 0 ? withToken : variants;
+  return pool.sort((a, b) => b.length - a.length)[0] ?? token;
+}
+
+export function buildBuzzAnchorCandidates(
+  inputs: BuzzTermInput[],
+  sources: BuzzSourceInputs,
+): BuzzAnchorCandidate[] {
+  const tokenToVariants = new Map<string, Set<string>>();
+
+  for (const input of inputs) {
+    const tokens = extractBuzzMatchTokens(input.term);
+    const keys =
+      tokens.filter(isStrongMatchToken).length > 0
+        ? tokens.filter(isStrongMatchToken)
+        : input.term.trim().length >= 6
+          ? [input.term.trim()]
+          : [];
+
+    for (const key of keys) {
+      const norm = normalizeToken(key);
+      if (!tokenToVariants.has(norm)) tokenToVariants.set(norm, new Set());
+      tokenToVariants.get(norm)!.add(input.term);
+    }
+  }
+
+  const candidates: BuzzAnchorCandidate[] = [];
+  for (const [token, variantSet] of tokenToVariants) {
+    const variants = [...variantSet];
+    const anchor = pickRepresentativeAnchor(token, variants);
+    const hit = assembleBuzzScore(anchor, sources);
+    candidates.push({
+      anchor,
+      variants,
+      hit,
+      score: hit.effectiveScore,
+      inputCount: variants.length,
+    });
+  }
+
+  const byAnchor = new Map<string, BuzzAnchorCandidate>();
+  for (const c of candidates) {
+    const key = normalizeToken(c.anchor);
+    const prev = byAnchor.get(key);
+    if (
+      !prev ||
+      c.score > prev.score ||
+      (c.score === prev.score && c.inputCount > prev.inputCount)
+    ) {
+      byAnchor.set(key, c);
+    }
+  }
+
+  return [...byAnchor.values()].sort(
+    (a, b) => b.score - a.score || b.inputCount - a.inputCount || a.anchor.localeCompare(b.anchor, "ja"),
+  );
+}

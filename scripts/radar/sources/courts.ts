@@ -57,16 +57,17 @@ export async function fetchCourtsNews(): Promise<FeedItem[]> {
 }
 
 /** 開廷期日情報ページの指紋監視（構造が複雑なため項目分解せず変更検知のみ） */
-export async function fetchCourtsKijitsu(): Promise<FeedItem[]> {
+export async function fetchCourtsKijitsu(lastFingerprint?: string | null): Promise<FeedItem[]> {
   const html = await fetchText(KIJITSU_URL);
   if (!html) return [];
 
-  // ナビ・フッター等の毎回変わらない部分を避け、本文コンテナだけを対象にする
   const bodyMatch = html.match(
     /<div class="module-sub-page-parts-default-5">([\s\S]*?)<\/div>\s*<\/div>/,
   );
   const body = (bodyMatch?.[1] ?? html).replace(/\s+/g, " ").trim();
   const fingerprint = createHash("sha256").update(body).digest("hex").slice(0, 10);
+
+  if (lastFingerprint && lastFingerprint === fingerprint) return [];
 
   return [
     {
@@ -77,4 +78,9 @@ export async function fetchCourtsKijitsu(): Promise<FeedItem[]> {
       publishedAt: new Date(),
     },
   ];
+}
+
+/** courts-kijitsu タイトルから指紋を取り出す */
+export function extractCourtsKijitsuFingerprint(title: string): string | null {
+  return title.match(/fp:([a-f0-9]{10})/)?.[1] ?? null;
 }

@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
 import { SummaryCard } from "@/components/issue/summary-card";
 import { IssueTimelineLive } from "@/components/issue/issue-timeline-live";
 import {
@@ -10,7 +11,8 @@ import {
 } from "@/components/issue/issue-viewer-context";
 import { CategoryBadge, StatusBadge } from "@/components/ui/badge";
 import { AppSidebarStatic } from "@/components/layout/app-sidebar";
-import { AdSlot, PageContainer, Section, SectionTitle } from "@/components/layout/page-container";
+import { AdSlotGated } from "@/components/layout/ad-slot-gated";
+import { PageContainer, Section, SectionTitle } from "@/components/layout/page-container";
 import { getComments, getIssueBySlug, getIssueTimeline, isDbEnabled } from "@/lib/data";
 import { GUEST_COMMENT_LIMIT } from "@/lib/constants";
 import type { Metadata } from "next";
@@ -53,7 +55,7 @@ export default async function IssuePage({ params }: IssuePageProps) {
   if (!issue) notFound();
 
   const [commentPage, timeline] = await Promise.all([
-    getComments(issue.id, undefined, GUEST_COMMENT_LIMIT),
+    getComments(issue.id, undefined, GUEST_COMMENT_LIMIT, "new", { includeReplies: false }),
     isDbEnabled() ? getIssueTimeline(issue.id) : Promise.resolve([]),
   ]);
   commentPage.nextCursor = null;
@@ -63,9 +65,9 @@ export default async function IssuePage({ params }: IssuePageProps) {
   return (
     <IssueViewerProvider slug={issue.slug} issueId={issue.id} guestComments={commentPage.comments}>
       <PageContainer>
-        <div className="grid gap-8 lg:grid-cols-[1fr_260px]">
+        <div className="grid gap-8 lg:grid-cols-[1fr_300px]">
           <div className="min-w-0">
-            <AdSlot className="mb-8" />
+            <AdSlotGated slug={issue.slug} className="mb-8" />
 
             {issue.underReview && (
               <div className="mb-6 rounded-md border border-amber-500/40 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -102,22 +104,33 @@ export default async function IssuePage({ params }: IssuePageProps) {
             <div className="space-y-6">
               <Section>
                 <SectionTitle>要点</SectionTitle>
-                <SummaryCard summary={issue.summary} articleSlug={issue.slug} />
+                <SummaryCard
+                  summary={issue.summary}
+                  articleSlug={issue.articleHtml ? issue.slug : undefined}
+                />
               </Section>
 
               <Section>
                 <SectionTitle>あなたの一票</SectionTitle>
-                <IssueVoteSlot
-                  issueId={issue.id}
-                  initialTally={tally}
-                  labels={issue.voteLabels}
-                />
+                <div className="mx-auto max-w-md">
+                  <IssueVoteSlot
+                    issueId={issue.id}
+                    initialTally={tally}
+                    labels={issue.voteLabels}
+                  />
+                </div>
               </Section>
 
-              <IssueTimelineLive issueId={issue.id} initialEntries={timeline} />
+              <IssueTimelineLive
+                issueId={issue.id}
+                initialEntries={timeline}
+                confirmation={issue.confirmation}
+              />
 
               <Section>
-                <IssueCommentsSlot issueId={issue.id} commentCount={issue.commentCount} />
+                <Suspense fallback={null}>
+                  <IssueCommentsSlot issueId={issue.id} commentCount={issue.commentCount} />
+                </Suspense>
               </Section>
 
               {issue.confirmation !== null && (
@@ -126,7 +139,7 @@ export default async function IssuePage({ params }: IssuePageProps) {
                 </div>
               )}
 
-              <AdSlot label="フッター広告" />
+              <AdSlotGated slug={issue.slug} label="フッター広告" />
             </div>
           </div>
 

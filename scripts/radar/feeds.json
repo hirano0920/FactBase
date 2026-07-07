@@ -97,6 +97,20 @@
     { "name": "thehindu-intl", "url": "https://www.thehindu.com/news/international/feeder/default.rss", "trust": 60, "note": "The Hindu 国際" },
     { "name": "xinhua-world", "url": "http://www.xinhuanet.com/english/rss/worldrss.xml", "trust": 55, "note": "新華社英文（中国公式系）" },
     { "name": "tass", "url": "https://tass.com/rss/v2.xml", "trust": 50, "note": "TASS（ロシア公式系・trust低）" },
-    { "name": "rt", "url": "https://www.rt.com/rss/", "trust": 45, "note": "RT（ロシア公式系・trust低）" }
+    { "name": "rt", "url": "https://www.rt.com/rss/", "trust": 45, "note": "RT（ロシア公式系・trust低）" },
+
+    { "name": "csis", "url": "https://www.csis.org/analysis/feed", "trust": 78, "note": "CSIS（米戦略国際問題研究所）分析レポート" },
+    { "name": "cfr", "url": "https://www.cfr.org/rss.xml", "trust": 78, "note": "CFR（米外交問題評議会）" },
+    { "name": "brookings", "url": "https://www.brookings.edu/feed/", "trust": 75, "note": "Brookings Institution" },
+    { "name": "rand", "url": "https://www.rand.org/pubs/rss/research_reports.xml", "trust": 75, "note": "RAND Corporation" },
+    { "name": "hrw", "url": "https://www.hrw.org/rss.xml", "trust": 72, "note": "Human Rights Watch" },
+    { "name": "amnesty", "url": "https://www.amnesty.org/en/feed/", "trust": 70, "note": "Amnesty International" },
+
+    { "name": "gnews-ldp", "url": "https://news.google.com/rss/search?q=site:jimin.jp%20when:7d&hl=ja&gl=JP&ceid=JP:ja", "trust": 80, "note": "自民党公式（jimin.jp）政策発表" },
+    { "name": "gnews-komei", "url": "https://news.google.com/rss/search?q=site:komei.or.jp%20when:7d&hl=ja&gl=JP&ceid=JP:ja", "trust": 78, "note": "公明党公式（komei.or.jp）政策発表" },
+    { "name": "gnews-cdp", "url": "https://news.google.com/rss/search?q=site:cdp-japan.jp%20when:7d&hl=ja&gl=JP&ceid=JP:ja", "trust": 78, "note": "立憲民主党公式（cdp-japan.jp）政策発表" },
+    { "name": "gnews-nippon-ishin", "url": "https://news.google.com/rss/search?q=site:o-ishin.jp%20when:7d&hl=ja&gl=JP&ceid=JP:ja", "trust": 78, "note": "日本維新の会公式（o-ishin.jp）政策発表" },
+    { "name": "gnews-dpfp", "url": "https://news.google.com/rss/search?q=site:dpfp.or.jp%20when:7d&hl=ja&gl=JP&ceid=JP:ja", "trust": 78, "note": "国民民主党公式（dpfp.or.jp）政策発表" },
+    { "name": "gnews-nhk-yoron", "url": "https://news.google.com/rss/search?q=NHK+%E4%B8%96%E8%AB%96%E8%AA%BF%E6%9F%BB+when:30d&hl=ja&gl=JP&ceid=JP:ja", "trust": 72, "note": "NHK世論調査（月次）" }
   ]
 }
