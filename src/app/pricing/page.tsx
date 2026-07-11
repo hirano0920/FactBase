@@ -71,7 +71,8 @@ export default async function PricingPage({ searchParams }: PricingPageProps) {
   const isLoggedIn = Boolean(session?.user);
 
   return (
-    <PageContainer width="content">
+    <PageContainer>
+      <div className="mx-auto max-w-5xl">
       <header className="mb-10 text-center">
         <p className="mb-2 text-xs font-extrabold tracking-widest text-warm">
           ✨ {SITE.name.toUpperCase()} PLUS/PRO
@@ -195,6 +196,7 @@ export default async function PricingPage({ searchParams }: PricingPageProps) {
       <p className="mt-8 text-center text-xs text-ink-faint">
         決済はWeb（Stripe）のみ。無料体験後に月額課金が開始されます。1人1票。票の重み付けはありません。
       </p>
+      </div>
     </PageContainer>
   );
 }

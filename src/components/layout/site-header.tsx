@@ -4,13 +4,6 @@ import { SITE } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { NotificationBell } from "@/components/layout/notification-bell";
-import { FlameIcon, LockIcon, TrendingUpIcon } from "@/components/ui/icons";
-
-const DESKTOP_NAV = [
-  { href: "/ranking", label: "Hotなスレ", Icon: FlameIcon },
-  { href: "/ranking/votes", label: "Hotな投票", Icon: TrendingUpIcon },
-  { href: "/pricing", label: "Plus/Pro", Icon: LockIcon },
-] as const;
 
 const PLAN_LABELS = {
   FREE: null,
@@ -66,29 +59,15 @@ export async function SiteHeader() {
         </div>
       </div>
 
-      {/* ワイド画面のみフルヘッダー（nav を画面中央に固定する 3 列グリッド） */}
-      <div className="mx-auto hidden h-14 max-w-wide grid-cols-[1fr_auto_1fr] items-center gap-4 px-page lg:grid">
+      <div className="mx-auto hidden h-14 max-w-wide items-center justify-between px-page lg:flex">
         <Link
           href="/"
-          className="justify-self-start text-lg font-extrabold tracking-tighter text-ink no-underline hover:text-accent"
+          className="text-lg font-extrabold tracking-tighter text-ink no-underline hover:text-accent"
         >
           {SITE.displayName}
         </Link>
 
-        <nav className="flex items-center justify-center gap-6" aria-label="メイン">
-          {DESKTOP_NAV.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="flex items-center gap-1.5 text-sm font-semibold text-ink-secondary no-underline transition-colors hover:text-ink"
-            >
-              <item.Icon style={{ width: 16, height: 16 }} />
-              {item.label}
-            </Link>
-          ))}
-        </nav>
-
-        <div className="flex items-center justify-self-end gap-2">
+        <div className="flex items-center gap-2">
           <ThemeToggle />
           {user && <NotificationBell isLoggedIn />}
           {user ? (

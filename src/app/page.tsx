@@ -26,7 +26,7 @@ export default async function HomePage() {
   return (
     <PageContainer>
       <div className={`grid gap-6 lg:gap-8 ${HOME_THREE_COL_GRID}`}>
-        <div className="hidden xl:block xl:self-start">
+        <div className="hidden xl:block">
           <StickySidebar>
             <div className="space-y-4">
               <IssueSearchBox />
@@ -45,7 +45,7 @@ export default async function HomePage() {
           </Suspense>
         </div>
 
-        <div className="hidden lg:block lg:self-start">
+        <div className="hidden lg:block">
           <Suspense fallback={<SidebarSkeleton />}>
             <AppSidebarStatic />
           </Suspense>
