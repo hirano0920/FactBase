@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { SummaryCard } from "@/components/issue/summary-card";
 import {
   IssueBookmarkSlot,
@@ -17,9 +18,19 @@ interface HomeIssueExpandProps {
   issue: Issue;
   guestComments: Comment[];
   onBack: () => void;
+  /** trueならマウント直後に投票パネルまで飛ばす（スレッド目当てのユーザーが要点を読み飛ばせるように） */
+  scrollToVote?: boolean;
 }
 
-export function HomeIssueExpand({ issue, guestComments, onBack }: HomeIssueExpandProps) {
+export function HomeIssueExpand({ issue, guestComments, onBack, scrollToVote = false }: HomeIssueExpandProps) {
+  useEffect(() => {
+    if (!scrollToVote) return;
+    requestAnimationFrame(() => {
+      document.getElementById("vote-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <div className="home-expand-enter space-y-6">
       <button
@@ -35,11 +46,6 @@ export function HomeIssueExpand({ issue, guestComments, onBack }: HomeIssueExpan
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <CategoryBadge category={issue.category} />
             <StatusBadge status={issue.status} />
-            {issue.confirmation === "reported" && (
-              <span className="rounded-full border border-hot/40 bg-hot-muted px-2.5 py-0.5 text-xs font-medium text-hot">
-                🔴 速報・続報中
-              </span>
-            )}
           </div>
           <div className="flex items-start justify-between gap-3">
             <h2 className="text-2xl font-extrabold leading-tight tracking-tight text-ink sm:text-3xl">
@@ -49,15 +55,16 @@ export function HomeIssueExpand({ issue, guestComments, onBack }: HomeIssueExpan
           </div>
         </header>
 
-        <Section>
+        <Section variant="arena">
           <SectionTitle>要点</SectionTitle>
           <SummaryCard
             summary={issue.summary}
             articleSlug={issue.articleHtml ? issue.slug : undefined}
+            compact
           />
         </Section>
 
-        <Section>
+        <Section id="vote-panel" variant="arena">
           <SectionTitle>あなたの一票</SectionTitle>
           <div className="mx-auto max-w-md">
             <IssueVoteSlot
@@ -68,8 +75,13 @@ export function HomeIssueExpand({ issue, guestComments, onBack }: HomeIssueExpan
           </div>
         </Section>
 
-        <Section>
-          <IssueCommentsSlot issueId={issue.id} commentCount={issue.commentCount} />
+        <Section variant="arena">
+          <IssueCommentsSlot
+            slug={issue.slug}
+            issueId={issue.id}
+            commentCount={issue.commentCount}
+            voteTally={issue.voteTally}
+          />
         </Section>
 
         {issue.confirmation !== null && (

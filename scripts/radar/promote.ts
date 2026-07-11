@@ -2,11 +2,10 @@
  * FactBase Radar バズ駆動記事の公開（④ 選定・公開ロジック）。
  *
  * 実行: npx tsx scripts/radar/promote.ts [--dry-run] [--force]
- * cron内で discover.ts の後に走る。discover.ts が集めた PENDING 候補（discoverySource="buzz"）を
+ * cron内で discover.ts の後に走る（本番は discover → promote のみ）。
+ * discover.ts が集めた PENDING 候補（discoverySource="buzz"）を
  * ピーク時間帯（通勤・昼休み・夜）にだけ、buzzScore（クロス照合の強さ）と証拠十分性でtop2〜3本を
- * 選んで記事化する。法案（discoverySource="bill"）は既存detect.tsが継続的に公開するため対象外。
- * 戦争・災害・重大法案可決のような速報は既存detect.tsのLIVE経路（isBreakingNews）が別途即時処理する
- * ——本スクリプトはその安全網の外側で「バズだが急ぎではない」記事だけを扱う。
+ * 選んで記事化する。detect/summarize/followup は cron 外（必要なら手動）。
  *
  * 選定基準（両方満たすことを要求。どちらかだけでは薄い記事に戻るため）:
  *   - buzzScore >= minBuzzScoreForPromotion（4ソースのクロス照合。片方だけの弱いシグナルを弾く）
@@ -16,18 +15,25 @@
 import { randomUUID } from "node:crypto";
 import { PrismaClient, Prisma } from "@prisma/client";
 import { RADAR } from "../../src/lib/constants";
-import { toIssueCategory, jstDateString } from "../../src/lib/radar";
+import { toIssueCategory, jstDateString, shouldUseInternationalReports } from "../../src/lib/radar";
 import { generateVerifiedArticle, violatesBan } from "../../src/lib/radar-article";
+import { checkArticleQualityGate } from "./lib/article-judge";
+import { buildClaimDiff, formatClaimDiffBlock } from "./lib/claim-diff";
+import { fetchArticleThumbnail } from "./lib/og-image";
+import { composeIssueTitle, composeVoteQuestion } from "../../src/lib/ai";
 import { fetchPrimaryExcerpts } from "./lib/primary-text";
 import { fetchReportExcerpts } from "./lib/report-text";
 import { pollingNewsSources } from "./lib/enrich";
 import {
   selectTopicsForPromotion,
   findDuplicateActiveIssue,
+  dedupeSelectedCandidates,
+  resolveCandidateDebateType,
   type SavedEvidence,
   type PromotionCandidate,
   type ActiveIssueForDedup,
 } from "./lib/promote-logic";
+import { resolveDebateType } from "../../src/lib/debate-type";
 import { isWithinPeakWindow } from "./lib/schedule";
 import { notifyRadarFailure } from "./notify";
 import { notifyRevalidate } from "./lib/notify-revalidate";
@@ -79,6 +85,7 @@ async function main() {
     sourceUrls:
       (r.sourceUrls as unknown as { title: string; url: string; feed: string; publishedAt?: string }[]) ?? [],
     evidence: r.evidenceJson as unknown as SavedEvidence,
+    updatedAt: r.updatedAt,
   }));
 
   const selected = selectTopicsForPromotion(
@@ -90,6 +97,18 @@ async function main() {
   console.log(
     `  ${candidates.length}件のPENDING候補 → buzzScore>=${RADAR.minBuzzScoreForPromotion}かつ証拠十分で${selected.length}件選定`,
   );
+
+  // 同一ラン内で選ばれた候補同士に「同一出来事」の重複が無いか確認し、あれば1本に統合する
+  // （例: 「代表辞任」と「辞任のきっかけになった道交法違反」が別トピックとして同時に選ばれるケース）。
+  // 統合後は証拠の厚い方を主候補にし、きっかけ→結果の時系列を1記事にまとめて書けるようにする。
+  const deduped = dedupeSelectedCandidates(selected);
+  for (const g of deduped) {
+    if (g.absorbed.length > 0) {
+      console.log(
+        `  🔗 [ラン内統合] ${g.absorbed.map((a) => a.title).join(" / ")} を「${g.primary.title}」に統合`,
+      );
+    }
+  }
 
   // detect.ts（RSS経路）とdiscover.ts（バズ経路）は別々のnanoプロンプトが独立にタイトルを
   // 生成するため、同じ出来事でもdedupKeyの文字列一致だけでは重複を防げないことがある。
@@ -105,21 +124,50 @@ async function main() {
     select: { id: true, title: true, keywords: true },
   });
 
-  for (const c of selected) {
+  for (const g of deduped) {
     try {
-      const duplicate = findDuplicateActiveIssue(c.title, c.topicTerm, activeIssues);
+      const duplicate = findDuplicateActiveIssue(g.primary.title, g.primary.topicTerm, activeIssues);
+      let issueId: string | null;
       if (duplicate) {
-        await mergeIntoExistingIssue(c, duplicate);
+        await mergeIntoExistingIssue(g.primary, duplicate);
+        issueId = duplicate.id;
       } else {
-        await promoteOne(c);
+        issueId = await promoteOne(g.primary);
+      }
+      if (issueId && g.absorbed.length > 0) {
+        await absorbIntoIssue(g.absorbed, issueId, g.primary.title);
       }
     } catch (e) {
-      console.error(`  ❌ 記事化失敗: ${c.title} (${e})`);
-      await notifyRadarFailure(`promote.ts: 記事化失敗 ${c.title}`, e);
+      console.error(`  ❌ 記事化失敗: ${g.primary.title} (${e})`);
+      await notifyRadarFailure(`promote.ts: 記事化失敗 ${g.primary.title}`, e);
     }
   }
 
   console.log("📰 Radar promote 完了");
+}
+
+/**
+ * ラン内統合（dedupeSelectedCandidates）で主候補に吸収された候補を、
+ * 実際に作成/紐づけされたIssueへ後追いで紐づける（記事は別途生成しない）。
+ */
+async function absorbIntoIssue(absorbed: PromotionCandidate[], issueId: string, primaryTitle: string): Promise<void> {
+  if (DRY_RUN) {
+    for (const a of absorbed) {
+      console.log(`  📝 [dry-run] ${a.title} は「${primaryTitle}」に統合（DB書き込みなし）`);
+    }
+    return;
+  }
+  for (const a of absorbed) {
+    await prisma.$transaction([
+      prisma.topicCandidate.update({
+        where: { id: a.id },
+        data: { status: "PUBLISHED", issueId, decision: `merged_into_selected_candidate:${issueId}` },
+      }),
+      prisma.issueTimeline.create({
+        data: { issueId, label: `バズ検知: 関連トピックとして検知（${a.title.slice(0, 60)}）` },
+      }),
+    ]);
+  }
 }
 
 /**
@@ -144,7 +192,8 @@ async function mergeIntoExistingIssue(c: PromotionCandidate, duplicate: ActiveIs
   ]);
 }
 
-async function promoteOne(c: PromotionCandidate): Promise<void> {
+/** 公開できた場合は作成したIssueのidを返す（ラン内統合の吸収候補を後から紐づけるため）。HELD/dry-runはnull */
+async function promoteOne(c: PromotionCandidate): Promise<string | null> {
   let isOfficial = c.evidence.officialEvents.length > 0 || c.evidence.laws.length > 0;
   const internationalSources = c.evidence.internationalNews.map((n) => ({
     title: n.title,
@@ -163,11 +212,47 @@ async function promoteOne(c: PromotionCandidate): Promise<void> {
     isOfficial = false;
   }
 
+  const useInternational = shouldUseInternationalReports(c.category, c.topicTerm || c.title);
   const [reportExcerpts, internationalReportExcerpts, pollingExcerpts] = await Promise.all([
     isOfficial ? Promise.resolve([]) : fetchReportExcerpts(c.sourceUrls),
-    fetchReportExcerpts(internationalSources),
+    useInternational ? fetchReportExcerpts(internationalSources) : Promise.resolve([]),
     fetchReportExcerpts(pollingNewsSources(c.evidence)),
   ]);
+  if (!useInternational && internationalSources.length > 0) {
+    console.log(`  🌍 国内主争点のため海外報道抜粋はスキップ（${internationalSources.length}件あり）`);
+  }
+
+  // カードのサムネイル取得（リンクプレビュー用・自前保存なし）。本文取得に既に成功したURLを
+  // 候補にすることで無駄打ちを減らす。記事生成と並行して走らせ、公開直前にまとめて待つ。
+  const thumbnailPromise = fetchArticleThumbnail(
+    [...reportExcerpts, ...internationalReportExcerpts].map((e) => ({ url: e.url, feed: e.feed })),
+  ).catch(() => null);
+
+  const debateResolved = resolveDebateType({
+    topic: c.topicTerm || c.evidence.topic || c.title,
+    category: c.category,
+    title: c.title,
+    voteQuestion: c.evidence.voteQuestion,
+    newsTitles: (c.evidence.news ?? []).map((n) => n.title),
+    debateType: c.evidence.debateType ?? resolveCandidateDebateType(c),
+    reignite: c.evidence.reignite,
+  });
+
+  // ④ 媒体別主張のdiff（一致点/食い違い/単独媒体限定）を先に機械抽出し、Writerには生抜粋と併せて渡す。
+  let claimDiffBlock = "";
+  try {
+    claimDiffBlock = formatClaimDiffBlock(
+      await buildClaimDiff(
+        [...reportExcerpts, ...internationalReportExcerpts].map((e) => ({
+          feed: e.feed,
+          title: e.title,
+          text: e.text,
+        })),
+      ),
+    );
+  } catch (e) {
+    console.warn(`  ⚠️ 媒体diffのnano失敗（fail-open・生抜粋のみで続行）: ${c.title} (${e})`);
+  }
 
   const { article, verified, unresolvedClaims } = await generateVerifiedArticle({
     issueTitle: c.title,
@@ -176,11 +261,14 @@ async function promoteOne(c: PromotionCandidate): Promise<void> {
     primaryExcerpts,
     reportExcerpts,
     internationalReportExcerpts,
+    claimDiffBlock,
     pollingExcerpts,
     dietSpeeches: c.evidence.dietSpeeches,
     background: c.evidence.background,
     laws: c.evidence.laws,
     estatStats: c.evidence.estatStats,
+    debateType: debateResolved?.debateType ?? null,
+    reignite: debateResolved?.reignite ?? false,
   });
 
   if (!verified) {
@@ -190,7 +278,7 @@ async function promoteOne(c: PromotionCandidate): Promise<void> {
       where: { id: c.id },
       data: { status: "HELD", decision: `unverified_claim:${reasons.slice(0, 200)}` },
     });
-    return;
+    return null;
   }
 
   const banned = violatesBan(article);
@@ -200,24 +288,79 @@ async function promoteOne(c: PromotionCandidate): Promise<void> {
       where: { id: c.id },
       data: { status: "HELD", decision: `banned_phrase:${banned}` },
     });
-    return;
+    return null;
   }
 
+  try {
+    const gate = await checkArticleQualityGate({
+      title: c.title,
+      lead: article.lead,
+      articleHtml: article.articleHtml,
+    });
+    if (!gate.ok) {
+      console.warn(`  ⚠️ 品質ゲート不合格「${gate.reason}」→ 公開せずHELD: ${c.title}`);
+      await prisma.topicCandidate.update({
+        where: { id: c.id },
+        data: { status: "HELD", decision: `quality_gate:${(gate.reason ?? "").slice(0, 200)}` },
+      });
+      return null;
+    }
+  } catch (e) {
+    console.warn(`  ⚠️ 品質ゲートnano失敗（fail-open・公開続行）: ${c.title} (${e})`);
+  }
+
+  // discover段階の仮設問・選択肢（見出しだけを見て作った）を、実際の記事本文と確定debateTypeに
+  // 合わせて作り直す。失敗時はdiscover段階の値にフォールバックする（記事公開は止めない）。
+  const fallbackChoices =
+    c.evidence.voteChoices ?? { for: "支持する", against: "支持しない", undecided: "わからない" };
+  const { question: voteQuestionTitle, choices } = await composeVoteQuestion({
+    issueTitle: c.title,
+    lead: article.lead,
+    bullets: article.bullets,
+    debateType: debateResolved?.debateType ?? "policy",
+    fallbackQuestion: c.evidence.voteQuestion || c.title,
+    fallbackChoices,
+  });
+
   if (DRY_RUN) {
+    const thumbnail = await thumbnailPromise;
     console.log(
       `  📝 [dry-run] ${c.title}（buzzScore=${c.evidence.buzzScore} / ${isOfficial ? "OFFICIAL" : "REPORTED"}）`,
     );
     console.log(`     lead: ${article.lead}`);
-    return;
+    console.log(`     question: ${voteQuestionTitle}`);
+    console.log(
+      `     choices: for=${choices.for} / against=${choices.against} / undecided=${choices.undecided}`,
+    );
+    console.log(
+      `     thumbnail: ${thumbnail ? `${thumbnail.thumbnailUrl}（出典: ${thumbnail.thumbnailSourceFeed}）` : "取得失敗/なし"}`,
+    );
+    return null;
   }
 
   const slug = `radar-buzz-${jstDateString()}-${randomUUID().slice(0, 8)}`;
-  const choices = c.evidence.voteChoices ?? { for: "支持する", against: "支持しない", undecided: "わからない" };
+  const thumbnail = await thumbnailPromise;
+
+  // shareTitle（X/OG/SEO用の「自分ごとフック」）はtitle（中立な投票設問）と分離して生成する。
+  // 失敗してもtitleへフォールバックするだけなので記事公開は止めない。
+  const shareTitle = await composeIssueTitle({
+    clusterTitle: c.title,
+    question: voteQuestionTitle,
+    sourceTitles: c.sourceUrls.map((s) => s.title),
+    classification: isOfficial ? "official" : "reported",
+    category: c.category ?? "",
+    primaryExcerpts,
+    debateType: debateResolved?.debateType,
+  }).catch((e) => {
+    console.warn(`  ⚠️ shareTitle生成失敗（titleにフォールバック）: ${e}`);
+    return "";
+  });
 
   const issue = await prisma.issue.create({
     data: {
       slug,
-      title: c.evidence.voteQuestion || c.title,
+      title: voteQuestionTitle,
+      shareTitle: shareTitle || null,
       category: toIssueCategory(c.category ?? ""),
       status: "TRENDING",
       confirmation: isOfficial ? "OFFICIAL" : "REPORTED",
@@ -229,6 +372,10 @@ async function promoteOne(c: PromotionCandidate): Promise<void> {
       articleHtml: article.articleHtml,
       articleGeneratedAt: new Date(),
       voteLabelsJson: choices as unknown as Prisma.InputJsonValue,
+      debateType: debateResolved?.debateType ?? null,
+      thumbnailUrl: thumbnail?.thumbnailUrl ?? null,
+      thumbnailSourceUrl: thumbnail?.thumbnailSourceUrl ?? null,
+      thumbnailSourceFeed: thumbnail?.thumbnailSourceFeed ?? null,
       keywords: c.topicTerm ? [c.topicTerm] : [c.title],
       monitoringUntil: new Date(Date.now() + 60 * 86400_000),
     },
@@ -259,6 +406,7 @@ async function promoteOne(c: PromotionCandidate): Promise<void> {
 
   await notifyRevalidate(slug, issue.id);
   console.log(`  ✅ /issues/${slug} を公開（${isOfficial ? "OFFICIAL" : "REPORTED"}・buzzScore=${c.evidence.buzzScore}）`);
+  return issue.id;
 }
 
 main()

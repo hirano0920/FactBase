@@ -4,7 +4,7 @@ import { getRanking, getWeeklyRanking } from "@/lib/data";
 import { AppSidebarBody } from "@/components/layout/app-sidebar-body";
 import type { Plan } from "@prisma/client";
 
-/** サイドバー用データ。同一リクエスト内で重複取得しない。LIVEはクライアント側で遅延取得。 */
+/** サイドバー用データ。同一リクエスト内で重複取得しない。 */
 export const getSidebarData = cache(async () => {
   const [ranking, weekly] = await Promise.all([getRanking(), getWeeklyRanking(5)]);
   return { ranking, weekly };
@@ -23,7 +23,6 @@ export async function AppSidebar() {
     <AppSidebarBody
       hotNow={ranking.slice(0, 5)}
       weekly={weekly}
-      liveEntries={[]}
       plan={plan}
     />
   );
@@ -37,7 +36,6 @@ export async function AppSidebarStatic() {
     <AppSidebarBody
       hotNow={ranking.slice(0, 5)}
       weekly={weekly}
-      liveEntries={[]}
       plan="FREE"
     />
   );

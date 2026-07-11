@@ -20,6 +20,8 @@ export interface Issue {
   id: string;
   slug: string;
   title: string;
+  /** X/OG/SEO用の「自分ごとフック」タイトル。titleは中立な投票設問のまま、こちらだけ引きを強める。未設定はnull（titleにフォールバック） */
+  shareTitle: string | null;
   category: CategoryId;
   status: IssueStatus;
   summary: IssueSummary;
@@ -35,6 +37,15 @@ export interface Issue {
   underReview: boolean;
   /** 投票ボタンのカスタム文言（Radar争点用。nullなら賛成/反対/わからない） */
   voteLabels: VoteLabels | null;
+  /**
+   * カードのサムネイル。出典URLの画像をリンクプレビューとして直接参照するだけ（自前保存・再配布なし）。
+   * 未取得/拒否時はnull（呼び出し側は静かにフォールバック表示）
+   */
+  thumbnailUrl: string | null;
+  /** サムネイルの出典（クリックで元記事に飛べるように・出典明記のため） */
+  thumbnailSourceUrl: string | null;
+  /** カード上の出典表記（媒体名） */
+  thumbnailSourceFeed: string | null;
 }
 
 export interface Comment {
@@ -51,6 +62,8 @@ export interface Comment {
   dislikeCount: number;
   helpfulCount: number;
   fcResult: FactCheckResult | null;
+  /** Pro限定✅バッジ。fcResult.verdict==="true" && userPlan==="FACTCHECK" の読み取り時点の導出値 */
+  verifiedBadge: boolean;
   createdAt: string;
   /** 返信の場合は親コメントID。トップレベルコメントはnull */
   parentId: string | null;
@@ -58,6 +71,13 @@ export interface Comment {
   replyCount: number;
   /** 1階層のみの返信（トップレベルコメントにのみ含まれる。返信自身のrepliesは常に空） */
   replies: Comment[];
+}
+
+/** スプリットスレッド専用。相手陣営からのhelpful数（越境評価バッジ表示用） */
+export interface SplitComment extends Comment {
+  crossHelpful: number;
+  /** trueならAIが記事の材料から生成した論点提示（コールドスタート対策）。DBには保存されない仮想コメント */
+  isAiSteelman?: boolean;
 }
 
 export type FcVerdictId =
@@ -104,7 +124,7 @@ export interface UserBadge {
 
 export interface RankingItem {
   rank: number;
-  issue: Pick<Issue, "id" | "slug" | "title" | "category" | "status">;
+  issue: Pick<Issue, "id" | "slug" | "title" | "shareTitle" | "category" | "status">;
   voteTally: VoteTally;
   commentCount: number;
   trendScore: number;

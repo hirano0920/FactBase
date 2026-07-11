@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 const TABS = [
@@ -13,17 +13,6 @@ const TABS = [
         strokeLinecap="round"
         strokeLinejoin="round"
         d="M3 10.5 12 3l9 7.5M5 9.5V21h5v-6h4v6h5V9.5"
-      />
-    ),
-  },
-  {
-    href: "/?live=1#live-feed",
-    label: "LIVE",
-    icon: (
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M12 3a6 6 0 0 0-9 8.5M12 21a6 6 0 0 0 9-8.5M9.5 9.5a3 3 0 1 1 5 0"
       />
     ),
   },
@@ -54,8 +43,6 @@ const TABS = [
 /** モバイル専用の下部タブバー。 */
 export function BottomNav() {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const isLive = searchParams.get("live") === "1";
 
   return (
     <nav
@@ -63,14 +50,9 @@ export function BottomNav() {
       className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-surface/95 backdrop-blur-md lg:hidden"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
-      <div className="grid grid-cols-4">
+      <div className="grid grid-cols-3">
         {TABS.map((tab) => {
-          const active =
-            tab.href === "/"
-              ? pathname === "/" && !isLive
-              : tab.label === "LIVE"
-                ? pathname === "/" && isLive
-                : pathname.startsWith(tab.href);
+          const active = tab.href === "/" ? pathname === "/" : pathname.startsWith(tab.href);
 
           return (
             <Link

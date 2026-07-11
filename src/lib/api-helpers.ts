@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { kv, rateKey } from "@/lib/redis";
 import { getClientIpFromHeaders, isDomesticAccess } from "@/lib/geo";
+import { SITE } from "@/lib/constants";
 import type { Session } from "next-auth";
 
 /**
@@ -28,7 +29,7 @@ export function requireDomesticAccess(req: NextRequest): NextResponse | null {
   if (!isDomesticAccess(req.headers)) {
     return apiError(
       451,
-      "FactBaseは日本国内からのアクセスのみご利用いただけます",
+      `${SITE.name}は日本国内からのアクセスのみご利用いただけます`,
       "GEO_BLOCKED",
     );
   }

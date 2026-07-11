@@ -37,7 +37,7 @@ export function FeedFilterBar({
           type="button"
           onClick={() => onCategoryChange(undefined)}
           className={cn(
-            "shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors",
+            "shrink-0 rounded-full border px-3.5 py-2.5 text-sm font-medium transition",
             !activeCategory
               ? "border-ink bg-ink text-surface"
               : "border-border text-ink-secondary hover:border-border-strong hover:bg-surface-muted",
@@ -51,7 +51,7 @@ export function FeedFilterBar({
             type="button"
             onClick={() => onCategoryChange(c.id)}
             className={cn(
-              "shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors",
+              "shrink-0 rounded-full border px-3.5 py-2.5 text-sm font-medium transition",
               activeCategory === c.id
                 ? "border-ink bg-ink text-surface"
                 : "border-border text-ink-secondary hover:border-border-strong hover:bg-surface-muted",
@@ -75,7 +75,7 @@ export function FeedFilterBar({
             type="button"
             onClick={() => onSortChange(s.id)}
             className={cn(
-              "rounded-full border px-3 py-1 text-xs font-semibold transition-colors",
+              "rounded-full border px-3 py-2 text-xs font-semibold transition",
               activeSort === s.id
                 ? "border-accent/40 bg-accent/10 text-accent"
                 : "border-border text-ink-secondary hover:bg-surface-muted",

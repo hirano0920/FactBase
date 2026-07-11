@@ -128,18 +128,17 @@ export async function listHeldRadarCandidates(limit = 20) {
   });
 }
 
-/** cronは15分間隔で動く前提。この分数を超えて新規イベントが来ていなければ停止を疑う */
-const RADAR_STALE_MINUTES = 40;
+/** discover は最大約4時間間隔。この分数を超えて候補更新が無ければ停止を疑う */
+const RADAR_STALE_MINUTES = 5 * 60;
 
 /**
  * 「今日ニュースが少なくて記事が出ていない」のか「パイプライン自体が止まっている」のかを
  * 判別するための稼働状況。Slack Webhook未設定でも管理画面だけで判断できるようにする。
- * lastSourceEventAtが更新され続けていればdetect.tsのフィード取得は生きている
- * （＝新着0件でも公開0件でも「動いてはいる」と判断できる）。
+ * 本番 cron は discover → promote のみのため、TopicCandidate の更新で alive を判定する
+ * （旧: detect の SourceEvent。detect 停止後は増えず誤検知になる）。
  */
 export async function getRadarHealth() {
-  const [lastSourceEvent, lastCandidate, todayIssueCount, todayCandidateCount] = await Promise.all([
-    prisma.sourceEvent.findFirst({ orderBy: { createdAt: "desc" }, select: { createdAt: true } }),
+  const [lastCandidate, todayIssueCount, todayCandidateCount] = await Promise.all([
     prisma.topicCandidate.findFirst({ orderBy: { updatedAt: "desc" }, select: { updatedAt: true } }),
     prisma.issue.count({
       where: {
@@ -152,18 +151,19 @@ export async function getRadarHealth() {
     }),
   ]);
 
-  const minutesSinceLastEvent = lastSourceEvent
-    ? (Date.now() - lastSourceEvent.createdAt.getTime()) / 60_000
+  const minutesSinceLastCandidate = lastCandidate
+    ? (Date.now() - lastCandidate.updatedAt.getTime()) / 60_000
     : null;
-  // フィード取得（detect.tsのステップ1）が動いていれば必ず定期的にSourceEventが増える。
-  // これが止まっていればcron自体が停止/クラッシュしている可能性が高い
-  const alive = minutesSinceLastEvent !== null && minutesSinceLastEvent <= RADAR_STALE_MINUTES;
+  // discover 窓（最大約4h）を超えて候補が更新されていなければ cron / discover 停止の疑い
+  const alive =
+    minutesSinceLastCandidate !== null && minutesSinceLastCandidate <= RADAR_STALE_MINUTES;
 
   return {
     alive,
-    lastSourceEventAt: lastSourceEvent?.createdAt.toISOString() ?? null,
+    lastSourceEventAt: null as string | null,
     lastCandidateEvaluatedAt: lastCandidate?.updatedAt.toISOString() ?? null,
-    minutesSinceLastEvent: minutesSinceLastEvent !== null ? Math.round(minutesSinceLastEvent) : null,
+    minutesSinceLastEvent:
+      minutesSinceLastCandidate !== null ? Math.round(minutesSinceLastCandidate) : null,
     todayIssueCount,
     todayCandidateCount,
   };

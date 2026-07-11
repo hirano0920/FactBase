@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SITE } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
 interface PlusTrialPromoProps {
@@ -20,9 +21,9 @@ export function PlusTrialPromo({ className, compact = false }: PlusTrialPromoPro
         <p className="mb-1 inline-flex rounded-full bg-warm px-2 py-0.5 text-[10px] font-extrabold tracking-wide text-white">
           3日間無料
         </p>
-        <p className="mt-2 text-sm font-bold text-ink">FactBase Plus を試す</p>
+        <p className="mt-2 text-sm font-bold text-ink">{SITE.name} Plus を試す</p>
         <p className="mt-1 text-xs leading-relaxed text-ink-secondary">
-          ワンタップFC 1日5回。今すぐ3日間、料金はかかりません。
+          層の動き・両陣営マップが見られる。今すぐ3日間、料金はかかりません。
         </p>
         <Link
           href="/pricing"
@@ -48,7 +49,7 @@ export function PlusTrialPromo({ className, compact = false }: PlusTrialPromoPro
         Plus / Pro は<strong className="text-warm-hover"> 最初の3日間は無料</strong>。いつでも解約できます。
       </p>
       <p className="mt-1 text-sm text-ink-muted">
-        投票・コメントはログインすれば無料。FCや広告非表示を試すときだけ課金が始まります。
+        投票・議論は無料。層の動き・両陣営分析・レスバ支援 AI を試すときだけ課金が始まります。
       </p>
     </div>
   );

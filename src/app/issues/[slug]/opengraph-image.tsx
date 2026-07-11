@@ -26,7 +26,8 @@ export default async function OgImage({ params }: { params: Promise<{ slug: stri
   const { slug } = await params;
   const issue = await getIssueBySlug(slug);
 
-  const title = issue?.title ?? SITE.name;
+  // shareTitle（自分ごとフック）優先。無ければ中立な投票設問（title）にフォールバック
+  const title = issue?.shareTitle || issue?.title || SITE.name;
   const lead = issue?.summary.lead ?? SITE.tagline;
   const tally = issue?.voteTally;
 

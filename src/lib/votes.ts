@@ -180,6 +180,20 @@ export async function castVote(
     return getTally(issueId);
   }
 
+  // 初回投票（existing===null）だけ「読前」スナップショットとしてVoteEventに記録する。
+  // 意見変化率（A-3）・沈黙の多数派ヒートマップ（A-4）の母数になる読前値なので、
+  // 再投票のたびに上書きしない（@@unique制約により重複INSERTは無害に失敗するだけ）。
+  // 分析専用の副作用なので失敗しても投票自体は成立させる。
+  if (existing === null) {
+    try {
+      await prisma.voteEvent.create({
+        data: { userId, issueId, phase: "BEFORE_READ", choice: newEnum },
+      });
+    } catch {
+      // 既に存在する場合等は無視（投票フロー自体は成立させる）
+    }
+  }
+
   // KVはDBコミット後に更新（KV障害時もDBが正、次のコールドスタートで復元される）
   try {
     await kv.hincrby(voteKey(issueId), choice, 1);
@@ -202,4 +216,17 @@ export async function getUserVote(
     select: { choice: true },
   });
   return vote ? enumToChoice[vote.choice] : null;
+}
+
+/** 一覧画面(ランキング等)で「投票済みの争点だけ結果を見せる」ためのバッチ判定 */
+export async function getVotedIssueIds(
+  userId: string,
+  issueIds: string[],
+): Promise<string[]> {
+  if (issueIds.length === 0) return [];
+  const votes = await prisma.vote.findMany({
+    where: { userId, issueId: { in: issueIds } },
+    select: { issueId: true },
+  });
+  return votes.map((v) => v.issueId);
 }

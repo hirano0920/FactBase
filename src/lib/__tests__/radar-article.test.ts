@@ -8,6 +8,10 @@ vi.mock("@/lib/openai-client", () => ({
   createOpenAIClient: () => ({
     chat: { completions: { create: mocks.create } },
   }),
+  createArticleClient: () => ({
+    chat: { completions: { create: mocks.create } },
+  }),
+  resolveArticleModel: (defaultModel: string) => defaultModel,
 }));
 
 import {
@@ -21,6 +25,8 @@ import {
   generateVerifiedArticle,
   generateArticle,
   violatesBan,
+  extractArgumentSections,
+  formatArgumentSectionsForPrompt,
   type ArticleClaim,
   type GenerateArticleParams,
 } from "@/lib/radar-article";
@@ -66,6 +72,13 @@ describe("buildSourceTextIndex", () => {
     expect(index.get("https://c")).toBe("発言内容");
     expect(index.get("https://d")).toBe("条文内容");
     expect(index.get("https://e")).toBe("背景本文");
+  });
+
+  it("pollingExcerptsのURLも本文に索引化する（世論調査主張の裏取り用）", () => {
+    const index = buildSourceTextIndex({
+      pollingExcerpts: [{ feed: "NHK", title: "内閣支持率調査", url: "https://poll", text: "支持率は45%でした" }],
+    });
+    expect(index.get("https://poll")).toBe("支持率は45%でした");
   });
 
   it("法令に条文抜粋が無い場合は索引に含めない（存在レベルの事実のみで裏取り不能なため）", () => {
@@ -183,6 +196,44 @@ describe("violatesBan", () => {
   });
 });
 
+describe("extractArgumentSections", () => {
+  it("賛成側/反対側セクションだけを抽出し、背景・出典等は除外する", () => {
+    const html = `<h2>いま何が論点か</h2><p>導入部</p>
+      <h2>背景</h2><ul><li>辞書的な説明</li></ul>
+      <h2>賛成側が言うこと</h2><ul><li>財源が確保できる</li><li>公平性が高まる</li></ul>
+      <h2>反対側が言うこと</h2><ul><li>負担が増える</li></ul>
+      <h2>出典</h2><ul><li><a href="https://example.com">記事</a></li></ul>`;
+    const sections = extractArgumentSections(html);
+    expect(sections.map((s) => s.heading)).toEqual(["賛成側が言うこと", "反対側が言うこと"]);
+    expect(sections[0].items).toEqual(["財源が確保できる", "公平性が高まる"]);
+    expect(sections[1].items).toEqual(["負担が増える"]);
+  });
+
+  it("声明対立型の当事者名見出しも（既知の非論点見出しでなければ）拾う", () => {
+    const html = `<h2>いま分かっていること</h2><ul><li>事実</li></ul>
+      <h2>A氏の言い分</h2><ul><li>事実誤認だと主張</li></ul>
+      <h2>B事務所の言い分</h2><ul><li>謝罪を要求</li></ul>`;
+    const sections = extractArgumentSections(html);
+    expect(sections.map((s) => s.heading)).toEqual(["A氏の言い分", "B事務所の言い分"]);
+  });
+
+  it("見出しにHTMLタグが無いセクションや空のulは無視する", () => {
+    expect(extractArgumentSections("<h2>賛成側が言うこと</h2><p>箇条書きなし</p>")).toEqual([]);
+  });
+});
+
+describe("formatArgumentSectionsForPrompt", () => {
+  it("見出しごとにブロック化したプレーンテキストを返す", () => {
+    const text = formatArgumentSectionsForPrompt([
+      { heading: "賛成側が言うこと", items: ["財源が確保できる"] },
+      { heading: "反対側が言うこと", items: ["負担が増える"] },
+    ]);
+    expect(text).toBe(
+      "【賛成側が言うこと】\n- 財源が確保できる\n\n【反対側が言うこと】\n- 負担が増える",
+    );
+  });
+});
+
 describe("extractGroundableNumbers", () => {
   it("金額・割合・件数等の数量的事実を抽出する", () => {
     const html = "<li>予算は<strong>140億円</strong>に決定。前年比3.5%増で、対象は8000件</li>";
@@ -210,12 +261,44 @@ describe("extractHighlightedFacts", () => {
   it("強調が無ければ空配列を返す", () => {
     expect(extractHighlightedFacts("<li>強調なしの文章</li>")).toEqual([]);
   });
+
+  it("観点ラベル・日付ラベルだけのstrongは除外する（検証誤爆防止）", () => {
+    const html = `<ul>
+      <li><strong>共通して報じられていること:</strong> 各社が金利据え置きを報じた</li>
+      <li><strong>媒体名:</strong> 日経</li>
+      <li><strong>ダイヤモンド・オンライン:</strong> 独自の分析を報じた</li>
+      <li><strong>本人・事務所側:</strong> 該当しないと反論</li>
+      <li><strong>6月4日:</strong> 会合が開かれた</li>
+      <li><strong>今年6月26日:</strong> 議論が始まった</li>
+      <li><strong>政策金利を1%に据え置き</strong></li>
+    </ul>`;
+    expect(extractHighlightedFacts(html)).toEqual(["政策金利を1%に据え置き"]);
+  });
+
+  it("正確な日が分からない月単位の時系列見出し（4月:等）も日付ラベルとして除外する", () => {
+    const html = `<ul>
+      <li><strong>4月:</strong> 道路交通法違反が発覚</li>
+      <li><strong>今年7月:</strong> 代表辞任を表明</li>
+      <li><strong>政策金利を1%に据え置き</strong></li>
+    </ul>`;
+    expect(extractHighlightedFacts(html)).toEqual(["政策金利を1%に据え置き"]);
+  });
 });
 
 describe("findUngroundedNumbers", () => {
   it("資料本文のどこにも無い数値だけを返す", () => {
     const result = findUngroundedNumbers(["100億円", "3.5%"], ["予算は100億円に決定されました"]);
     expect(result).toEqual(["3.5%"]);
+  });
+
+  it("全角数字で書かれた資料でも半角の数値claimを裏付けありと判定する（表記ゆれ誤判定の修正）", () => {
+    const result = findUngroundedNumbers(["100億円"], ["予算は１００億円に決定されました"]);
+    expect(result).toEqual([]);
+  });
+
+  it("全角％でも半角%のclaimを裏付けありと判定する", () => {
+    const result = findUngroundedNumbers(["3.5%"], ["支持率は3.5％に上昇"]);
+    expect(result).toEqual([]);
   });
 });
 
@@ -231,6 +314,16 @@ describe("findUnclaimedHighlights", () => {
 
   it("claimsに含まれていなくても資料本文に直接見つかれば合格扱いにする", () => {
     const result = findUnclaimedHighlights(["予算は140億円"], [], ["予算は140億円に決定されました"]);
+    expect(result).toEqual([]);
+  });
+
+  it("資料本文が全角数字でも半角の強調箇所を合格扱いにする（表記ゆれ誤判定の修正）", () => {
+    const result = findUnclaimedHighlights(["予算は140億円"], [], ["予算は１４０億円に決定されました"]);
+    expect(result).toEqual([]);
+  });
+
+  it("claimsが全角・強調箇所が半角の組み合わせでも合格扱いにする", () => {
+    const result = findUnclaimedHighlights(["予算は140億円"], ["予算は１４０億円に決定"], ["別の資料"]);
     expect(result).toEqual([]);
   });
 });
@@ -312,6 +405,65 @@ describe("isTimelineWorthy", () => {
   });
 });
 
+describe("generateArticle（TwoSides導火線フォーマット）", () => {
+  it("REPORTEDは火種向けセクションとlead/bullets指示を含む", async () => {
+    mockArticleResponse({ lead: "lead", bullets: [], articleHtml: "<h2>いま何が論点か</h2>" });
+    await generateArticle({
+      issueTitle: "テスト争点",
+      isReported: true,
+      sources: [{ title: "見出し", url: "https://known", feed: "f" }],
+      debateType: "policy",
+    });
+    const sentContent = mocks.create.mock.calls[0][0].messages[1].content as string;
+    const systemContent = mocks.create.mock.calls[0][0].messages[0].content as string;
+    expect(systemContent).toContain("最低限");
+    expect(systemContent).toContain("スプリットスレッド");
+    expect(systemContent).toContain("声明対立");
+    expect(systemContent).toContain("国内が主戦場");
+    expect(systemContent).toContain("辞書定義");
+    expect(sentContent).toContain("<h2>いま何が論点か</h2>");
+    expect(sentContent).toContain("<h2>どこで意見が分かれるか</h2>");
+    expect(sentContent).toContain("<h2>賛成側が言うこと</h2>");
+    expect(sentContent).toContain("争点タイプ: policy");
+    expect(sentContent).toContain("いま分かっていること:");
+    expect(sentContent).toContain("賛成側が言うこと:");
+    expect(sentContent).not.toContain("<h2>現時点で確認できること</h2>");
+    expect(sentContent).not.toContain("<h2>各立場の主張</h2>");
+    expect(sentContent).not.toContain("<h2>報道の共通点と相違点</h2>");
+    expect(sentContent).toContain("資料にありません");
+  });
+
+  it("declaration型は当事者名ヒントを注入する", async () => {
+    mockArticleResponse({ lead: "lead", bullets: [], articleHtml: "<p>x</p>" });
+    await generateArticle({
+      issueTitle: "声明対立",
+      isReported: true,
+      sources: [{ title: "見出し", url: "https://known", feed: "f" }],
+      debateType: "declaration",
+    });
+    const sentContent = mocks.create.mock.calls[0][0].messages[1].content as string;
+    expect(sentContent).toContain("争点タイプ: declaration");
+    expect(sentContent).toContain("当事者名");
+    expect(sentContent).toContain("A側（当事者名）");
+  });
+
+  it("OFFICIALは与党/野党固定ラベルではなく対立の軸を使う", async () => {
+    mockArticleResponse({ lead: "lead", bullets: [], articleHtml: "<h2>いま分かっていること</h2>" });
+    await generateArticle({
+      issueTitle: "テスト争点",
+      isReported: false,
+      sources: [{ title: "見出し", url: "https://known", feed: "f" }],
+      debateType: "policy",
+    });
+    const sentContent = mocks.create.mock.calls[0][0].messages[1].content as string;
+    expect(sentContent).toContain("<h2>どこで意見が分かれるか</h2>");
+    expect(sentContent).toContain("与党/野党固定はしない");
+    expect(sentContent).toContain("<h2>賛成側が言うこと</h2>");
+    expect(sentContent).not.toContain("<h2>各立場の主張</h2>");
+    expect(sentContent).not.toContain("<h2>ポイント</h2>");
+  });
+});
+
 describe("generateArticle（時系列セクションの自動挿入）", () => {
   const baseParams: GenerateArticleParams = {
     issueTitle: "テスト争点",
@@ -320,24 +472,24 @@ describe("generateArticle（時系列セクションの自動挿入）", () => {
   };
 
   it("isTimelineWorthy=falseなら時系列セクションの指示を含めない", async () => {
-    mockArticleResponse({ lead: "lead", bullets: [], articleHtml: "<h2>ポイント</h2>" });
+    mockArticleResponse({ lead: "lead", bullets: [], articleHtml: "<h2>いま分かっていること</h2>" });
     await generateArticle(baseParams);
     const sentContent = mocks.create.mock.calls[0][0].messages[1].content as string;
-    expect(sentContent).not.toContain("<h2>時系列</h2>");
+    expect(sentContent).not.toContain("<h2>これまでの流れ</h2>");
   });
 
   it("previousArticleがあれば（続報＝変遷あり）時系列セクションの指示を含める", async () => {
-    mockArticleResponse({ lead: "lead", bullets: [], articleHtml: "<h2>ポイント</h2>" });
+    mockArticleResponse({ lead: "lead", bullets: [], articleHtml: "<h2>いま分かっていること</h2>" });
     await generateArticle({
       ...baseParams,
-      previousArticle: { lead: "前回の要約", articleHtml: "<h2>ポイント</h2>" },
+      previousArticle: { lead: "前回の要約", articleHtml: "<h2>いま分かっていること</h2>" },
     });
     const sentContent = mocks.create.mock.calls[0][0].messages[1].content as string;
-    expect(sentContent).toContain("<h2>時系列</h2>");
+    expect(sentContent).toContain("<h2>これまでの流れ</h2>");
   });
 
   it("日付が複数日にまたがるsourcesがあれば初回生成でも時系列セクションを含める", async () => {
-    mockArticleResponse({ lead: "lead", bullets: [], articleHtml: "<h2>ポイント</h2>" });
+    mockArticleResponse({ lead: "lead", bullets: [], articleHtml: "<h2>いま分かっていること</h2>" });
     await generateArticle({
       ...baseParams,
       sources: [
@@ -347,6 +499,35 @@ describe("generateArticle（時系列セクションの自動挿入）", () => {
       ],
     });
     const sentContent = mocks.create.mock.calls[0][0].messages[1].content as string;
-    expect(sentContent).toContain("<h2>時系列</h2>");
+    expect(sentContent).toContain("<h2>これまでの流れ</h2>");
+  });
+});
+
+describe("generateArticle（世論調査報道抜粋）", () => {
+  const baseParams: GenerateArticleParams = {
+    issueTitle: "テスト争点",
+    isReported: false,
+    sources: [{ title: "見出し", url: "https://known", feed: "f" }],
+  };
+
+  it("pollingExcerptsが無ければ世論調査報道抜粋ブロックを含めない", async () => {
+    mockArticleResponse({ lead: "lead", bullets: [], articleHtml: "<h2>ポイント</h2>" });
+    await generateArticle(baseParams);
+    const sentContent = mocks.create.mock.calls[0][0].messages[1].content as string;
+    expect(sentContent).not.toContain("# 世論調査報道抜粋");
+  });
+
+  it("pollingExcerptsがあれば媒体名付きで本文に含める", async () => {
+    mockArticleResponse({ lead: "lead", bullets: [], articleHtml: "<h2>ポイント</h2>" });
+    await generateArticle({
+      ...baseParams,
+      pollingExcerpts: [
+        { feed: "NHK", title: "内閣支持率調査", url: "https://poll", text: "支持率は45%でした" },
+      ],
+    });
+    const sentContent = mocks.create.mock.calls[0][0].messages[1].content as string;
+    expect(sentContent).toContain("# 世論調査報道抜粋");
+    expect(sentContent).toContain("NHK");
+    expect(sentContent).toContain("支持率は45%でした");
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import type { PrismaClient } from "@prisma/client";
-import { ensureEvidence, evidenceToArticleFacts, internationalNewsSources } from "../enrich";
+import { ensureEvidence, evidenceToArticleFacts, internationalNewsSources, pollingNewsSources } from "../enrich";
 import type { EvidenceBundle } from "../research";
 
 const EMPTY_BUNDLE: EvidenceBundle = {
@@ -129,6 +129,28 @@ describe("internationalNewsSources", () => {
     expect(sources).toEqual([
       { title: "A", url: "https://a", feed: "Reuters" },
       { title: "B", url: "https://b", feed: "international" },
+    ]);
+  });
+});
+
+describe("pollingNewsSources", () => {
+  it("evidenceがnull、またはpollingNewsが無ければ空配列", () => {
+    expect(pollingNewsSources(null)).toEqual([]);
+    expect(pollingNewsSources(EMPTY_BUNDLE)).toEqual([]);
+  });
+
+  it("pollingNewsを{title,url,feed}形式に変換する（sourceが空ならpollingにフォールバック）", () => {
+    const bundle: EvidenceBundle = {
+      ...EMPTY_BUNDLE,
+      pollingNews: [
+        { title: "A内閣支持率調査", source: "NHK", url: "https://a", pubDate: "", region: "domestic" },
+        { title: "B", source: "", url: "https://b", pubDate: "", region: "domestic" },
+      ],
+    };
+    const sources = pollingNewsSources(bundle);
+    expect(sources).toEqual([
+      { title: "A内閣支持率調査", url: "https://a", feed: "NHK" },
+      { title: "B", url: "https://b", feed: "polling" },
     ]);
   });
 });

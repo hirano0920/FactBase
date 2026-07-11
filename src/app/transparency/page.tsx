@@ -23,12 +23,20 @@ export default function TransparencyPage() {
               <SectionTitle>使用AI</SectionTitle>
               <dl className="space-y-4 text-sm">
                 <div>
-                  <dt className="font-medium text-ink">記事・要約</dt>
-                  <dd className="mt-1 text-ink-muted">{AI_MODELS.article}</dd>
+                  <dt className="font-medium text-ink">記事・要約（主筆）</dt>
+                  <dd className="mt-1 text-ink-muted">
+                    {AI_MODELS.article}（時事の理解・わかりやすい中立まとめ）
+                  </dd>
                 </div>
                 <div>
-                  <dt className="font-medium text-ink">FC・通報判定</dt>
-                  <dd className="mt-1 text-ink-muted">{AI_MODELS.utility}</dd>
+                  <dt className="font-medium text-ink">FC・通報・claims検証</dt>
+                  <dd className="mt-1 text-ink-muted">
+                    {AI_MODELS.utility}（高頻度の門番。記事生成とは別系統）
+                  </dd>
+                </div>
+                <div>
+                  <dt className="font-medium text-ink">争点選別</dt>
+                  <dd className="mt-1 text-ink-muted">{AI_MODELS.topicFilter}</dd>
                 </div>
                 <div>
                   <dt className="font-medium text-ink">ベクトル検索</dt>

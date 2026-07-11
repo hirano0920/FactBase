@@ -3,12 +3,15 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { reputationProgress, likeTitleProgress, REPUTATION_LADDERS, LIKE_TITLES } from "@/lib/reputation";
 import { getUserPublicStats } from "@/lib/user-stats";
+import { getUserInfluenceStats } from "@/lib/influence";
+import { getUserTrustScore } from "@/lib/trust-score";
+import { InfluenceStatsPanel } from "@/components/user/influence-stats-panel";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { PageContainer, Section } from "@/components/layout/page-container";
 import { DeleteAccountButton } from "@/components/account/delete-account-button";
 import { ProfileEditForm } from "@/components/account/profile-edit-form";
 import { UserDisplayName } from "@/components/user/display-name";
-import { PLAN_PRICES, PLANS } from "@/lib/constants";
+import { PLAN_PRICES, PLANS, SITE } from "@/lib/constants";
 import Link from "next/link";
 import type { Metadata } from "next";
 
@@ -32,6 +35,10 @@ export default async function AccountPage() {
   const { visibleCommentCount: commentCount, totalLikes } = await getUserPublicStats(
     session.user.id,
   );
+  const [influence, trust] = await Promise.all([
+    getUserInfluenceStats(session.user.id),
+    getUserTrustScore(session.user.id),
+  ]);
   const progress = reputationProgress(session.user.plan, commentCount);
   const likeProgress = likeTitleProgress(totalLikes);
 
@@ -75,6 +82,7 @@ export default async function AccountPage() {
                 initialName={session.user.name ?? ""}
                 initialBio={profile?.bio ?? ""}
               />
+              <InfluenceStatsPanel influence={influence} trust={trust} />
               <Link
                 href={`/u/${session.user.id}`}
                 className="mt-4 inline-block text-sm font-medium text-link"
@@ -87,7 +95,7 @@ export default async function AccountPage() {
               <h2 className="mb-3 text-base font-bold text-ink">基本情報</h2>
               <dl className="space-y-2 text-sm">
                 <div className="flex justify-between gap-4">
-                  <dt className="shrink-0 text-ink-faint">FactBase ID</dt>
+                  <dt className="shrink-0 text-ink-faint">{SITE.name} ID</dt>
                   <dd className="truncate font-mono text-xs text-ink-secondary">{session.user.id}</dd>
                 </div>
                 <div className="flex justify-between">

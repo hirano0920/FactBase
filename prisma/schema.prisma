@@ -35,6 +35,8 @@ enum IssueCategory {
   ECONOMY
   FINANCE
   EDUCATION
+  SOCIETY
+  ENTERTAINMENT
 }
 
 enum FcVerdict {
@@ -94,6 +96,7 @@ model User {
   accounts       Account[]
   sessions       Session[]
   votes          Vote[]
+  voteEvents     VoteEvent[]
   comments       Comment[]
   badges         UserBadge[]
   reports        Report[]
@@ -134,6 +137,9 @@ model Issue {
   id                 String        @id @default(cuid())
   slug               String        @unique
   title              String
+  // X/SEO用の「自分ごとフック」タイトル（composeIssueTitle生成）。titleは中立な投票設問のまま維持し、
+  // OG/メタタイトルだけ引きの強い表現にする（2層タイトル分離）。未設定時はtitleにフォールバック
+  shareTitle         String?
   category           IssueCategory
   status             IssueStatus   @default(ACTIVE)
   summaryJson        Json
@@ -152,12 +158,22 @@ model Issue {
   // Radar由来の争点用メタデータ
   confirmation   ConfirmationStatus   @default(MANUAL)
   voteLabelsJson Json? // 投票ボタンのカスタム文言 {"for":"説明すべき","against":"問題ない","undecided":"判断できない"}
+  // TwoSides争点タイプ（declaration/policy/org_response/norm_flare/indicator/geopolitics）。
+  // 生成時（resolveDebateType）は使っていたが、これまでIssueレコードには残しておらず、
+  // 公開後にレスバ支援AI等が争点タイプ別の切り口を再利用できなかった。null=旧データ/推定不能
+  debateType     String?
+  // カード用サムネイル。自前保存はせず出典URLの画像をリンクプレビューとして直接参照するだけ
+  // （転載・再配布はしない）。取得できなかった/拒否された場合は全てnullのままフォールバック表示。
+  thumbnailUrl       String?
+  thumbnailSourceUrl String? // 出典明記・クリックで元記事に飛べるようにする
+  thumbnailSourceFeed String? // カード上の出典表記（媒体名）
   // 公開後の品質報告（誤った要約・的外れなスレ立て等）が閾値に達すると true。
   // 人間確認が終わるまでトレンド表示・新規流入から外す（削除はしない＝透明性ログとして残す）
   underReview    Boolean              @default(false)
   qualityReports IssueQualityReport[]
 
   votes         Vote[]
+  voteEvents    VoteEvent[]
   comments      Comment[]
   evidenceLinks IssueEvidenceLink[]
   timeline      IssueTimeline[]
@@ -312,6 +328,33 @@ model Vote {
   @@index([issueId])
 }
 
+enum VotePhase {
+  BEFORE_READ
+  AFTER_READ
+}
+
+// 「意見が変わった率」「沈黙の多数派ヒートマップ」用の読前/読後スナップショット。
+// 既存Vote（現在の投票状態・投票ゲート・集計の真実のソース）とは別の追記用テーブルにして、
+// 既存の投票ロジック・投票ゲートに影響を与えない。
+// BEFORE_READはcastVote()が初回投票時に自動記録。AFTER_READは読了ゲート後の連続スライダー投票専用。
+model VoteEvent {
+  id     String     @id @default(cuid())
+  userId String
+  issueId String
+  phase  VotePhase
+  // BEFORE_READ: 3択投票と同じ値。AFTER_READ: intensityから導出したbucket（互換的な扱い用）
+  choice VoteChoice
+  // AFTER_READ（連続スライダー）のときだけ値が入る。-100=強く反対 〜 +100=強く賛成
+  intensity Int?
+  createdAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, issueId, phase])
+  @@index([issueId, phase])
+}
+
 model Comment {
   id               String           @id @default(cuid())
   issueId          String
@@ -352,6 +395,8 @@ model Helpful {
   comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
 
   @@unique([userId, commentId])
+  // commentId起点の集計(越境評価スコア計算)に必要。@@unique([userId,commentId])はuserId先頭のため使えない
+  @@index([commentId])
 }
 
 // 「保存したスレッド」。ユーザーが後で読み返すために争点をブックマークする。

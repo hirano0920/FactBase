@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getClientCountryFromHeaders, isDomesticAccessForMiddleware, isGeoFenceEnabled } from "@/lib/geo";
+import { SITE } from "@/lib/constants";
 
 /** Webhook・認証コールバック・ヘルスチェック等は国判定の対象外 */
 const GEO_EXEMPT_PREFIXES = [
@@ -25,7 +26,7 @@ export function middleware(req: NextRequest) {
       return NextResponse.json(
         {
           error: {
-            message: "FactBaseは日本国内からのアクセスのみご利用いただけます",
+            message: `${SITE.name}は日本国内からのアクセスのみご利用いただけます`,
             code: "GEO_BLOCKED",
           },
         },

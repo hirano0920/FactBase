@@ -7,6 +7,9 @@ import {
   LIKE_TITLES,
 } from "@/lib/reputation";
 import { getUserPublicStats } from "@/lib/user-stats";
+import { getUserInfluenceStats } from "@/lib/influence";
+import { getUserTrustScore } from "@/lib/trust-score";
+import { InfluenceStatsPanel } from "@/components/user/influence-stats-panel";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { PageContainer, Section } from "@/components/layout/page-container";
 import { UserDisplayName } from "@/components/user/display-name";
@@ -38,6 +41,10 @@ export default async function ProfilePage({ params }: ProfilePageProps) {
   if (!user) notFound();
 
   const { visibleCommentCount: commentCount, totalLikes } = await getUserPublicStats(user.id);
+  const [influence, trust] = await Promise.all([
+    getUserInfluenceStats(user.id),
+    getUserTrustScore(user.id),
+  ]);
   const progress = reputationProgress(user.plan, commentCount);
   const likeProgress = likeTitleProgress(totalLikes);
   const ladder = REPUTATION_LADDERS[user.plan];
@@ -64,6 +71,11 @@ export default async function ProfilePage({ params }: ProfilePageProps) {
               累計 like {totalLikes}
             </p>
           </header>
+
+          <Section>
+            <h2 className="mb-3 text-base font-bold text-ink">議論インフルエンス</h2>
+            <InfluenceStatsPanel influence={influence} trust={trust} />
+          </Section>
 
           <Section>
             <h2 className="mb-3 text-base font-bold text-ink">tier（コメント数）</h2>

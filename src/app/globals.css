@@ -26,9 +26,10 @@
   --color-warm-muted: #fbe9dd;
   --color-warm-hover: #c1683f;
 
-  --color-for: #4a7a5c;
+  /* アリーナ調: 賛成/反対は「二陣営がぶつかる」ことが一目でわかるよう、彩度を上げてはっきり対立させる */
+  --color-for: #1f7d47;
   --color-for-muted: #eaf3ec;
-  --color-against: #b0564f;
+  --color-against: #b23c2e;
   --color-against-muted: #f8ece9;
   --color-neutral: #6b7280;
   --color-neutral-muted: #f1eee6;
@@ -55,13 +56,17 @@
   --shadow-subtle: 0 1px 2px rgb(15 20 25 / 0.04);
   --shadow-card: 0 2px 6px rgb(15 20 25 / 0.05), 0 8px 20px rgb(15 20 25 / 0.04);
   --shadow-glow: 0 8px 30px rgb(79 70 229 / 0.16);
-  --radius-sm: 0.625rem;
-  --radius-md: 1rem;
-  --radius-lg: 1.5rem;
+  /* アリーナ調: 丸すぎる角は「無難なSaaS感」の元凶なので、全体的に締める */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
 
   --spacing-page: 1.5rem;
-  --width-content: 42rem;
-  --width-wide: 56rem;
+  /* Tailwind v4ではmax-w-*ユーティリティは--container-*名前空間から生成される。
+     以前--width-*だったため max-w-content/max-w-wide が実際には存在せず、
+     広い画面でPageContainerの幅制限が効いていなかった。 */
+  --container-content: 42rem;
+  --container-wide: 96rem;
 }
 
 /*
@@ -89,9 +94,9 @@
   --color-warm-muted: #3a2a20;
   --color-warm-hover: #eba883;
 
-  --color-for: #6fae82;
+  --color-for: #4fbb7c;
   --color-for-muted: #1c2e21;
-  --color-against: #d4837a;
+  --color-against: #e2695c;
   --color-against-muted: #322020;
   --color-neutral: #9aa1ac;
   --color-neutral-muted: #26282c;
@@ -142,6 +147,20 @@
     @apply text-link-hover;
   }
 
+  button {
+    @apply transition-transform duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40;
+  }
+
+  button:active {
+    transform: scale(0.97);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    button:active {
+      transform: none;
+    }
+  }
+
   ::selection {
     @apply bg-accent/15 text-ink;
   }
@@ -171,6 +190,25 @@
 
   .animate-pulse-hot {
     animation: pulse-hot 1.8s infinite;
+  }
+
+  /* ヒーローの背景ブロブがゆっくり漂う。静止画然としないための「生きてる」感の演出 */
+  @keyframes drift {
+    0%,
+    100% {
+      transform: translate(0, 0) scale(1);
+    }
+    50% {
+      transform: translate(4%, 6%) scale(1.12);
+    }
+  }
+
+  .animate-drift {
+    animation: drift 16s ease-in-out infinite;
+  }
+
+  .animate-drift-slow {
+    animation: drift 22s ease-in-out infinite reverse;
   }
 
   /* コメント・リスト項目が下からふわっと流れ込む登場アニメーション */
@@ -323,6 +361,22 @@
     animation: home-feed-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
+  /* ページ遷移のたびにコンテンツをふわっと入れ替える */
+  @keyframes route-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .route-transition {
+    animation: route-in 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .reveal-pending {
       opacity: 1;
@@ -335,6 +389,15 @@
 
     .home-expand-enter,
     .home-feed-enter {
+      animation: none;
+    }
+
+    .animate-drift,
+    .animate-drift-slow {
+      animation: none;
+    }
+
+    .route-transition {
       animation: none;
     }
   }

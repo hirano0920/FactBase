@@ -13,7 +13,7 @@
  *   1. --source のテキスト（e-Gov/会議録から手動コピペした一次情報）を読む
  *   2. nano: 法令チャンク分割の提案（JSON）
  *   3. コンソールで承認 (y/n)
- *   4. GPT-5: SEO記事生成（3行要約 + H2要点 + 賛否両論 + FAQ + 出典）
+ *   4. Grok 4.3: SEO記事生成（3行要約 + H2要点 + 賛否両論 + FAQ + 出典）
  *   5. Issue + EvidenceChunk + IssueEvidenceLink をDBに保存（pinned=trueで優先リンク）
  */
 import { readFileSync } from "node:fs";
@@ -21,7 +21,7 @@ import { createInterface } from "node:readline/promises";
 import { PrismaClient, type IssueCategory } from "@prisma/client";
 import OpenAI from "openai";
 import { AI_MODELS } from "../src/lib/constants";
-import { createOpenAIClient } from "../src/lib/openai-client";
+import { createArticleClient, createOpenAIClient, resolveArticleModel } from "../src/lib/openai-client";
 
 const prisma = new PrismaClient();
 
@@ -85,7 +85,7 @@ async function generateArticle(
 - 煽り・感嘆符・レトリックなし。冷静さがこのサイトの価値`;
 
   const res = await openai.chat.completions.create({
-    model: AI_MODELS.article,
+    model: resolveArticleModel(AI_MODELS.article),
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: system },
@@ -114,7 +114,7 @@ ${sourceText.slice(0, 50_000)}
 
   const text = res.choices[0]?.message?.content ?? "";
   const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("GPT-5の出力からJSONを抽出できませんでした");
+  if (!jsonMatch) throw new Error("記事モデルの出力からJSONを抽出できませんでした");
   return JSON.parse(jsonMatch[0]) as ArticleOutput;
 }
 
@@ -129,11 +129,12 @@ async function main() {
   }
 
   const sourceText = readFileSync(source, "utf-8");
-  const openai = createOpenAIClient({ timeout: 60_000, maxRetries: 1 });
+  const utility = createOpenAIClient({ timeout: 60_000, maxRetries: 1 });
+  const articleClient = createArticleClient({ timeout: 180_000, maxRetries: 1 });
   const rl = createInterface({ input: process.stdin, output: process.stdout });
 
   console.log("1/3 nanoで法令チャンク分割を提案中…");
-  const chunks = await proposeChunks(openai, sourceText);
+  const chunks = await proposeChunks(utility, sourceText);
   console.log(`\n提案されたチャンク: ${chunks.length}件`);
   chunks.forEach((c, i) =>
     console.log(`  [${i}] ${c.articleRef ?? "(参照なし)"} — ${c.text.slice(0, 60)}…`),
@@ -145,8 +146,8 @@ async function main() {
     process.exit(0);
   }
 
-  console.log("\n2/3 GPT-5で記事生成中…");
-  const article = await generateArticle(openai, title, sourceText);
+  console.log(`\n2/3 ${resolveArticleModel(AI_MODELS.article)} で記事生成中…`);
+  const article = await generateArticle(articleClient, title, sourceText);
 
   console.log("\n3/3 DBに保存中…");
   const issue = await prisma.issue.upsert({

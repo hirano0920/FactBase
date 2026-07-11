@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { REPLY_LIMITS, VOTE_CHOICES, type VoteChoiceId } from "@/lib/constants";
 import { cn, formatNumber } from "@/lib/utils";
-import type { Comment, FcVerdictId } from "@/types";
+import { VERDICT_STYLES, VERIFIED_BADGE_LABEL } from "@/lib/fc-display";
+import type { Comment } from "@/types";
 import { UserDisplayName } from "@/components/user/display-name";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -32,19 +33,10 @@ function stanceLabel(stance: VoteChoiceId) {
   return VOTE_CHOICES.find((c) => c.id === stance)?.label ?? stance;
 }
 
-const VERDICT_STYLES: Record<FcVerdictId, { label: string; className: string }> = {
-  true: { label: "一次情報で確認", className: "border-for/30 bg-for-muted text-for" },
-  false: { label: "一次情報と矛盾", className: "border-against/30 bg-against-muted text-against" },
-  reported: { label: "報道ベース・真偽未確認", className: "border-amber-500/30 bg-amber-50 text-amber-800" },
-  disputed: { label: "当事者間で対立", className: "border-accent/30 bg-accent/5 text-accent" },
-  unknown: { label: "一次情報では確認不可", className: "border-border bg-surface-muted text-ink-secondary" },
-  opinion: { label: "意見・評価", className: "border-border bg-surface-muted text-ink-muted" },
-};
-
 const FC_LOADING_STAGES = [
-  "🔍 法令データベースを検索しています…",
-  "📚 国会会議録・公式資料と照合しています…",
-  "🧐 一次情報と主張を突き合わせています…",
+  "🔍 争点の出典を確認しています…",
+  "📚 報道・声明と照合しています…",
+  "🧐 主張と素材を突き合わせています…",
   "✍️ 判定を作成しています…",
 ];
 
@@ -146,6 +138,11 @@ export function CommentCard({
           />
         </Link>
         {!isReply && <Badge variant="stance">{stanceLabel(comment.stance)}派</Badge>}
+        {comment.verifiedBadge && (
+          <Badge variant="verified" title="Plus/Proユーザーによる、出典で確認済みのコメントです">
+            ✅ {VERIFIED_BADGE_LABEL}
+          </Badge>
+        )}
         <time className="text-xs text-ink-faint">{comment.createdAt.slice(0, 10)}</time>
       </header>
 
@@ -158,7 +155,7 @@ export function CommentCard({
       {fc && verdictStyle && (
         <div className={cn("mt-4 rounded-md border px-4 py-3", verdictStyle.className)}>
           <p className="text-xs font-semibold">
-            ファクトチェック: {fc.label ?? verdictStyle.label}
+            出典チェック: {fc.label ?? verdictStyle.label}
           </p>
           <p className="mt-1 text-sm">{fc.reason}</p>
           {fc.sources.length > 0 && (
@@ -178,7 +175,7 @@ export function CommentCard({
             </ul>
           )}
           <p className="mt-2 text-[11px] opacity-70">
-            一次情報のみで判定 · 法的助言ではありません
+            争点素材・出典に基づく判定 · 法的助言ではありません
           </p>
         </div>
       )}

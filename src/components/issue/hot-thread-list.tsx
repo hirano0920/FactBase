@@ -50,7 +50,7 @@ export function HotThreadList({ title, items, showRank = false, emptyMessage }: 
                     {CATEGORY_LABELS[item.issue.category]}
                   </p>
                   <p className="mt-0.5 line-clamp-2 text-sm font-bold leading-snug text-ink">
-                    {item.issue.title}
+                    {item.issue.shareTitle || item.issue.title}
                   </p>
                   <p className="mt-1 text-xs font-semibold tabular-nums text-ink-muted">
                     {formatNumber(item.voteTally.totalVoters)}人投票 · 累計

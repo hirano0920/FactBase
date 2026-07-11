@@ -3,28 +3,28 @@ import Link from "next/link";
 import { AboutDifferentiatorCard } from "@/components/about/about-differentiator-card";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { PageContainer } from "@/components/layout/page-container";
-import { MAIN_SIDEBAR_GRID } from "@/lib/constants";
+import { MAIN_SIDEBAR_GRID, SITE } from "@/lib/constants";
 import { ScrollReveal } from "@/components/ui/scroll-reveal";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "FactBaseを知る",
+  title: `${SITE.name}を知る`,
   description:
-    "FactBaseの目的、他SNSとの違い、Radar・Check、立ち上げ人情報。一次情報にもとづく投票・議論の場。",
+    `${SITE.name}の目的、他SNS・メディアとの違い、Radar、議論インテリジェンス。第3のメディアとしての中立な討論会場。`,
 };
 
 const DIFFERENTIATORS = [
   {
-    title: "恣意的な並び順がない",
-    description: "おすすめ表示は使わず、投票数とコメント数だけがHot順を決めます。",
+    title: "おすすめアルゴリズムがない",
+    description: "鬱になるタイムラインはありません。争点・新着・投票結果だけ。",
   },
   {
-    title: "一次情報にもとづく整理",
-    description: "Radarが争点を検知し、Checkが主張を一次情報と照合します（ワンタップFCはPlus / Pro）。",
+    title: "両側が見えるスプリット",
+    description: "FOR / AGAINST を意図的に並べ、自分と違う意見も読めます。越境評価で健全なランキング。",
   },
   {
-    title: "荒らし対策としての登録制",
-    description: "閲覧・投票は誰でも無料。コメントもログインすれば無料。荒らし対策のため登録制にしています。",
+    title: "議論インテリジェンス（Plus）",
+    description: "読前→読後の層の動き、両陣営マップ、影響力 — Grok にない TwoSides 独自データ。",
   },
   {
     title: "運営情報を公開",
@@ -39,28 +39,25 @@ export default function AboutPage() {
         <div className="min-w-0 max-w-content space-y-12">
           <ScrollReveal>
             <header className="space-y-4">
-              <p className="text-xs font-bold tracking-widest text-accent">ABOUT</p>
+              <p className="text-xs font-bold tracking-widest text-accent">ABOUT · 第3のメディア</p>
               <h1 className="text-3xl font-extrabold tracking-tight text-ink">
-                「おすすめ」のアルゴリズムは、ひとつもありません。
+                偏向報道でも、SNSのフィルターバブルでもない。
               </h1>
               <p className="text-base leading-relaxed text-ink-secondary">
-                投票数とコメント数だけが並び順を決める、
-                <strong className="font-semibold text-ink">
-                  政治・経済・金融・財政・為替・戦争・歴史・人権など時事問題を議論する場所
-                </strong>
-                です。
+                <strong className="font-semibold text-ink">中立な討論会場</strong>
+                — 争点を整理し、投票し、両側の議論が見える場所です。
+                オールドメディアの偏向と、X・ヤフコメ・YouTubeの同調圏のあいだにあります。
               </p>
               <p className="text-sm leading-relaxed text-ink-muted">
-                記事を選別・作成する <strong className="font-medium text-ink-secondary">FactBase Radar</strong>
-                、コメントをチェックする <strong className="font-medium text-ink-secondary">FactBase Check</strong>
-                は、日本国内および世界各地の一次情報データに基づく独自データベースを利用します。デマに溢れた現代で、情報をファクトに基づきわかりやすく整理して提供します。
+                記事は <strong className="font-medium text-ink-secondary">{SITE.name} Radar</strong>
+                がバズ争点から自動生成。議論の質は越境評価と出典チェック（Plus/Pro）で支えます。
               </p>
             </header>
           </ScrollReveal>
 
           <ScrollReveal delay={60}>
             <section>
-              <h2 className="mb-4 text-lg font-bold text-ink">他のSNSとの違い</h2>
+              <h2 className="mb-4 text-lg font-bold text-ink">他のメディア・SNSとの違い</h2>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {DIFFERENTIATORS.map((item, i) => (
                   <AboutDifferentiatorCard
@@ -97,11 +94,11 @@ export default function AboutPage() {
                     </p>
                   </div>
                   <p>
-                    両親が教師の家庭で育ち、中学生頃から教育改革に興味を持ち、政治の道を志しました。慶應義塾大学入学後、様々なアプリを開発する中で、日本でファクトに基づき冷静に政治を語る場がオンライン上にないことに危機感を覚え、FactBase.tokyo
-                    を立ち上げました。
+                    SNSのフィルターバブルと偏向報道に疲れた人向けに、
+                    中立で両論が見える討論場 {SITE.displayName} を立ち上げました。
                   </p>
                   <p className="text-xs text-ink-faint">
-                    特定の政党・思想を支持するサービスではありません。判断基準はすべて一次情報です。
+                    特定の政党・思想を支持するサービスではありません。判断基準は争点素材とコミュニティの越境評価です。
                   </p>
                 </div>
               </div>

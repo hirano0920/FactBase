@@ -27,6 +27,7 @@ import { PrismaClient, type IssueCategory, type Prisma } from "@prisma/client";
 import { XMLParser } from "fast-xml-parser";
 import {
   classifyHeadlines,
+  composeVoteQuestion,
   type RadarCluster,
   type ActiveIssueForMatch,
   type PendingCandidateForMatch,
@@ -50,6 +51,7 @@ import {
   jstDateString,
 } from "../../src/lib/radar";
 import { RADAR } from "../../src/lib/constants";
+import { isWithinPeakWindow } from "./lib/schedule";
 import type { FeedItem } from "./sources/common";
 import { fetchCourtsNews, fetchCourtsKijitsu, extractCourtsKijitsuFingerprint } from "./sources/courts";
 import { fetchShugiinBills, fetchSangiinBills } from "./sources/diet";
@@ -64,6 +66,9 @@ import { ensureEvidence, evidenceToArticleFacts, internationalNewsSources } from
 import { resolveIssueTitle } from "./lib/issue-title";
 import { splitIncoherentPrimaryClusters } from "./lib/split-clusters";
 import { generateVerifiedArticle, violatesBan } from "../../src/lib/radar-article";
+import { checkArticleQualityGate } from "./lib/article-judge";
+import { buildClaimDiff, formatClaimDiffBlock } from "./lib/claim-diff";
+import { resolveDebateType } from "../../src/lib/debate-type";
 import { notifyRadarFailure } from "./notify";
 import { notifyRevalidate } from "./lib/notify-revalidate";
 
@@ -161,6 +166,8 @@ function toIssueCategory(category: string): IssueCategory {
     law: "LAW",
     finance: "FINANCE",
     education: "EDUCATION",
+    society: "SOCIETY",
+    entertainment: "ENTERTAINMENT",
     rights: "POLITICS",
     international: "POLITICS",
   };
@@ -249,7 +256,16 @@ function selectForClassification<T extends { id: string; feedName: string; trust
   return out;
 }
 
+const FORCE = process.argv.includes("--force"); // 起動時間帯チェックを無視（動作確認用）
+
 async function main() {
+  const inDetectWindow =
+    FORCE || isWithinPeakWindow(new Date(), RADAR.detectWindowsJst, RADAR.detectWindowToleranceMin);
+  if (!inDetectWindow) {
+    console.log("detect 時間帯外のためスキップ（--forceで無視可）");
+    return;
+  }
+
   const config = JSON.parse(
     readFileSync(new URL("./feeds.json", import.meta.url), "utf-8"),
   ) as { feeds: FeedConfig[] };
@@ -731,12 +747,23 @@ async function main() {
         const internationalReportExcerpts = evidence
           ? await fetchReportExcerpts(internationalNewsSources(evidence))
           : [];
+        let claimDiffBlock = "";
+        try {
+          claimDiffBlock = formatClaimDiffBlock(
+            await buildClaimDiff(
+              internationalReportExcerpts.map((e) => ({ feed: e.feed, title: e.title, text: e.text })),
+            ),
+          );
+        } catch (e) {
+          console.warn(`  ⚠️ 媒体diffのnano失敗（fail-open・生抜粋のみで続行）: ${cluster.title} (${e})`);
+        }
         const { article, verified, unresolvedClaims } = await generateVerifiedArticle({
           issueTitle,
           isReported: false,
           sources,
           primaryExcerpts,
           internationalReportExcerpts,
+          claimDiffBlock,
           dietSpeeches,
           background,
           laws,
@@ -751,6 +778,38 @@ async function main() {
           await holdForArticle(`banned_phrase:${banned}`);
           continue;
         }
+        try {
+          const gate = await checkArticleQualityGate({
+            title: issueTitle,
+            lead: article.lead,
+            articleHtml: article.articleHtml,
+          });
+          if (!gate.ok) {
+            await holdForArticle(`quality_gate:${(gate.reason ?? "").slice(0, 200)}`);
+            continue;
+          }
+        } catch (e) {
+          console.warn(`  ⚠️ 品質ゲートnano失敗（fail-open・公開続行）: ${cluster.title} (${e})`);
+        }
+        const officialDebateType = resolveDebateType({
+          topic: issueTitle,
+          category: cluster.category,
+          title: cluster.title,
+          voteQuestion: cluster.question,
+          newsTitles: members.map((m) => m.title),
+        });
+        // cluster.choices（見出しだけを見た仮の投票選択肢）を、実際の記事本文と確定debateTypeに
+        // 合わせて作り直す（promote.tsと同じ扱い）。Issue.titleはissueTitle（resolveIssueTitleが
+        // 既に「自分ごとフック」付きで生成済み・detect.tsにはpromote.tsのshareTitle分離が無いため
+        // ここで上書きしない）。
+        const { choices: finalChoices } = await composeVoteQuestion({
+          issueTitle,
+          lead: article.lead,
+          bullets: article.bullets,
+          debateType: officialDebateType?.debateType ?? "policy",
+          fallbackQuestion: cluster.question || issueTitle,
+          fallbackChoices: cluster.choices,
+        });
         const issue = await prisma.issue.create({
           data: {
             slug,
@@ -768,7 +827,8 @@ async function main() {
             } as unknown as Prisma.InputJsonValue,
             articleHtml: article.articleHtml,
             articleGeneratedAt: new Date(),
-            voteLabelsJson: cluster.choices as unknown as Prisma.InputJsonValue,
+            voteLabelsJson: finalChoices as unknown as Prisma.InputJsonValue,
+            debateType: officialDebateType?.debateType ?? null,
             keywords: issueKeywords,
             monitoringUntil: new Date(Date.now() + monitoringDays * 86400_000),
           },
@@ -808,6 +868,13 @@ async function main() {
       continue;
     }
     const issueKeywords = Array.from(new Set([cluster.title, issueTitle, ...billTitles]));
+    const liveDebateType = resolveDebateType({
+      topic: issueTitle,
+      category: cluster.category,
+      title: cluster.title,
+      voteQuestion: cluster.question,
+      newsTitles: members.map((m) => m.title),
+    });
     const issue = await prisma.issue.create({
       data: {
         slug,
@@ -817,6 +884,7 @@ async function main() {
         confirmation: "REPORTED",
         summaryJson: level1Summary(cluster, sources) as unknown as Prisma.InputJsonValue,
         voteLabelsJson: cluster.choices as unknown as Prisma.InputJsonValue,
+        debateType: liveDebateType?.debateType ?? null,
         keywords: issueKeywords,
         monitoringUntil: new Date(Date.now() + monitoringDays * 86400_000),
       },

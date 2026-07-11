@@ -28,13 +28,20 @@ export function PageContainer({
 interface SectionProps {
   children: ReactNode;
   className?: string;
+  id?: string;
+  /** "arena": 記事・スレッドページ用。ヘアラインボーダー+大きめ角丸の落ち着いたカード */
+  variant?: "default" | "arena";
 }
 
-export function Section({ children, className }: SectionProps) {
+export function Section({ children, className, id, variant = "default" }: SectionProps) {
   return (
     <section
+      id={id}
       className={cn(
-        "rounded-lg border border-border bg-surface-raised p-6 shadow-card sm:p-8",
+        "p-4 sm:p-8",
+        variant === "arena"
+          ? "rounded-[20px] border border-border bg-surface-raised"
+          : "rounded-lg border border-border bg-surface-raised shadow-card",
         className,
       )}
     >
@@ -52,7 +59,7 @@ export function SectionTitle({ children, className }: SectionTitleProps) {
   return (
     <h2
       className={cn(
-        "mb-5 font-serif text-lg font-semibold text-ink sm:text-xl",
+        "mb-3 font-serif text-lg font-extrabold tracking-tight text-ink sm:mb-5 sm:text-xl",
         className,
       )}
     >

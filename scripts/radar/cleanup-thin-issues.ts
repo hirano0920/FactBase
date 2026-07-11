@@ -12,8 +12,28 @@
  *
  * status を ARCHIVED にするだけでレコードは残す（監査・復元可能性のため物理削除しない）。
  */
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { isRoutineOfficialUpdate, isPendingArticlePlaceholder } from "../../src/lib/radar";
+
+// ローカル実行用: tsx は .env を自動ロードしないため、リポジトリ直下の .env.local / .env を読む
+// （CI では GitHub secrets が環境変数で渡るのでこのブロックは no-op）。
+function loadLocalEnv() {
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+  for (const name of [".env.local", ".env"]) {
+    const path = resolve(root, name);
+    if (existsSync(path)) {
+      try {
+        process.loadEnvFile(path);
+      } catch {
+        // Node が古い等で loadEnvFile が無い場合は握りつぶす（環境変数が既にあれば動く）
+      }
+    }
+  }
+}
+loadLocalEnv();
 
 const prisma = new PrismaClient();
 
@@ -87,7 +107,27 @@ async function main() {
   }
 
   if (toArchive.length === 0) {
-    console.log("対象なし — 薄い争点は見つかりませんでした");
+    console.log("対象なし — ACTIVE/TRENDING に薄い争点は見つかりませんでした");
+    // どのDBに繋がっているか・なぜ0件かの切り分け用診断
+    const total = await prisma.issue.count();
+    const byStatus = await prisma.issue.groupBy({ by: ["status"], _count: { _all: true } });
+    console.log(`\n[診断] Issue総数: ${total}`);
+    for (const s of byStatus) console.log(`  ${s.status}: ${s._count._all}`);
+    const kijitsuLike = await prisma.issue.findMany({
+      where: { OR: [{ title: { contains: "開廷期日" } }, { title: { contains: "期日情報" } }] },
+      select: { slug: true, title: true, status: true, confirmation: true, articleHtml: true },
+      take: 10,
+    });
+    if (kijitsuLike.length > 0) {
+      console.log(`\n[診断] 「開廷期日」を含むIssue ${kijitsuLike.length}件（全status）:`);
+      for (const i of kijitsuLike) {
+        console.log(
+          `  ${i.status}/${i.confirmation ?? "-"}/${i.articleHtml ? "記事あり" : "記事なし"} /issues/${i.slug} — ${i.title}`,
+        );
+      }
+    } else {
+      console.log("\n[診断] 「開廷期日」を含むIssueはこのDBに存在しません（別DB or キャッシュ表示の可能性）");
+    }
     return;
   }
 

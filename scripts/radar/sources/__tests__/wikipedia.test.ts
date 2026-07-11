@@ -76,4 +76,44 @@ describe("fetchWikipediaBackground", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500 }));
     expect(await fetchWikipediaBackground("国旗損壊罪")).toBeNull();
   });
+
+  it("検索結果が争点語と無関係なら足切りしてnullを返す（辞書定義混入の防止）", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 404 })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ query: { search: [{ title: "カレーライス" }] } }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await fetchWikipediaBackground("国旗損壊罪")).toBeNull();
+    // summary再取得（3回目のfetch）は発生しない
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("関連する候補が2件目にあれば、無関係な1件目をスキップして拾う", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 404 })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({ query: { search: [{ title: "カレーライス" }, { title: "国旗損壊罪法案" }] } }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({
+            title: "国旗損壊罪法案",
+            extract: "国旗を損壊する行為を処罰する法案。",
+            content_urls: { desktop: { page: "https://ja.wikipedia.org/wiki/X" } },
+          }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    const bg = await fetchWikipediaBackground("国旗損壊罪");
+    expect(bg?.title).toBe("国旗損壊罪法案");
+  });
 });

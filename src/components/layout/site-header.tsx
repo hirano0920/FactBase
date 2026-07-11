@@ -6,11 +6,6 @@ import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { NotificationBell } from "@/components/layout/notification-bell";
 import { FlameIcon, LockIcon, TrendingUpIcon } from "@/components/ui/icons";
 
-const MOBILE_NAV = [
-  { href: "/ranking", label: "Hotなスレ" },
-  { href: "/ranking/votes", label: "Hotな投票" },
-] as const;
-
 const DESKTOP_NAV = [
   { href: "/ranking", label: "Hotなスレ", Icon: FlameIcon },
   { href: "/ranking/votes", label: "Hotな投票", Icon: TrendingUpIcon },
@@ -39,22 +34,10 @@ export async function SiteHeader() {
           {SITE.displayName}
         </Link>
 
-        <nav
-          className="flex min-w-0 flex-1 items-center justify-center gap-3 overflow-x-auto scrollbar-none"
-          aria-label="メイン"
-        >
-          {MOBILE_NAV.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="shrink-0 whitespace-nowrap text-xs font-bold text-ink-secondary no-underline hover:text-ink"
-            >
-              {item.label}
-            </Link>
-          ))}
-        </nav>
+        <div className="flex-1" />
 
         <div className="flex shrink-0 items-center gap-1">
+          <ThemeToggle />
           {user ? (
             <>
               <NotificationBell isLoggedIn />

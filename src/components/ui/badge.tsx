@@ -4,20 +4,23 @@ import { cn } from "@/lib/utils";
 
 interface BadgeProps {
   children: React.ReactNode;
-  variant?: "default" | "category" | "status" | "stance" | "pro";
+  variant?: "default" | "category" | "status" | "stance" | "pro" | "verified";
   className?: string;
+  title?: string;
 }
 
-export function Badge({ children, variant = "default", className }: BadgeProps) {
+export function Badge({ children, variant = "default", className, title }: BadgeProps) {
   return (
     <span
+      title={title}
       className={cn(
         "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium tracking-wide",
         variant === "default" && "bg-surface-muted text-ink-muted",
-        variant === "category" && "bg-accent/8 text-accent",
-        variant === "status" && "bg-surface-muted text-ink-secondary",
-        variant === "stance" && "bg-surface-muted text-ink-secondary",
-        variant === "pro" && "border border-warm/25 bg-warm-muted text-warm-hover",
+        variant === "category" && "bg-surface-muted text-ink-secondary",
+        variant === "status" && "border border-border-strong bg-transparent text-ink-secondary",
+        variant === "stance" && "border border-border-strong bg-transparent text-ink-secondary",
+        variant === "pro" && "border border-warm/30 bg-warm-muted text-warm-hover",
+        variant === "verified" && "border border-for/30 bg-for-muted text-for",
         className,
       )}
     >

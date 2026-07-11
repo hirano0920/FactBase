@@ -1,5 +1,5 @@
 /**
- * FactBase Radar — スコアリングと公開判断の純関数。
+ * TwoSides Radar — スコアリングと公開判断の純関数。
  * 公開判断は HotScore × TrustScore − RiskScore。ただし安全ゲートが最優先:
  * ハードブロック該当は点数に関係なく必ずHELD（人間確認必須）。
  */
@@ -58,20 +58,42 @@ export const OUT_OF_SCOPE_FLAGS = [
   "pure_science",
 ] as const;
 
-/** 見出しからスポーツ・エンタメ・科学速報等を機械検出（nano漏れの保険） */
+/** 見出しからスポーツ試合・色恋ゴシップ・科学速報等を機械検出（mini漏れの保険） */
 const OUT_OF_SCOPE_PATTERNS: RegExp[] = [
   /ワールドカップ|w杯|world\s*cup|fifa/i,
   /サッカー|soccer|football|プレミア|チャンピオンズリーグ|ucl/i,
   /(試合|ゲーム).{0,8}(結果|終了|勝利|敗北|引き分け)/,
   /\d+\s*[-–—]\s*\d+.*(勝|敗|試合)/,
   /nba|nfl|mlb|nhl|wbc|大谷|本塁打|ホームラン|アシスト|得点王/i,
-  /アイドル|芸能|結婚|離婚|不倫|ゴシップ/i,
+  /熱愛|結婚(?:を)?(?:発表|へ)|離婚(?:を)?(?:発表|へ)|ゴシップ/i,
   /天気予報|週間天気/,
   /はやぶさ|hayabusa|小惑星|探査機|jaxa|宇宙ステーション|ロケット打ち上げ|天文/i,
 ];
 
-/** 政策・外交・予算・宇宙政策など「議論すべき角度」があれば除外パターンでも通す */
-const IN_SCOPE_OVERRIDE = /予算|法案|政策|国会|省|内閣|外交|安保|入管|規制|補助金|パリ協定|制裁|条約|宇宙基本/i;
+/** 政策・社会争点など「議論すべき角度」があれば除外パターンでも通す */
+const IN_SCOPE_OVERRIDE =
+  /予算|法案|政策|国会|省|内閣|外交|安保|入管|規制|補助金|パリ協定|制裁|条約|宇宙基本|ハラスメント|解雇|懲戒|リストラ|炎上|告発|消費者|課金|プライバシー|差別|教育|医療/i;
+
+/**
+ * 声明対立型（事務所vs本人・企業vs個人が声明/反論/謝罪を出し合っている）は、
+ * 単なる色恋沙汰・慶事とは違い賛否が分かれる社会的議論として除外パターンでも通す。
+ * 最終的な「debatableか」の判断は filterRelevantTopics（AI）に委ねる。ここは機械的な足切りの緩和のみ。
+ * promote 選定の TwoSides 適合ボーナスでも同じシグナルを使う。
+ */
+export const DECLARATION_CONFLICT_SIGNAL =
+  /声明|反論|抗議|謝罪|否定|見解|コメントを発表|記者会見|訴訟|提訴|契約解除|解雇|懲戒/i;
+
+/** @deprecated 互換 alias — DECLARATION_CONFLICT_SIGNAL を使う */
+const DECLARATION_CONFLICT_OVERRIDE = DECLARATION_CONFLICT_SIGNAL;
+
+/**
+ * タイトル・トピック語・報道見出しに声明対立の火種シグナルがあるか。
+ * TwoSides のお手本（双方声明＋賛否が取れる）を promote 順位で優遇するために使う。
+ */
+export function looksLikeDeclarationConflict(...texts: (string | null | undefined)[]): boolean {
+  const blob = texts.filter(Boolean).join("\n");
+  return blob.length > 0 && DECLARATION_CONFLICT_SIGNAL.test(blob);
+}
 
 /** 省庁・中央銀行・国会・裁判所など一次情報フィード（feeds.json と同期） */
 export const PRIMARY_SOURCE_FEED =
@@ -121,6 +143,7 @@ export const BREAKING_MAX_AGE_MIN = 360;
 export function isOutOfScopeTopic(clusterTitle: string, memberTitles: string[]): boolean {
   const blob = [clusterTitle, ...memberTitles].join("\n");
   if (IN_SCOPE_OVERRIDE.test(blob)) return false;
+  if (DECLARATION_CONFLICT_OVERRIDE.test(blob)) return false;
   return OUT_OF_SCOPE_PATTERNS.some((p) => p.test(blob));
 }
 
@@ -513,9 +536,11 @@ export interface BuzzSourceHit {
   inYouTubeTrending: boolean;
   /** ニュースランキング内で同一争点見出しが閾値以上（速報クラスタ） */
   inNewsCluster: boolean;
+  /** Yahoo!コメントランキング内＝「賛否が割れて議論になっている」の実測シグナル */
+  inCommentRanking: boolean;
   /** 4ソースの素点 0-4 */
   score: number;
-  /** promote/深掘り優先用。score + Newsクラスタボーナス（上限4） */
+  /** promote/深掘り優先用。score + Newsクラスタ + コメントランキングボーナス（上限5） */
   effectiveScore: number;
   /** クラスタに含まれる見出し数（ログ用） */
   newsClusterCount: number;
@@ -526,6 +551,8 @@ export interface BuzzSourceInputs {
   yahooRealtimeTerms: string[];
   newsRankingTitles: string[];
   youtubeTrendingTitles: string[];
+  /** Yahoo!コメントランキング見出し。省略時は未計測（false扱い） */
+  commentRankingTitles?: string[];
 }
 
 export function computeBuzzScore(topic: string, sources: BuzzSourceInputs): BuzzSourceHit {
@@ -540,6 +567,7 @@ export function buzzSourceLabels(hit: BuzzSourceHit): string[] {
     hit.inNewsRanking && "yahoo_news_ranking",
     hit.inYouTubeTrending && "youtube_trending",
     hit.inNewsCluster && "news_cluster",
+    hit.inCommentRanking && "yahoo_comment_ranking",
   ].filter((s): s is string => Boolean(s));
 }
 
@@ -548,17 +576,43 @@ export function buzzEffectiveScore(hit: BuzzSourceHit): number {
   return hit.effectiveScore;
 }
 
+type IssueCategoryId =
+  | "POLITICS"
+  | "LAW"
+  | "ECONOMY"
+  | "FINANCE"
+  | "EDUCATION"
+  | "SOCIETY"
+  | "ENTERTAINMENT";
+
 /** discover.ts/promote.tsのnano分類カテゴリ → IssueCategory（detect.tsのtoIssueCategoryと同じ対応） */
-export function toIssueCategory(category: string): "POLITICS" | "LAW" | "ECONOMY" | "FINANCE" | "EDUCATION" {
-  const map: Record<string, "POLITICS" | "LAW" | "ECONOMY" | "FINANCE" | "EDUCATION"> = {
+export function toIssueCategory(category: string): IssueCategoryId {
+  const map: Record<string, IssueCategoryId> = {
     politics: "POLITICS",
     economy: "ECONOMY",
     law: "LAW",
     finance: "FINANCE",
     education: "EDUCATION",
+    society: "SOCIETY",
+    entertainment: "ENTERTAINMENT",
     rights: "POLITICS",
     international: "POLITICS",
-    society: "POLITICS",
   };
   return map[category] ?? "POLITICS";
+}
+
+/**
+ * 海外報道を記事材料に使うか。
+ * 国内主（社会炎上・国内政治・国内経済など）は国内メディアのみ。
+ * 海外が主戦場（戦争・外交・米中など）のときだけ海外抜粋を渡す。
+ */
+const INTERNATIONAL_PRIMARY_TOPIC =
+  /戦争|停戦|侵攻|開戦|NATO|ウクライナ|ロシア|台湾有事|中東|ガザ|イスラエル|イラン|米中|対中関税|関税戦争|北朝鮮.*ミサイル|安保理/i;
+
+export function shouldUseInternationalReports(
+  category: string | null | undefined,
+  topic: string,
+): boolean {
+  if ((category ?? "").toLowerCase() === "international") return true;
+  return INTERNATIONAL_PRIMARY_TOPIC.test(topic);
 }

@@ -6,6 +6,8 @@ import {
   IssueBookmarkSlot,
   IssueCommentsSlot,
   IssueQualityReportSlot,
+  IssueIntelligenceSlot,
+  IssueSpectrumSlot,
   IssueViewerProvider,
   IssueVoteSlot,
 } from "@/components/issue/issue-viewer-context";
@@ -13,6 +15,7 @@ import { CategoryBadge, StatusBadge } from "@/components/ui/badge";
 import { AppSidebarStatic } from "@/components/layout/app-sidebar";
 import { AdSlotGated } from "@/components/layout/ad-slot-gated";
 import { PageContainer, Section, SectionTitle } from "@/components/layout/page-container";
+import { ScrollReveal } from "@/components/ui/scroll-reveal";
 import { getComments, getIssueBySlug, getIssueTimeline, isDbEnabled } from "@/lib/data";
 import { GUEST_COMMENT_LIMIT } from "@/lib/constants";
 import type { Metadata } from "next";
@@ -32,18 +35,21 @@ export async function generateMetadata({
   const issue = await getIssueBySlug(slug);
   if (!issue) return { title: "争点が見つかりません" };
 
+  // shareTitle（自分ごとフック）はX/SEO/OGだけに使う。ページ本体のtitle/H1は中立な投票設問のまま
+  const hookTitle = issue.shareTitle || issue.title;
+
   return {
-    title: issue.title,
+    title: hookTitle,
     description: issue.summary.lead,
     openGraph: {
-      title: issue.title,
+      title: hookTitle,
       description: issue.summary.lead,
       type: "article",
       images: [`/issues/${issue.slug}/opengraph-image`],
     },
     twitter: {
       card: "summary_large_image",
-      title: issue.title,
+      title: hookTitle,
       description: issue.summary.lead,
     },
   };
@@ -80,11 +86,6 @@ export default async function IssuePage({ params }: IssuePageProps) {
               <div className="mb-4 flex flex-wrap items-center gap-2">
                 <CategoryBadge category={issue.category} />
                 <StatusBadge status={issue.status} />
-                {issue.confirmation === "reported" && (
-                  <span className="rounded-full border border-hot/40 bg-hot-muted px-2.5 py-0.5 text-xs font-medium text-hot">
-                    🔴 速報・続報中
-                  </span>
-                )}
                 {issue.confirmation === "official" && (
                   <span className="rounded-full border border-for/30 bg-for-muted px-2.5 py-0.5 text-xs font-medium text-for">
                     公式発表あり
@@ -102,36 +103,60 @@ export default async function IssuePage({ params }: IssuePageProps) {
             </header>
 
             <div className="space-y-6">
-              <Section>
-                <SectionTitle>要点</SectionTitle>
-                <SummaryCard
-                  summary={issue.summary}
-                  articleSlug={issue.articleHtml ? issue.slug : undefined}
-                />
-              </Section>
-
-              <Section>
-                <SectionTitle>あなたの一票</SectionTitle>
-                <div className="mx-auto max-w-md">
-                  <IssueVoteSlot
-                    issueId={issue.id}
-                    initialTally={tally}
-                    labels={issue.voteLabels}
+              <ScrollReveal>
+                <Section variant="arena">
+                  <SectionTitle>要点</SectionTitle>
+                  <SummaryCard
+                    summary={issue.summary}
+                    articleSlug={issue.articleHtml ? issue.slug : undefined}
+                    compact
                   />
-                </div>
-              </Section>
+                  {timeline.length > 0 && (
+                    <div className="mt-4 border-t border-border pt-4">
+                      <IssueTimelineLive
+                        issueId={issue.id}
+                        initialEntries={timeline}
+                        compact
+                      />
+                    </div>
+                  )}
+                </Section>
+              </ScrollReveal>
 
-              <IssueTimelineLive
-                issueId={issue.id}
-                initialEntries={timeline}
-                confirmation={issue.confirmation}
-              />
+              <ScrollReveal delay={80}>
+                <Section id="vote-panel" variant="arena">
+                  <SectionTitle>あなたの一票</SectionTitle>
+                  <div className="mx-auto max-w-md">
+                    <IssueVoteSlot
+                      issueId={issue.id}
+                      initialTally={tally}
+                      labels={issue.voteLabels}
+                    />
+                  </div>
+                </Section>
+              </ScrollReveal>
 
-              <Section>
-                <Suspense fallback={null}>
-                  <IssueCommentsSlot issueId={issue.id} commentCount={issue.commentCount} />
-                </Suspense>
-              </Section>
+              <ScrollReveal delay={120}>
+                <Section variant="arena">
+                  <Suspense fallback={null}>
+                    <IssueCommentsSlot
+                      slug={issue.slug}
+                      issueId={issue.id}
+                      commentCount={issue.commentCount}
+                      voteTally={tally}
+                    />
+                  </Suspense>
+                </Section>
+              </ScrollReveal>
+
+              <IssueSpectrumSlot slug={issue.slug} />
+
+              <ScrollReveal>
+                <Section variant="arena">
+                  <SectionTitle>議論インテリジェンス</SectionTitle>
+                  <IssueIntelligenceSlot slug={issue.slug} />
+                </Section>
+              </ScrollReveal>
 
               {issue.confirmation !== null && (
                 <div className="text-center">

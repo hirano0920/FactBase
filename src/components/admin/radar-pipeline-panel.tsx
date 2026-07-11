@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { PageContainer, Section, SectionTitle } from "@/components/layout/page-container";
 import type { PipelineInspectReport, PromotionEvaluation } from "@/lib/radar-pipeline-inspect";
+import { XShareHelper } from "@/components/admin/x-share-helper";
 
 const SKIP_LABEL: Record<PromotionEvaluation["skipReason"], string> = {
   would_publish: "記事化予定",
@@ -131,16 +132,10 @@ export function RadarPipelinePanel() {
         <SectionTitle>ルート概要</SectionTitle>
         <div className="space-y-2 text-sm text-ink-muted">
           <p>
-            <strong className="text-ink">A. discover → promote</strong> — Google Trends / Yahoo!
-            リアルタイム / Yahoo!ニュースランキング / YouTube → nano関連性判定 → 能動調査 → PENDING →
-            promote（buzzScore≥{report?.thresholds.minBuzzScoreForPromotion ?? 2} & 証拠十分）
-          </p>
-          <p>
-            <strong className="text-ink">B. detect.ts</strong> — 公式一次情報 + 🔴LIVE緊急のみ（選挙・内閣成立・戦争・テロ・震度6強以上+甚大被害）。
-            バズ報道錯綜は一切出さず promote へ
-          </p>
-          <p>
-            <strong className="text-ink">C. summarize / followup</strong> — 既存争点の記事化・続報（選定ではない）
+            <strong className="text-ink">本番 cron: discover → promote のみ</strong> — Google Trends /
+            Yahoo!リアルタイム / Yahoo!ニュースランキング / YouTube → 関連性判定 → 能動調査 → PENDING →
+            promote（buzzScore≥{report?.thresholds.minBuzzScoreForPromotion ?? 2} & 証拠十分）。
+            discover 1日7回 / promote ピーク3回。detect・summarize・followup は cron 外（手動可）。
           </p>
         </div>
       </Section>
@@ -253,6 +248,15 @@ export function RadarPipelinePanel() {
           </ul>
         )}
       </Section>
+
+      {report && report.recentIssues.length > 0 && (
+        <Section>
+          <SectionTitle>X 手動投稿支援</SectionTitle>
+          <XShareHelper
+            issues={report.recentIssues.map((i) => ({ slug: i.slug, title: i.title }))}
+          />
+        </Section>
+      )}
 
       {report && (
         <p className="mt-6 text-xs text-ink-faint">

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { IssueCard } from "@/components/issue/issue-card";
 import { HotIssueCard } from "@/components/issue/hot-issue-card";
+import { ScrollReveal } from "@/components/ui/scroll-reveal";
 import { FeedFilterBar } from "@/components/home/feed-filter-bar";
 import { HomeIssueExpand } from "@/components/home/home-issue-expand";
 import { PaginationBar } from "@/components/home/pagination-bar";
@@ -36,6 +37,7 @@ export function HomeFeed({ allIssues, hotIssue }: HomeFeedProps) {
   const [page, setPage] = useState(1);
   const [expandedSlug, setExpandedSlug] = useState<string | null>(null);
   const [expandedComments, setExpandedComments] = useState<Comment[]>([]);
+  const [scrollToVote, setScrollToVote] = useState(false);
 
   useEffect(() => {
     setExpandedSlug(searchParams.get("issue"));
@@ -89,10 +91,14 @@ export function HomeFeed({ allIssues, hotIssue }: HomeFeedProps) {
   }, [expandedIssue]);
 
   const openIssue = useCallback(
-    (slug: string) => {
+    (slug: string, opts?: { scrollToVote?: boolean }) => {
       setExpandedSlug(slug);
+      setScrollToVote(Boolean(opts?.scrollToVote));
       router.replace(`/?issue=${encodeURIComponent(slug)}`, { scroll: false });
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      // smoothスクロールだと、アニメーション中にフィード→記事詳細へコンテンツが
+      // 丸ごと入れ替わり、旧レイアウトの上をスクロールしている間にヒーローが
+      // 一瞬見えて消えるような引っかかりが出るため、瞬時に切り替える
+      window.scrollTo({ top: 0, behavior: "auto" });
     },
     [router],
   );
@@ -115,17 +121,28 @@ export function HomeFeed({ allIssues, hotIssue }: HomeFeedProps) {
   if (expandedIssue) {
     return (
       <div className="home-expand-enter">
-        <HomeIssueExpand issue={expandedIssue} guestComments={expandedComments} onBack={closeIssue} />
+        <HomeIssueExpand
+          issue={expandedIssue}
+          guestComments={expandedComments}
+          onBack={closeIssue}
+          scrollToVote={scrollToVote}
+        />
       </div>
     );
   }
 
-  const groups = chunk(pageIssues, 4);
+  const groups = chunk(pageIssues, 3);
 
   return (
     <div className="space-y-6">
       {displayHotIssue && (
-        <HotIssueCard issue={displayHotIssue} hideResults onSelect={() => openIssue(displayHotIssue.slug)} />
+        <ScrollReveal>
+          <HotIssueCard
+            issue={displayHotIssue}
+            hideResults
+            onSelect={(opts) => openIssue(displayHotIssue.slug, opts)}
+          />
+        </ScrollReveal>
       )}
 
       <FeedFilterBar
@@ -138,7 +155,7 @@ export function HomeFeed({ allIssues, hotIssue }: HomeFeedProps) {
       />
 
       {pageIssues.length === 0 ? (
-        <p className="rounded-xl border border-border bg-surface-raised p-8 text-center text-sm text-ink-faint">
+        <p className="rounded-[20px] border border-border bg-surface-raised p-8 text-center text-sm text-ink-faint">
           該当するスレッドはまだありません
         </p>
       ) : (
@@ -146,13 +163,14 @@ export function HomeFeed({ allIssues, hotIssue }: HomeFeedProps) {
           {groups.map((group, gi) => (
             <div key={gi} className="space-y-3">
               <div className="grid gap-3">
-                {group.map((issue) => (
-                  <IssueCard
-                    key={issue.id}
-                    issue={issue}
-                    hideResults
-                    onSelect={() => openIssue(issue.slug)}
-                  />
+                {group.map((issue, gIndex) => (
+                  <ScrollReveal key={issue.id} delay={gIndex * 60}>
+                    <IssueCard
+                      issue={issue}
+                      hideResults
+                      onSelect={(opts) => openIssue(issue.slug, opts)}
+                    />
+                  </ScrollReveal>
                 ))}
               </div>
               <AdSlot />

@@ -53,6 +53,20 @@ describe("buzz-cross-match", () => {
     expect(hit.effectiveScore).toBe(2);
   });
 
+  it("コメントランキング一致で inCommentRanking=true・effectiveScore+1（賛否分裂の実測シグナル）", () => {
+    const hit = assembleBuzzScore("高市首相", {
+      ...sources,
+      commentRankingTitles: ["高市首相、NATO首脳会議を欠席へ　トランプ氏との会合なく"],
+    });
+    expect(hit.inCommentRanking).toBe(true);
+    expect(hit.effectiveScore).toBeGreaterThanOrEqual(3);
+  });
+
+  it("commentRankingTitles未指定時は inCommentRanking=false（後方互換）", () => {
+    const hit = assembleBuzzScore("高市首相", sources);
+    expect(hit.inCommentRanking).toBe(false);
+  });
+
   it("複数見出しを争点アンカーに集約する", () => {
     const anchors = buildBuzzAnchorCandidates(
       [

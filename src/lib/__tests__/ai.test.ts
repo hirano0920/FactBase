@@ -16,6 +16,7 @@ import {
   judgeIssueQuality,
   classifyHeadlines,
   filterRelevantTopics,
+  composeVoteQuestion,
 } from "@/lib/ai";
 import { AI_MODELS, RADAR } from "@/lib/constants";
 
@@ -210,7 +211,14 @@ describe("filterRelevantTopics", () => {
     mockContent(
       JSON.stringify({
         topics: [
-          { topic: "国旗損壊罪", relevant: true, category: "law", reason: "国会審議中の法案" },
+          {
+            topic: "国旗損壊罪",
+            relevant: true,
+            category: "law",
+            debatable: true,
+            debateType: "policy",
+            reason: "国会審議中の法案",
+          },
           { topic: "某アイドル熱愛", relevant: false, category: "", reason: "芸能ゴシップ" },
         ],
       }),
@@ -222,6 +230,7 @@ describe("filterRelevantTopics", () => {
     expect(topics).toHaveLength(1);
     expect(topics[0].topic).toBe("国旗損壊罪");
     expect(topics[0].category).toBe("law");
+    expect(topics[0].debateType).toBe("policy");
   });
 
   it("継続的話題フラグをプロンプトのuserメッセージに反映する", async () => {
@@ -267,19 +276,133 @@ describe("filterRelevantTopics", () => {
             topic: "国旗損壊罪",
             relevant: true,
             category: "law",
+            debatable: true,
+            debateType: "policy",
             reason: "国会審議中",
             question: "国旗損壊罪の新設、あなたはどう見る？",
             choices: { for: "賛成", against: "反対", undecided: "わからない" },
           },
-          { topic: "為替介入", relevant: true, category: "finance", reason: "" },
+          {
+            topic: "為替介入",
+            relevant: true,
+            category: "finance",
+            debatable: true,
+            debateType: "indicator",
+            reason: "",
+          },
         ],
       }),
     );
     const topics = await filterRelevantTopics([{ term: "国旗損壊罪" }, { term: "為替介入" }]);
     expect(topics[0].question).toBe("国旗損壊罪の新設、あなたはどう見る？");
     expect(topics[0].choices).toEqual({ for: "賛成", against: "反対", undecided: "わからない" });
-    // choices省略時はデフォルト文言で補う
+    expect(topics[0].debateType).toBe("policy");
     expect(topics[1].question).toContain("為替介入");
     expect(topics[1].choices).toEqual({ for: "支持する", against: "支持しない", undecided: "わからない" });
+    expect(topics[1].debateType).toBe("indicator");
+  });
+
+  it("choicesが長すぎる場合は投票ボタンに収まる長さに切り詰める（AI出力の暴走に備えた保険）", async () => {
+    mockContent(
+      JSON.stringify({
+        topics: [
+          {
+            topic: "国旗損壊罪",
+            relevant: true,
+            category: "law",
+            debatable: true,
+            debateType: "policy",
+            reason: "国会審議中",
+            question: "国旗損壊罪の新設、あなたはどう見る？",
+            choices: {
+              for: "新設に賛成し表現の自由より公共の秩序を優先すべき",
+              against: "新設に反対し表現の自由を最大限尊重すべき",
+              undecided: "まだ判断に必要な情報が十分に揃っていない",
+            },
+          },
+        ],
+      }),
+    );
+    const topics = await filterRelevantTopics([{ term: "国旗損壊罪" }]);
+    expect(topics[0].choices.for.length).toBeLessThanOrEqual(12);
+    expect(topics[0].choices.against.length).toBeLessThanOrEqual(12);
+    expect(topics[0].choices.undecided.length).toBeLessThanOrEqual(12);
+  });
+
+  it("debatable=falseやdebateType不明は落とす", async () => {
+    mockContent(
+      JSON.stringify({
+        topics: [
+          {
+            topic: "速報だけ",
+            relevant: true,
+            category: "",
+            debatable: false,
+            reason: "事実共有のみ",
+          },
+          {
+            topic: "減税",
+            relevant: true,
+            category: "politics",
+            debatable: true,
+            debateType: "policy",
+            reason: "賛否あり",
+          },
+        ],
+      }),
+    );
+    const topics = await filterRelevantTopics([{ term: "速報だけ" }, { term: "減税" }]);
+    expect(topics.map((t) => t.topic)).toEqual(["減税"]);
+  });
+});
+
+describe("composeVoteQuestion", () => {
+  const fallback = {
+    issueTitle: "国旗損壊罪法案",
+    lead: "国旗損壊罪の新設を巡り、与野党で賛否が分かれています。",
+    bullets: ["いま分かっていること: 参院で審議中", "賛成側が言うこと: 秩序維持に必要", "反対側が言うこと: 表現の自由を侵害"],
+    debateType: "policy" as const,
+    fallbackQuestion: "国旗損壊罪の新設、あなたはどう見る？",
+    fallbackChoices: { for: "賛成", against: "反対", undecided: "わからない" },
+  };
+
+  it("記事内容から確定した設問・選択肢を返す", async () => {
+    mockContent(
+      JSON.stringify({
+        question: "国旗損壊罪の新設、賛成ですか？",
+        choices: { for: "新設に賛成", against: "新設に反対", undecided: "まだ判断できない" },
+      }),
+    );
+    const result = await composeVoteQuestion(fallback);
+    expect(result.question).toBe("国旗損壊罪の新設、賛成ですか？");
+    expect(result.choices).toEqual({ for: "新設に賛成", against: "新設に反対", undecided: "まだ判断できない" });
+  });
+
+  it("choicesが長すぎる場合は12字に切り詰める", async () => {
+    mockContent(
+      JSON.stringify({
+        question: "国旗損壊罪の新設、賛成ですか？",
+        choices: {
+          for: "秩序維持のために新設に賛成すべき",
+          against: "表現の自由を侵害するため反対すべき",
+          undecided: "まだ判断",
+        },
+      }),
+    );
+    const result = await composeVoteQuestion(fallback);
+    expect(result.choices.for.length).toBeLessThanOrEqual(12);
+    expect(result.choices.against.length).toBeLessThanOrEqual(12);
+  });
+
+  it("空応答時はfallbackの設問・選択肢を返す", async () => {
+    mockContent(JSON.stringify({ question: "", choices: { for: "", against: "", undecided: "" } }));
+    const result = await composeVoteQuestion(fallback);
+    expect(result).toEqual({ question: fallback.fallbackQuestion, choices: fallback.fallbackChoices });
+  });
+
+  it("nano呼び出し失敗時はfallbackにフォールバックする（記事公開を止めない）", async () => {
+    mocks.create.mockRejectedValueOnce(new Error("network error"));
+    const result = await composeVoteQuestion(fallback);
+    expect(result).toEqual({ question: fallback.fallbackQuestion, choices: fallback.fallbackChoices });
   });
 });

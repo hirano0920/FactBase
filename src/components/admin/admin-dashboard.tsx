@@ -107,14 +107,14 @@ function RadarHealthBanner({ health }: { health: RadarHealth }) {
         {health.alive ? "🟢 Radar稼働中" : "🔴 Radar停止の疑いあり"}
       </p>
       <p className="mt-1 text-xs opacity-90">
-        {health.lastSourceEventAt
-          ? `最終フィード取得: ${new Date(health.lastSourceEventAt).toLocaleString("ja-JP")}（${health.minutesSinceLastEvent}分前）`
-          : "フィード取得履歴なし"}
+        {health.lastCandidateEvaluatedAt
+          ? `最終候補更新: ${new Date(health.lastCandidateEvaluatedAt).toLocaleString("ja-JP")}（${health.minutesSinceLastEvent}分前）`
+          : "候補更新履歴なし"}
         {" · "}本日の公開 {health.todayIssueCount}件 / 評価した候補 {health.todayCandidateCount}件
       </p>
       {!health.alive && (
         <p className="mt-1 text-xs">
-          15分間隔のcronで新着イベントが40分以上入っていません。GitHub Actionsの実行履歴を確認してください（0件公開自体は静かなニュース日なら正常です）。
+          discover（最大約4時間間隔）で候補が5時間以上更新されていません。GitHub Actionsの実行履歴を確認してください（0件公開自体は静かなニュース日なら正常です）。
         </p>
       )}
     </div>

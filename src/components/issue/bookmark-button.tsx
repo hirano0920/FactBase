@@ -43,7 +43,7 @@ export function BookmarkButton({ slug, initialBookmarked, isLoggedIn }: Bookmark
       aria-pressed={bookmarked}
       aria-label={bookmarked ? "保存を解除" : "スレッドを保存"}
       className={cn(
-        "flex h-8 w-8 items-center justify-center rounded-full transition-colors",
+        "flex h-8 w-8 items-center justify-center rounded-full transition",
         bookmarked ? "text-warm" : "text-ink-faint hover:bg-surface-muted hover:text-ink-secondary",
       )}
     >

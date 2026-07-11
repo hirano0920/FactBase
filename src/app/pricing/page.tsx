@@ -3,7 +3,7 @@ import { CheckoutButton } from "@/components/pricing/checkout-button";
 import { PlusTrialPromo } from "@/components/pricing/plus-trial-promo";
 import { ManagePlanButton } from "@/components/pricing/manage-plan-button";
 import { PageContainer } from "@/components/layout/page-container";
-import { FC_DAILY_LIMITS, PLAN_PRICES, PLANS } from "@/lib/constants";
+import { FC_DAILY_LIMITS, PLAN_PRICES, PLANS, SITE } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
 export const metadata = {
@@ -17,20 +17,28 @@ const PLANS_DISPLAY = [
     name: "無料",
     icon: "🆓",
     price: "¥0",
-    tagline: "まずはここから",
-    features: ["スレッド・記事の閲覧", "投票", "ログインでコメント投稿"],
-    locked: ["ワンタップFC", "広告非表示"],
+    tagline: "第3のメディアを体験",
+    features: [
+      "争点記事・投票・スプリット議論",
+      "ログインでコメント投稿",
+      "層の動きの概要（n・変化率）",
+    ],
+    locked: ["両陣営マップ詳細", "レスバ支援 AI", "広告非表示"],
   },
   {
     id: PLANS.COMMENT,
     dbPlan: "COMMENT",
-    name: "FactBase Plus",
+    name: `${SITE.name} Plus`,
     icon: "💬",
     price: PLAN_PRICES[PLANS.COMMENT],
-    tagline: "主張をすぐ検証",
+    tagline: "世論の計器",
     features: [
       "無料のすべて",
-      `ワンタップFC（1日${FC_DAILY_LIMITS.COMMENT}回）`,
+      "読前→読後の層の動き（詳細）",
+      "沈黙の多数派ヒートマップ",
+      "両陣営論点マップ・越境トップ",
+      "個人影響力・MVP表示",
+      `レスバ支援 AI · 出典チェック（1日${FC_DAILY_LIMITS.COMMENT}回）`,
     ],
     locked: ["広告非表示"],
     highlighted: true,
@@ -38,18 +46,18 @@ const PLANS_DISPLAY = [
   {
     id: PLANS.FACTCHECK,
     dbPlan: "FACTCHECK",
-    name: "FactBase Pro",
+    name: `${SITE.name} Pro`,
     icon: "👑",
     price: PLAN_PRICES[PLANS.FACTCHECK],
-    tagline: "本気で見極める",
+    tagline: "本気で議論する",
     features: [
-      "無料のすべて",
-      `ワンタップFC（1日${FC_DAILY_LIMITS.FACTCHECK}回）`,
+      "Plus のすべて",
       "広告非表示",
+      `出典チェック 1日${FC_DAILY_LIMITS.FACTCHECK}回`,
+      "レスバ支援 AI 多め",
     ],
     locked: [],
     premium: true,
-    footnote: `※ワンタップFCはPlus 1日${FC_DAILY_LIMITS.COMMENT}回 / Pro 1日${FC_DAILY_LIMITS.FACTCHECK}回`,
   },
 ] as const;
 
@@ -65,13 +73,16 @@ export default async function PricingPage({ searchParams }: PricingPageProps) {
   return (
     <PageContainer width="content">
       <header className="mb-10 text-center">
-        <p className="mb-2 text-xs font-extrabold tracking-widest text-warm">✨ FACTBASE PLUS/PRO</p>
+        <p className="mb-2 text-xs font-extrabold tracking-widest text-warm">
+          ✨ {SITE.name.toUpperCase()} PLUS/PRO
+        </p>
         <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">
-          議論は無料。検証はPlus / Pro。
+          議論は無料。計器は Plus / Pro。
         </h1>
-        <p className="mx-auto mt-3 max-w-md text-ink-muted">
-          投票・コメントはログインすれば無料。ワンタップFCと広告非表示は
-          <strong className="text-ink"> Plus / Pro</strong>（3日間無料体験あり）。
+        <p className="mx-auto mt-3 max-w-lg text-ink-muted">
+          投票・スプリット・コメントはログインすれば無料。
+          <strong className="text-ink"> 層の動き・両陣営マップ・影響力</strong>
+          は Grok にない TwoSides 独自のデータ（3日間無料体験あり）。
         </p>
       </header>
 

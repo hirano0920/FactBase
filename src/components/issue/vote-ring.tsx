@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { formatNumber } from "@/lib/utils";
+import { CountUp } from "@/components/ui/count-up";
 import type { VoteTally } from "@/types";
 
 interface VoteRingProps {
@@ -124,12 +124,12 @@ export function VoteRing({ issueId, issueSlug, issueTitle, initialTally }: VoteR
 
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
           <span className="font-serif text-5xl font-semibold tabular-nums text-ink">
-            {leadPercent.toFixed(0)}
+            <CountUp value={Math.round(leadPercent)} duration={500} />
             <span className="text-2xl">%</span>
           </span>
           <span className="mt-1 text-sm font-medium text-ink-secondary">{leadLabel}が優勢</span>
           <span className="mt-2 text-xs tabular-nums text-ink-faint">
-            {formatNumber(tally.totalVoters)}人が投票中
+            <CountUp value={tally.totalVoters} duration={500} />人が投票中
           </span>
         </div>
       </div>

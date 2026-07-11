@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { PageContainer } from "@/components/layout/page-container";
+import { SITE } from "@/lib/constants";
 import Link from "next/link";
 import type { Metadata } from "next";
 
@@ -20,7 +21,7 @@ export default async function AccessDeniedPage() {
             日本国内からのみご利用いただけます
           </h1>
           <p className="mb-8 text-sm leading-relaxed text-ink-secondary">
-            FactBaseは日本国内のユーザー向けに運営しています。
+            {SITE.name}は日本国内のユーザー向けに運営しています。
             海外からのアクセス、またはVPN等で国が判別できない場合はご利用いただけません。
           </p>
           {session?.user ? (

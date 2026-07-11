@@ -32,7 +32,7 @@ export function PaginationBar({ page, totalPages, onPageChange }: PaginationBarP
         disabled={page <= 1}
         onClick={() => onPageChange(page - 1)}
         className={cn(
-          "rounded-md border border-border px-3 py-1.5 text-sm font-medium transition-colors",
+          "rounded-md border border-border px-3 py-1.5 text-sm font-medium transition",
           page > 1
             ? "text-ink-secondary hover:bg-surface-muted"
             : "cursor-not-allowed text-ink-faint",
@@ -69,7 +69,7 @@ export function PaginationBar({ page, totalPages, onPageChange }: PaginationBarP
         disabled={page >= totalPages}
         onClick={() => onPageChange(page + 1)}
         className={cn(
-          "rounded-md border border-border px-3 py-1.5 text-sm font-medium transition-colors",
+          "rounded-md border border-border px-3 py-1.5 text-sm font-medium transition",
           page < totalPages
             ? "text-ink-secondary hover:bg-surface-muted"
             : "cursor-not-allowed text-ink-faint",

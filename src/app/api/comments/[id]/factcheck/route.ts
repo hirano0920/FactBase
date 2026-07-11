@@ -1,21 +1,17 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireSession, checkRateLimit, errors, apiError } from "@/lib/api-helpers";
 import { prisma } from "@/lib/prisma";
-import { factCheck, type FcChunk } from "@/lib/ai";
+import { factCheck } from "@/lib/ai";
 import { retrieveChunks } from "@/lib/rag";
 import { invalidateOnFcResultSaved } from "@/lib/cache-invalidate";
 import { consumeFcQuota } from "@/lib/fc-quota";
 import { acquireFcInflightSlot, releaseFcInflightSlot } from "@/lib/fc-inflight";
 import { canUseFactCheck, fcDailyLimit } from "@/lib/plan-features";
+import { buildSourceLinks } from "@/lib/fc-sources";
 import type { FcVerdict, Prisma } from "@prisma/client";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
-
-interface FcSourceLink {
-  label: string;
-  url: string;
-}
 
 /**
  * ワンタップFC。Plus 5回/日、Pro 20回/日。
@@ -131,20 +127,6 @@ export async function POST(
   } finally {
     await releaseFcInflightSlot();
   }
-}
-
-function buildSourceLinks(usedIds: string[], chunks: FcChunk[]): FcSourceLink[] {
-  const byId = new Map(chunks.map((c) => [c.id, c]));
-  const links: FcSourceLink[] = [];
-  for (const id of usedIds) {
-    const chunk = byId.get(id);
-    if (!chunk?.sourceUrl) continue;
-    const label = `${chunk.sourceName}${chunk.articleRef ? ` ${chunk.articleRef}` : ""}`;
-    if (!links.some((l) => l.url === chunk.sourceUrl)) {
-      links.push({ label, url: chunk.sourceUrl });
-    }
-  }
-  return links;
 }
 
 function toResponse(

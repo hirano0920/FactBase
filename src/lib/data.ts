@@ -17,6 +17,7 @@ import {
   BURST,
   DEBATE_HIGHLIGHT_MIN_COMMENTS,
   HOME_FEED_PAGE_SIZE,
+  MODERATION,
   REPLY_LIMITS,
   type CategoryId,
   type CommentSortId,
@@ -25,6 +26,9 @@ import {
 } from "@/lib/constants";
 import { getUserPublicStatsBatch } from "@/lib/user-stats";
 import { isIssueReadyForPublicFeed, isPendingArticlePlaceholder } from "@/lib/radar";
+import { sortByBridgingScore } from "@/lib/bridging";
+import { qualifiesVerifiedBadge } from "@/lib/fc-display";
+import { generateSteelman } from "@/lib/ai";
 import {
   filterIssues,
   paginateIssues,
@@ -35,14 +39,13 @@ import {
   commentsCacheKey,
   commentsVerKey,
   debateHighlightsCacheKey,
-  globalTimelineCacheKey,
-  globalTimelineVerKey,
   getCacheVersion,
   issuesListCacheKey,
   kv,
   rankingCacheKey,
   rankingBySortCacheKey,
   rankingWeeklyCacheKey,
+  splitCommentsCacheKey,
   timelineCacheKey,
   timelineVerKey,
 } from "@/lib/redis";
@@ -53,8 +56,17 @@ import type {
   FcCache as DbFcCache,
   IssueCategory,
   IssueStatus as DbIssueStatus,
+  VoteChoice,
 } from "@prisma/client";
-import type { Comment, FcVerdictId, Issue, IssueSummary, RankingItem, VoteTally } from "@/types";
+import type {
+  Comment,
+  FcVerdictId,
+  Issue,
+  IssueSummary,
+  RankingItem,
+  SplitComment,
+  VoteTally,
+} from "@/types";
 
 export const isDbEnabled = () => Boolean(process.env.DATABASE_URL);
 
@@ -85,6 +97,8 @@ const categoryToId: Record<IssueCategory, CategoryId> = {
   ECONOMY: "economy",
   FINANCE: "finance",
   EDUCATION: "education",
+  SOCIETY: "society",
+  ENTERTAINMENT: "entertainment",
 };
 
 const statusToId: Record<DbIssueStatus, IssueStatus> = {
@@ -119,6 +133,7 @@ function mapIssue(issue: DbIssue): Issue {
     id: issue.id,
     slug: issue.slug,
     title: issue.title,
+    shareTitle: issue.shareTitle,
     category: categoryToId[issue.category],
     status: statusToId[issue.status],
     summary: issue.summaryJson as unknown as IssueSummary,
@@ -136,6 +151,9 @@ function mapIssue(issue: DbIssue): Issue {
           : null,
     voteLabels: (issue.voteLabelsJson as Issue["voteLabels"]) ?? null,
     underReview: issue.underReview,
+    thumbnailUrl: issue.thumbnailUrl,
+    thumbnailSourceUrl: issue.thumbnailSourceUrl,
+    thumbnailSourceFeed: issue.thumbnailSourceFeed,
   };
 }
 
@@ -163,6 +181,8 @@ function mapComment(comment: DbCommentWithUser, statsMap: UserStatsMap): Comment
     likeCount: comment.likeCount,
     dislikeCount: comment.dislikeCount,
     helpfulCount: comment.helpfulCount,
+    // Plus/Pro + verdict=TRUE のとき ✅（出典で確認）。Grok oracle ではなく「検証を通した主張」の社会的証明
+    verifiedBadge: qualifiesVerifiedBadge(comment.fcCache?.verdict ?? null, comment.user.plan),
     fcResult: comment.fcCache
       ? {
           verdict: comment.fcCache.verdict.toLowerCase() as FcVerdictId,
@@ -212,6 +232,38 @@ export async function getRelatedIssues(slug: string): Promise<RelatedIssueBrief[
   return rows.map((r) => ({ slug: r.slug, title: r.title, category: categoryToId[r.category] }));
 }
 
+export interface IssueSearchResult {
+  slug: string;
+  title: string;
+  category: CategoryId;
+  commentCount: number;
+}
+
+/** 左カラムの記事検索用。タイトル部分一致（大文字小文字を区別しない）で最大N件。 */
+export async function searchIssues(query: string, limit = 8): Promise<IssueSearchResult[]> {
+  const q = query.trim();
+  if (!isDbEnabled() || q.length === 0) return [];
+  const rows = await prisma.issue.findMany({
+    where: {
+      status: { not: "ARCHIVED" },
+      underReview: false,
+      OR: [
+        { title: { contains: q, mode: "insensitive" } },
+        { shareTitle: { contains: q, mode: "insensitive" } },
+      ],
+    },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+    select: { slug: true, title: true, category: true, commentCount: true },
+  });
+  return rows.map((r) => ({
+    slug: r.slug,
+    title: r.title,
+    category: categoryToId[r.category],
+    commentCount: r.commentCount,
+  }));
+}
+
 export async function getIssueBySlug(slug: string): Promise<Issue | null> {
   if (!isDbEnabled()) return mockIssueBySlug(slug) ?? null;
 
@@ -230,6 +282,7 @@ function issueBrief(issue: DbIssue) {
     id: issue.id,
     slug: issue.slug,
     title: issue.title,
+    shareTitle: issue.shareTitle,
     category: categoryToId[issue.category],
     status: statusToId[issue.status],
   };
@@ -436,6 +489,12 @@ export interface DebateHighlights {
  * のときだけ表示に使うこと（このAPI自体は件数に関わらず結果を返す）。
  * undecided（わからない派）は「立場」ではないため対決表示の対象にしない。
  */
+/**
+ * 賛成派・反対派それぞれの代表意見を1件ずつ返す（対決表示用）。
+ * スプリットスレッド（getSplitComments）と同じ越境評価スコア（bridging）で選ぶ。
+ * 単純helpfulCount順だと多数派バイアスがかかり「splitカラムはbridgingなのにバナーだけ多数派」という
+ * 矛盾になるため統一する（2026-07-09、Phase 2-1）。helpfulCount=0の場合は代表意見なしとして扱う。
+ */
 export async function getDebateHighlights(issueId: string): Promise<DebateHighlights> {
   if (!isDbEnabled()) return { for: null, against: null };
 
@@ -449,28 +508,16 @@ export async function getDebateHighlights(issueId: string): Promise<DebateHighli
     // fall through
   }
 
-  const [forRow, againstRow] = await Promise.all([
-    prisma.comment.findFirst({
-      where: { issueId, isHidden: false, parentId: null, stance: "FOR", helpfulCount: { gt: 0 } },
-      orderBy: [{ helpfulCount: "desc" }, { likeCount: "desc" }, { createdAt: "desc" }],
-      include: commentInclude(false),
-    }),
-    prisma.comment.findFirst({
-      where: { issueId, isHidden: false, parentId: null, stance: "AGAINST", helpfulCount: { gt: 0 } },
-      orderBy: [{ helpfulCount: "desc" }, { likeCount: "desc" }, { createdAt: "desc" }],
-      include: commentInclude(false),
-    }),
+  const [forPage, againstPage] = await Promise.all([
+    getSplitColumn(issueId, "FOR", undefined, 1),
+    getSplitColumn(issueId, "AGAINST", undefined, 1),
   ]);
+  const top = (page: SplitColumnPage): Comment | null => {
+    const c = page.comments[0];
+    return c && c.helpfulCount > 0 ? c : null;
+  };
 
-  const statsMap = await getUserPublicStatsBatch(
-    collectUserIds(
-      [forRow, againstRow].filter((r): r is NonNullable<typeof r> => Boolean(r)) as DbCommentWithUser[],
-    ),
-  );
-  const toComment = (row: typeof forRow) =>
-    row ? mapComment(row as DbCommentWithUser, statsMap) : null;
-
-  const result: DebateHighlights = { for: toComment(forRow), against: toComment(againstRow) };
+  const result: DebateHighlights = { for: top(forPage), against: top(againstPage) };
 
   try {
     await kv.set(cacheKey, JSON.stringify(result), { ex: BURST.commentsCacheSec });
@@ -478,6 +525,241 @@ export async function getDebateHighlights(issueId: string): Promise<DebateHighli
     // ignore
   }
   return result;
+}
+
+export interface SplitColumnPage {
+  comments: SplitComment[];
+  nextCursor: string | null;
+}
+
+export interface SplitCommentPage {
+  for: SplitColumnPage;
+  against: SplitColumnPage;
+}
+
+interface BridgingCandidateRow {
+  id: string;
+  helpfulCount: number;
+  crossHelpful: number;
+  createdAt: Date;
+}
+
+// 異常に巨大なスレッドでのソートコストに対する防御的上限。通常のスレッドはこれよりずっと少ない
+const SPLIT_SORT_FETCH_CAP = 2000;
+
+/**
+ * 指定した立場(stance)の候補コメント一覧を、helpfulCountと「相手陣営からのhelpful数(crossHelpful)」
+ * 付きで取得する。スコア自体はここでは計算せず、呼び出し側でcomputeBridgingScore/sortByBridgingScoreに委ねる
+ * （SQLとJSでロジックが二重管理にならないようにするため）。
+ *
+ * crossHelpfulの集計は組織票対策として、投票済み・UNDECIDED以外・MODERATION.newAccountCommentHours
+ * 経過後のアカウントによるhelpfulのみを数える。
+ */
+async function fetchBridgingCandidates(
+  issueId: string,
+  stance: VoteChoice,
+): Promise<BridgingCandidateRow[]> {
+  const antiBrigadeCutoff = new Date(Date.now() - MODERATION.newAccountCommentHours * 60 * 60 * 1000);
+  return prisma.$queryRaw<BridgingCandidateRow[]>`
+    SELECT
+      c.id,
+      c."helpfulCount",
+      c."createdAt",
+      COALESCE(cross_counts.n, 0)::int AS "crossHelpful"
+    FROM "Comment" c
+    LEFT JOIN LATERAL (
+      SELECT COUNT(*)::int AS n
+      FROM "Helpful" h
+      JOIN "Vote" v ON v."userId" = h."userId" AND v."issueId" = c."issueId"
+      JOIN "User" u ON u.id = h."userId"
+      WHERE h."commentId" = c.id
+        AND v.choice != c.stance
+        AND v.choice != 'UNDECIDED'
+        AND u."createdAt" <= ${antiBrigadeCutoff}
+    ) cross_counts ON true
+    WHERE c."issueId" = ${issueId}
+      AND c."isHidden" = false
+      AND c."parentId" IS NULL
+      AND c.stance = ${stance}::"VoteChoice"
+    ORDER BY c."createdAt" DESC
+    LIMIT ${SPLIT_SORT_FETCH_CAP}
+  `;
+}
+
+async function getSplitColumn(
+  issueId: string,
+  stance: VoteChoice,
+  cursor: string | undefined,
+  limit: number,
+): Promise<SplitColumnPage> {
+  const candidates = await fetchBridgingCandidates(issueId, stance);
+  const sorted = sortByBridgingScore(candidates);
+
+  let startIndex = 0;
+  if (cursor) {
+    const idx = sorted.findIndex((r) => r.id === cursor);
+    startIndex = idx === -1 ? 0 : idx + 1;
+  }
+  const page = sorted.slice(startIndex, startIndex + limit + 1);
+  const hasMore = page.length > limit;
+  const pageRows = hasMore ? page.slice(0, limit) : page;
+  if (pageRows.length === 0) return { comments: [], nextCursor: null };
+
+  const idsToFetch = pageRows.map((r) => r.id);
+  const crossHelpfulById = new Map(pageRows.map((r) => [r.id, r.crossHelpful]));
+
+  const rows = await prisma.comment.findMany({
+    where: { id: { in: idsToFetch } },
+    include: commentInclude(false),
+  });
+  const byId = new Map(rows.map((r) => [r.id, r as DbCommentWithUser]));
+  const ordered = idsToFetch
+    .map((id) => byId.get(id))
+    .filter((r): r is DbCommentWithUser => Boolean(r));
+
+  const statsMap = await getUserPublicStatsBatch(collectUserIds(ordered));
+  return {
+    comments: ordered.map((row) => ({
+      ...mapComment(row, statsMap),
+      crossHelpful: crossHelpfulById.get(row.id) ?? 0,
+    })),
+    nextCursor: hasMore ? idsToFetch[idsToFetch.length - 1] : null,
+  };
+}
+
+const AI_STEELMAN_CACHE_TTL_SEC = 6 * 60 * 60;
+
+function buildSteelmanComment(issueId: string, stance: VoteChoice, argument: string): SplitComment {
+  return {
+    id: `ai-steelman-${issueId}-${stance}`,
+    issueId,
+    userId: "ai-steelman",
+    userName: "論点提示AI",
+    userPlan: "FREE",
+    userCommentCount: 0,
+    userTotalLikes: 0,
+    stance: enumToChoice[stance],
+    body: argument,
+    likeCount: 0,
+    dislikeCount: 0,
+    helpfulCount: 0,
+    verifiedBadge: false,
+    fcResult: null,
+    createdAt: new Date().toISOString(),
+    parentId: null,
+    replyCount: 0,
+    replies: [],
+    crossHelpful: 0,
+    isAiSteelman: true,
+  };
+}
+
+/**
+ * カラムが空のとき、記事の材料から「その立場の最も筋が通った主張」をAIに代弁させる
+ * （コールドスタート対策。人間が投稿すればcommentsVerKeyが上がりキャッシュごと自然に降格する＝
+ * DBには一切保存しない）。生成失敗時は静かにnullを返し、空カラム表示にフォールバックする。
+ */
+async function getOrGenerateSteelman(
+  issueId: string,
+  stance: VoteChoice,
+  ver: number,
+): Promise<SplitComment | null> {
+  const cacheKey = `cache:steelman:${issueId}:${stance}:${ver}`;
+  try {
+    const cached = await kv.get(cacheKey);
+    if (cached) {
+      const parsed = JSON.parse(cached) as { argument: string } | null;
+      return parsed?.argument ? buildSteelmanComment(issueId, stance, parsed.argument) : null;
+    }
+  } catch {
+    // fall through
+  }
+
+  const issue = await prisma.issue.findUnique({
+    where: { id: issueId },
+    select: { title: true, summaryJson: true },
+  });
+  if (!issue) return null;
+  const summary = issue.summaryJson as unknown as IssueSummary;
+
+  let argument = "";
+  try {
+    argument = await generateSteelman({
+      issueTitle: issue.title,
+      lead: summary.lead ?? "",
+      bullets: summary.bullets ?? [],
+      stance: stance === "FOR" ? "for" : "against",
+    });
+  } catch (e) {
+    console.error("[getOrGenerateSteelman] failed", e);
+  }
+
+  try {
+    await kv.set(cacheKey, JSON.stringify({ argument }), { ex: AI_STEELMAN_CACHE_TTL_SEC });
+  } catch {
+    // ignore
+  }
+
+  return argument ? buildSteelmanComment(issueId, stance, argument) : null;
+}
+
+/**
+ * 賛成/反対2カラムのコメント取得（スプリットスレッド）。各カラムは越境評価スコアで並ぶ。
+ * commentsVerKeyを流用するため、新規コメント投稿時は既存のgetComments同様に自動的にキャッシュが割れる
+ * （helpfulタップ時はバージョンが上がらず最大30秒の遅延が生じる点はgetComments/helpfulソートと同じ既知の許容差）。
+ * カラムが初回ロードで空の場合のみ、AIスティールマン（getOrGenerateSteelman）で埋める。
+ */
+export async function getSplitComments(
+  issueId: string,
+  opts?: { limit?: number; forCursor?: string; againstCursor?: string },
+): Promise<SplitCommentPage> {
+  if (!isDbEnabled()) {
+    return { for: { comments: [], nextCursor: null }, against: { comments: [], nextCursor: null } };
+  }
+
+  const limit = opts?.limit ?? 20;
+  const forCursorKey = opts?.forCursor ?? "first";
+  const againstCursorKey = opts?.againstCursor ?? "first";
+  const ver = await getCacheVersion(commentsVerKey(issueId));
+  const forKey = splitCommentsCacheKey(issueId, ver, "for", forCursorKey, limit);
+  const againstKey = splitCommentsCacheKey(issueId, ver, "against", againstCursorKey, limit);
+
+  const [cachedFor, cachedAgainst] = await Promise.all([
+    kv.get(forKey).catch(() => null),
+    kv.get(againstKey).catch(() => null),
+  ]);
+
+  const [forPage, againstPage] = await Promise.all([
+    cachedFor
+      ? Promise.resolve(JSON.parse(cachedFor) as SplitColumnPage)
+      : getSplitColumn(issueId, "FOR", opts?.forCursor, limit),
+    cachedAgainst
+      ? Promise.resolve(JSON.parse(cachedAgainst) as SplitColumnPage)
+      : getSplitColumn(issueId, "AGAINST", opts?.againstCursor, limit),
+  ]);
+
+  // カラムが初回ロード（カーソル無し）で空のときだけAIスティールマンで埋める（load moreでは呼ばない）。
+  // 人間が投稿すればcommentsVerKeyが上がりこのキャッシュごと自然に無効化＝降格する
+  const [forSteelman, againstSteelman] = await Promise.all([
+    !cachedFor && !opts?.forCursor && forPage.comments.length === 0
+      ? getOrGenerateSteelman(issueId, "FOR", ver)
+      : null,
+    !cachedAgainst && !opts?.againstCursor && againstPage.comments.length === 0
+      ? getOrGenerateSteelman(issueId, "AGAINST", ver)
+      : null,
+  ]);
+  if (forSteelman) forPage.comments = [forSteelman];
+  if (againstSteelman) againstPage.comments = [againstSteelman];
+
+  try {
+    if (!cachedFor) await kv.set(forKey, JSON.stringify(forPage), { ex: BURST.commentsCacheSec });
+    if (!cachedAgainst)
+      await kv.set(againstKey, JSON.stringify(againstPage), { ex: BURST.commentsCacheSec });
+  } catch {
+    // ignore
+  }
+
+  return { for: forPage, against: againstPage };
 }
 
 export interface IssueTimelineEntry {
@@ -519,49 +801,6 @@ export async function getIssueTimeline(issueId: string, limit = 10): Promise<Iss
   }
   return mapped;
 }
-
-export interface GlobalTimelineEntry extends IssueTimelineEntry {
-  issueSlug: string;
-  issueTitle: string;
-}
-
-/** 全争点横断の最新タイムライン（サイドバー LIVE フィード用） */
-export const getGlobalTimeline = cache(async (limit = 8): Promise<GlobalTimelineEntry[]> => {
-  if (!isDbEnabled()) return [];
-
-  const ver = await getCacheVersion(globalTimelineVerKey());
-  const cacheKey = globalTimelineCacheKey(ver);
-
-  const cached = await kvGetFast(cacheKey);
-  if (cached) return JSON.parse(cached) as GlobalTimelineEntry[];
-
-  const rows = await prisma.issueTimeline.findMany({
-    where: {
-      issue: {
-        status: { not: "ARCHIVED" },
-        underReview: false,
-        confirmation: "REPORTED",
-      },
-    },
-    orderBy: { at: "desc" },
-    take: limit,
-    include: {
-      issue: { select: { slug: true, title: true } },
-    },
-  });
-
-  const mapped = rows.map((t) => ({
-    id: t.id,
-    label: t.label,
-    sourceUrl: t.sourceUrl,
-    at: t.at.toISOString(),
-    issueSlug: t.issue.slug,
-    issueTitle: t.issue.title,
-  }));
-
-  kvSetBackground(cacheKey, JSON.stringify(mapped), BURST.globalTimelineCacheSec);
-  return mapped;
-});
 
 /** trendScore = 投票数 + コメント数×10（仕様どおり単純な指標。アルゴリズム的な傾斜配分はしない） */
 export const getRanking = cache(async (): Promise<RankingItem[]> => {
@@ -647,6 +886,86 @@ export async function getBookmarkedIssues(userId: string, limit = 5): Promise<Bo
     title: r.issue.title,
     category: categoryToId[r.issue.category],
   }));
+}
+
+export interface ParticipatedIssue {
+  slug: string;
+  title: string;
+  category: CategoryId;
+  commentCount: number;
+  /** このスレッドにコメントしたことがあるか（投票のみより優先表示） */
+  hasCommented: boolean;
+  /** 自分の最後の関与（投票 or 自分のコメント）より後に、他人のコメントが付いたか */
+  hasUpdate: boolean;
+}
+
+const PARTICIPATED_CANDIDATE_POOL = 20;
+
+/**
+ * 左カラム「あなたが参加したスレッド」用。
+ * - コメントしたスレッドを投票のみのスレッドより優先（深く関与した方を上に）
+ * - 「更新あり」は Issue.updatedAt を見ない。投票のたびにIssue.updatedAtが動く（votes.ts）ため、
+ *   人気スレッドはほぼ常にtrueになってしまいシグナルにならない。
+ *   代わりに「自分の最後の関与より後に、自分以外の誰かがコメントしたか」で判定する。
+ */
+export async function getMyParticipatedIssues(userId: string, limit = 8): Promise<ParticipatedIssue[]> {
+  if (!isDbEnabled()) return [];
+
+  const votes = await prisma.vote.findMany({
+    where: { userId },
+    orderBy: { createdAt: "desc" },
+    take: PARTICIPATED_CANDIDATE_POOL,
+    select: { issueId: true, createdAt: true },
+  });
+  if (votes.length === 0) return [];
+  const issueIds = votes.map((v) => v.issueId);
+
+  const [myComments, othersComments, issues] = await Promise.all([
+    prisma.comment.groupBy({
+      by: ["issueId"],
+      where: { issueId: { in: issueIds }, userId },
+      _max: { createdAt: true },
+    }),
+    prisma.comment.groupBy({
+      by: ["issueId"],
+      where: { issueId: { in: issueIds }, userId: { not: userId } },
+      _max: { createdAt: true },
+    }),
+    prisma.issue.findMany({
+      where: { id: { in: issueIds } },
+      select: { id: true, slug: true, title: true, category: true, commentCount: true },
+    }),
+  ]);
+
+  const myLastCommentAt = new Map(myComments.map((c) => [c.issueId, c._max.createdAt!]));
+  const othersLastCommentAt = new Map(othersComments.map((c) => [c.issueId, c._max.createdAt!]));
+  const issueById = new Map(issues.map((i) => [i.id, i]));
+
+  const merged = votes
+    .map((v) => {
+      const issue = issueById.get(v.issueId);
+      if (!issue) return null;
+      const myLastComment = myLastCommentAt.get(v.issueId) ?? null;
+      const myLastActivity = myLastComment && myLastComment > v.createdAt ? myLastComment : v.createdAt;
+      const othersLastComment = othersLastCommentAt.get(v.issueId) ?? null;
+      return {
+        slug: issue.slug,
+        title: issue.title,
+        category: categoryToId[issue.category],
+        commentCount: issue.commentCount,
+        hasCommented: myLastComment !== null,
+        hasUpdate: othersLastComment !== null && othersLastComment > myLastActivity,
+        myLastActivity,
+      };
+    })
+    .filter((v): v is NonNullable<typeof v> => v !== null);
+
+  merged.sort((a, b) => {
+    if (a.hasCommented !== b.hasCommented) return a.hasCommented ? -1 : 1;
+    return b.myLastActivity.getTime() - a.myLastActivity.getTime();
+  });
+
+  return merged.slice(0, limit).map(({ myLastActivity: _myLastActivity, ...rest }) => rest);
 }
 
 export async function isBookmarked(userId: string, issueId: string): Promise<boolean> {

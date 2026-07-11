@@ -1,6 +1,7 @@
 /**
  * バズ語の機械プリフィルタ（discover ①→② の間）。
- * スポーツ・芸能・天気ゴミを除き、争点候補は mini に任せる（News/RT はランキング/ジャンルを信頼）。
+ * 試合結果・熱愛・天気・広告など「賛否が取れないゴミ」だけ落とし、火種候補は mini に任せる。
+ * 政治ヒント必須にはしない（TwoSides: 社会炎上・生活争点も通す）。
  */
 import { isOutOfScopeTopic } from "./radar";
 import { IN_SCOPE_BUZZ_HINTS, YAHOO_RT_NEWS_GENRE } from "./buzz-scope";
@@ -18,9 +19,13 @@ export interface BuzzTermInput {
   genre?: string;
 }
 
-/** 争点になりにくいライフ・ゴシップ見出し */
+/**
+ * 賛否が取れないライフ・ゴシップ見出し。
+ * 「不倫」「ハラスメント騒動」は声明対立型のこともあるため、対立マーカー無しの慶事・色恋だけ弾く。
+ * 最終判断は filterRelevantTopics（AI）に委ねる。
+ */
 const LIFESTYLE_HEADLINE =
-  /育休|ご祝儀|ハラスメント騒動|不倫|熱愛|結婚式|離婚|ダイエット|レシピ|天気予報|週間天気|高校野球|SKハイニックス/i;
+  /ご祝儀|熱愛|結婚式|ダイエット|レシピ|天気予報|週間天気|高校野球|SKハイニックス|(?:商品)?セール|クーポン|ポイント還元/i;
 
 /** 政策角度のない天気・台風速報 alone */
 const WEATHER_HEADLINE = /台風\d+号.*(?:進路|接近|影響)|猛烈な.*台風.*接近/i;
@@ -37,10 +42,8 @@ export function isBuzzGarbageTerm(term: string, genre?: string): boolean {
 
 /**
  * discover ② mini 前の機械判定。
- * - yahoo_news: 国内/経済/国際ランキング由来 — ゴミ除外のみ（争点判定は mini）
- * - youtube: News&Politics 収集源 — ゴミ除外のみ
- * - yahoo_rt: スポーツ genre 除外 + ニュース系 genre は通す + 争点語
- * - trends: 争点語ヒント or ゴミでなければ通す（スポーツ総合トレンド除去）
+ * - yahoo_news / youtube: ソース由来を信頼 — ゴミ除外のみ
+ * - yahoo_rt / trends: ゴミでなければ通す（政治ヒントは必須ではない。あれば加点的に通す）
  */
 export function shouldKeepBuzzTerm(input: BuzzTermInput): boolean {
   const t = input.term.trim();
@@ -51,12 +54,13 @@ export function shouldKeepBuzzTerm(input: BuzzTermInput): boolean {
   if (IN_SCOPE_BUZZ_HINTS.test(t)) return true;
 
   if (input.source === "yahoo_rt") {
-    if (input.genre && YAHOO_RT_NEWS_GENRE.test(input.genre) && t.length >= 4) return true;
     if (input.genre && /スポーツ|エンタメ|ゲーム|アニメ|芸能/i.test(input.genre)) return false;
+    if (input.genre && YAHOO_RT_NEWS_GENRE.test(input.genre) && t.length >= 4) return true;
     if (t.length >= 6) return true;
   }
 
-  if (input.source === "trends" && t.length >= 4 && !isOutOfScopeTopic(t, [t])) return true;
+  // Trends: ゴミでなければ mini に渡す（政治語ヒント必須にしない）
+  if (input.source === "trends" && t.length >= 4) return true;
 
   return false;
 }

@@ -21,6 +21,11 @@ import {
   type SavedEvidence,
 } from "../../scripts/radar/lib/promote-logic";
 
+/**
+ * discover→promote（buzz_promote）が主力経路。rss_detect/summarizeはLIVE速報（🔴国家的緊急のみ）と
+ * 官公庁一次情報の例外経路で、バズ駆動の記事化はしない（detect.ts参照）。両経路は並走する設計で、
+ * rss_detect/summarizeを「格下げ」する予定はない（LIVE速報の安全網として恒久的に必要）。
+ */
 export type IssueRoute =
   | "buzz_promote"
   | "rss_detect"

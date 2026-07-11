@@ -5,7 +5,6 @@ import { invalidateCachedIssue } from "@/lib/issue-cache";
 import { revalidateAfterIssueUpdate } from "@/lib/revalidate-pages";
 import {
   commentsVerKey,
-  globalTimelineVerKey,
   issuesListCacheKey,
   kv,
   rankingBySortCacheKey,
@@ -40,10 +39,7 @@ export async function bumpCommentsCache(issueId: string): Promise<void> {
 }
 
 export async function bumpTimelineCache(issueId: string): Promise<void> {
-  await Promise.all([
-    safe(kv.incr(timelineVerKey(issueId))),
-    safe(kv.incr(globalTimelineVerKey())),
-  ]);
+  await safe(kv.incr(timelineVerKey(issueId)));
 }
 
 function safeRevalidate(slug?: string): void {
@@ -91,7 +87,6 @@ export async function invalidateOnIssueChanged(slug?: string): Promise<void> {
   await Promise.all([
     invalidateIssuesListCache(),
     invalidateRankingCaches(),
-    safe(kv.incr(globalTimelineVerKey())),
     slug ? safe(invalidateCachedIssue(slug)) : Promise.resolve(),
   ]);
   safeRevalidate(slug);

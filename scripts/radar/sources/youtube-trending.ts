@@ -1,14 +1,15 @@
 /**
- * YouTube Data API v3 — 日本向けニュース・政治系トレンド動画のタイトル取得。
+ * YouTube Data API v3 — 日本向けトレンド動画タイトル取得（バズ検知用）。
  * 環境変数 YOUTUBE_DATA_API_KEY が必要（未設定時は空配列でスキップ）。
  *
- * 取得軸:
- *   1. chart=mostPopular + regionCode=JP + videoCategoryId=25（News & Politics）
- *   2. 直近6h・order=date の広域ニュース検索
- *   3. Yahoo!ニュースランキング見出しをシードにした鮮度優先検索（order=date, 6h）
+ * 取得軸（TwoSides: News & Politics に閉じない）:
+ *   1. chart=mostPopular + regionCode=JP（総合トレンド）
+ *   2. chart=mostPopular + videoCategoryId=25（News & Politics）
+ *   3. 直近6h・order=date の広域検索（社会・時事含む）
+ *   4. Yahoo!ニュースランキング見出しをシードにした鮮度優先検索
  *
  * 動画本文・文字起こしは取らない（タイトルをバズ検知の入口に使い、
- * 記事生成は既存の国会・法令・Google News 調査に委ねる）。
+ * 記事生成は報道本文・一次情報の調査に委ねる）。スポーツ等のノイズは prefilter で落とす。
  */
 import { RADAR } from "../../../src/lib/constants";
 import { extractBuzzMatchTokens } from "../../../src/lib/buzz-cross-match";
@@ -78,10 +79,10 @@ export async function fetchYouTubeTrendingTitles(newsSeedTitles: string[] = []):
   const seedQueries = buildYouTubeNewsSeedQueries(newsSeedTitles, RADAR.youtubeNewsSeedQueries);
   const freshAfter = hoursAgoIso(6);
 
+  /** カテゴリ縛りなし（社会炎上・総合バズも拾う）。ノイズは prefilter 側 */
   const searchParams = (q: string) => ({
     part: "snippet",
     type: "video",
-    videoCategoryId: NEWS_POLITICS_CATEGORY,
     order: "date",
     publishedAfter: freshAfter,
     regionCode: "JP",
@@ -90,15 +91,25 @@ export async function fetchYouTubeTrendingTitles(newsSeedTitles: string[] = []):
     maxResults: "8",
   });
 
-  const [popular, dateBroad, ...seedResults] = await Promise.all([
-    fetchYouTubeApi<{ items?: Array<{ snippet?: { title?: string } }> }>("mostPopular", "videos", {
+  const [popularGeneral, popularNews, dateBroad, ...seedResults] = await Promise.all([
+    fetchYouTubeApi<{ items?: Array<{ snippet?: { title?: string } }> }>("mostPopularGeneral", "videos", {
+      part: "snippet",
+      chart: "mostPopular",
+      regionCode: "JP",
+      maxResults: "25",
+    }),
+    fetchYouTubeApi<{ items?: Array<{ snippet?: { title?: string } }> }>("mostPopularNews", "videos", {
       part: "snippet",
       chart: "mostPopular",
       regionCode: "JP",
       videoCategoryId: NEWS_POLITICS_CATEGORY,
       maxResults: "25",
     }),
-    fetchYouTubeApi<{ items?: Array<{ snippet?: { title?: string } }> }>("searchDateBroad", "search", searchParams("政治 OR 経済 OR 国際 OR 時事")),
+    fetchYouTubeApi<{ items?: Array<{ snippet?: { title?: string } }> }>(
+      "searchDateBroad",
+      "search",
+      searchParams("社会 OR 炎上 OR 時事 OR 政治 OR 経済 OR 企業"),
+    ),
     ...seedQueries.map((q, i) =>
       fetchYouTubeApi<{ items?: Array<{ snippet?: { title?: string } }> }>(`searchSeed${i}`, "search", searchParams(q)),
     ),
@@ -106,7 +117,8 @@ export async function fetchYouTubeTrendingTitles(newsSeedTitles: string[] = []):
 
   const titles = Array.from(
     new Set([
-      ...collectTitles(popular?.items),
+      ...collectTitles(popularGeneral?.items),
+      ...collectTitles(popularNews?.items),
       ...collectTitles(dateBroad?.items),
       ...seedResults.flatMap((r) => collectTitles(r?.items)),
     ]),

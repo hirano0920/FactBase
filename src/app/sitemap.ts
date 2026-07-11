@@ -1,7 +1,8 @@
 import type { MetadataRoute } from "next";
 import { getIssues } from "@/lib/data";
+import { SITE } from "@/lib/constants";
 
-const BASE_URL = process.env.AUTH_URL?.replace(/\/$/, "") || "https://factbase.tokyo";
+const BASE_URL = process.env.AUTH_URL?.replace(/\/$/, "") || SITE.url;
 
 /** 静的ページ + 争点(一覧/詳細/記事)を動的生成。revalidate=3600でISR相当。 */
 export const revalidate = 3600;

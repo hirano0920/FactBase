@@ -1,26 +1,25 @@
 /**
- * FactBase Radar 能動調査パイプライン（①バズ検知 → ②関連性判定 → ③能動調査）。
+ * TwoSides Radar 能動調査パイプライン（①バズ検知 → ②関連性判定 → ③能動調査）。
  *
  * 実行: npx tsx scripts/radar/discover.ts [--dry-run] [--force]
- * cron内で detect.ts の前段として走る。従来の detect.ts（RSSクラスタ）は安全網として並走する。
+ * 本番 cron は discover → promote のみ（detect/summarize/followup は外している）。
  *
  * 設計思想: 固定RSSを待ち受ける受け身型ではなく、
  *   「ネットでバズった／継続的に話題なトピック」を起点に一次情報を能動的に調べにいく。
  *   ① 収集: Google Trends / Yahoo!リアルタイム / Yahoo!ニュースランキング / YouTubeトレンド
  *            + 継続的話題(sustained) + 新規法案
- *   ② 判定: nano が政治・法律・社会等の争点だけを通し、ゴシップ等を捨て、表記ゆれを正規化
+ *   ② 判定: mini が賛否を取れる火種候補を通し、ゴシップ等を捨て、表記ゆれを正規化
  *   ③ 調査: 上位トピックについて国会会議録・法令・関連ニュースを横断取得し証拠バンドル化
  * 成果物は TopicCandidate(discoverySource, evidenceJson, status=PENDING)。
  * evidenceJsonには証拠バンドルに加えbuzzScore/buzzSources/voteQuestion/voteChoicesも埋め込む
  * （promote.tsがピーク時間帯にこれを読んでbuzzScore順に記事化する）。
- * 記事生成の中身（⑤: テンプレート改善等）は本スクリプトの範囲外。
  *
  * 実行タイミング: cron は15分間隔だが discover 本体は JST 1日7回(RADAR.discoverWindowsJst)のみ。
  * 各 promote ピークの約90分前＋昼後/夕方/夜の中間スイープで1日のバズを取りこぼさない。
- * 時間外は即 no-op（外部API・filterRelevantTopics/mini も呼ばない）。detect の 🔴LIVE は別経路で常時15分。
+ * 時間外は即 no-op（外部API・filterRelevantTopics/mini も呼ばない）。
  *
- * sighting の記録(recordSightings)は detect.ts が唯一の書き手（常時稼働のまま変更なし）。
- * 本スクリプトは読み取り(getSustainedTerms)のみで、二重カウントを避ける。
+ * TrendSighting の書き込みは従来 detect.ts が担当していた。cron から外したため sustained は
+ * 徐々に古くなる。4ソースのライブ取得は毎 discover で行うので主力検知は維持される。
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../src/lib/prisma";
@@ -39,20 +38,37 @@ import type { SavedEvidence } from "./lib/promote-logic";
 import { isWithinPeakWindow } from "./lib/schedule";
 import { fetchTrendingKeywords } from "./sources/trends";
 import { fetchYahooRealtimeBuzzPolitics } from "./sources/yahoo-realtime";
-import { fetchYahooNewsRankingTitles } from "./sources/yahoo-news-ranking";
+import {
+  fetchYahooNewsRankingTitles,
+  fetchYahooCommentRankingEntries,
+  fetchYahooArticleCommentCount,
+  type YahooRankingEntry,
+} from "./sources/yahoo-news-ranking";
 import { fetchYouTubeTrendingTitles } from "./sources/youtube-trending";
 import { fetchShugiinBills, fetchSangiinBills } from "./sources/diet";
 import { notifyRadarFailure } from "./notify";
 import { prefilterBuzzInputs, type BuzzTermInput } from "../../src/lib/buzz-prefilter";
-import { buildBuzzAnchorCandidates, assembleBuzzScore } from "../../src/lib/buzz-cross-match";
+import { buildBuzzAnchorCandidates, assembleBuzzScore, buzzMatchesTitleCorpus } from "../../src/lib/buzz-cross-match";
 import { selectResearchTargets } from "./lib/discover-logic";
 import { CONSENSUS_MIN_OUTLETS } from "./lib/promote-logic";
+import { matchBroadcastArticle, mergeBroadcastMatch } from "./lib/match-broadcast";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const FORCE = process.argv.includes("--force"); // 起動時間帯チェックを無視（動作確認用）
 
 /** 同一トピックをこの時間内に調査済みなら再調査しない（外部API・nanoコスト節約） */
 const RERESEARCH_MIN_INTERVAL_HOURS = 12;
+
+/**
+ * トピックに対応するYahoo!コメントランキングの記事を探す（あれば個別ページのコメント数を
+ * 取得し「炎上の強度」の絶対値・時系列差分を得る）。複数一致時は先頭（ランキング上位）を採用。
+ */
+function matchCommentRankingEntry(
+  topic: string,
+  entries: YahooRankingEntry[],
+): YahooRankingEntry | null {
+  return entries.find((e) => buzzMatchesTitleCorpus(topic, [e.title])) ?? null;
+}
 
 interface TopicToResearch {
   topic: string;
@@ -66,6 +82,12 @@ interface TopicToResearch {
   buzz?: BuzzSourceHit;
   /** detect.ts（RSS経路）が見送った候補を引き取って調査するもの（media consensus 経路で promote 可） */
   carriedOver?: boolean;
+  /** 一次情報や対立する言い分を根拠に議論を組み立てられるか（filterRelevantTopicsの判定。法案/引き取りは常にtrue） */
+  debatable: boolean;
+  /** TwoSides 争点タイプ。本線6型以外は調査しても promote しない */
+  debateType?: import("../../src/lib/debate-type").DebateType | null;
+  /** policy のスローバーン再燃 */
+  reignite?: boolean;
 }
 
 async function main() {
@@ -84,16 +106,26 @@ async function main() {
 
   // ① 収集 — バズ検知4ソース（政治・経済・国際・時事寄りは②のnanoが最終フィルタ）:
   //   Google Trends / Yahoo!リアルタイム / Yahoo!ニュースランキング / YouTube Data API
-  const [googleTerms, yahooBuzz, newsRankingTitles, sustainedGoogle, sustainedYahoo, shugiin, sangiin] =
-    await Promise.all([
-      fetchTrendingKeywords(),
-      fetchYahooRealtimeBuzzPolitics(),
-      fetchYahooNewsRankingTitles(),
-      getSustainedTerms(prisma, "google_trends"),
-      getSustainedTerms(prisma, "yahoo_realtime"),
-      fetchShugiinBills(),
-      fetchSangiinBills(),
-    ]);
+  const [
+    googleTerms,
+    yahooBuzz,
+    newsRankingTitles,
+    commentRankingEntries,
+    sustainedGoogle,
+    sustainedYahoo,
+    shugiin,
+    sangiin,
+  ] = await Promise.all([
+    fetchTrendingKeywords(),
+    fetchYahooRealtimeBuzzPolitics(),
+    fetchYahooNewsRankingTitles(),
+    fetchYahooCommentRankingEntries(),
+    getSustainedTerms(prisma, "google_trends"),
+    getSustainedTerms(prisma, "yahoo_realtime"),
+    fetchShugiinBills(),
+    fetchSangiinBills(),
+  ]);
+  const commentRankingTitles = commentRankingEntries.map((e) => e.title);
 
   const youtubeTitles = await fetchYouTubeTrendingTitles(newsRankingTitles);
 
@@ -124,6 +156,7 @@ async function main() {
     yahooRealtimeTerms: yahooBuzz.map((b) => b.term),
     newsRankingTitles,
     youtubeTrendingTitles: youtubeTitles,
+    commentRankingTitles,
   };
   const anchorCandidates = buildBuzzAnchorCandidates(filteredInputs, buzzSourceInputs);
   const score2Count = anchorCandidates.filter((c) => c.hit.effectiveScore >= 2).length;
@@ -140,7 +173,7 @@ async function main() {
   });
 
   console.log(
-    `  ① 収集: Trends${googleTerms.length}・Yahoo${yahooBuzz.length}・ニュース${newsRankingTitles.length}・YouTube${youtubeTitles.length}=生${rawBuzzInputs.length}語 → 政治圏プリフィルタ後${filteredInputs.length}語（nano候補${buzzTerms.length}）・横断アンカー≥2: ${score2Count}件 / 継続${sustainedSet.size} / 法案${shugiin.length + sangiin.length}件`,
+    `  ① 収集: Trends${googleTerms.length}・Yahoo${yahooBuzz.length}・ニュース${newsRankingTitles.length}・コメント${commentRankingTitles.length}・YouTube${youtubeTitles.length}=生${rawBuzzInputs.length}語 → 政治圏プリフィルタ後${filteredInputs.length}語（nano候補${buzzTerms.length}）・横断アンカー≥2: ${score2Count}件 / 継続${sustainedSet.size} / 法案${shugiin.length + sangiin.length}件`,
   );
 
   // ② 関連性判定（バズ語のみnanoに通す。法案は自明に関連なので直行）
@@ -149,7 +182,11 @@ async function main() {
   if (buzzTerms.length > 0) {
     try {
       relevant = await filterRelevantTopics(
-        buzzTerms.map((term) => ({ term, sustained: sustainedSet.has(term) })),
+        buzzTerms.map((term) => ({
+          term,
+          sustained: sustainedSet.has(term),
+          discussed: buzzMatchesTitleCorpus(term, commentRankingTitles),
+        })),
       );
     } catch (e) {
       console.warn(`  ⚠️ ② 関連性判定nano失敗 — バズ語をスキップし法案のみ続行 (${e})`);
@@ -181,6 +218,9 @@ async function main() {
     question: r.question,
     choices: r.choices,
     buzz: computeBuzzScore(r.topic, buzzSourceInputs),
+    debatable: r.debatable,
+    debateType: r.debateType,
+    reignite: r.reignite,
   }));
   const billTopics: TopicToResearch[] = billTitles.map((topic) => ({
     topic,
@@ -191,6 +231,9 @@ async function main() {
     // 法案はpromote.ts（バズ駆動記事）の対象外。既存detect.ts側で公開されるためquestion/choicesは不要
     question: "",
     choices: { for: "", against: "", undecided: "" },
+    debatable: true,
+    debateType: "policy" as const,
+    reignite: false,
   }));
 
   // detect.ts（RSS経路）が「報道多数だが一次情報なし／バズ前」で見送った候補を引き取る（#2/#3の救済）。
@@ -247,22 +290,35 @@ async function main() {
   const researched = await Promise.all(
     targets.map(async (t) => {
       const evidence = await researchTopic(t.topic, limits, prisma);
+      // YouTubeバズ由来のトピックは、放送局公式サイトの記事があれば本文取得できるよう優先的に探して合流する
+      if (t.buzz?.inYouTubeTrending) {
+        const broadcastMatch = await matchBroadcastArticle(t.topic).catch(() => null);
+        evidence.news = mergeBroadcastMatch(evidence.news, broadcastMatch);
+      }
       const suff = evaluateEvidenceSufficiency(evidence);
       const promoteSuff = evaluateBuzzPromoteSufficiency(evidence);
+      // ①社会炎上量の実測: コメントランキングに載っていれば個別記事ページの総コメント数を取得する
+      const commentEntry = matchCommentRankingEntry(t.topic, commentRankingEntries);
+      const commentCount = commentEntry
+        ? await fetchYahooArticleCommentCount(commentEntry.url)
+        : null;
       const summary =
         `国会${evidence.dietSpeeches.length}/法令${evidence.laws.length}/国内報道${evidence.news.length}/海外報道${evidence.internationalNews.length}` +
         `(異なる媒体${suff.distinctNewsOutlets})/背景${evidence.background ? "○" : "×"}/官庁${evidence.officialEvents.length}` +
-        `/buzzScore${t.buzz ? buzzEffectiveScore(t.buzz) : "n/a"}(raw${t.buzz?.score ?? "n/a"})/promote${promoteSuff.sufficient ? "可" : "不可"}`;
+        `/buzzScore${t.buzz ? buzzEffectiveScore(t.buzz) : "n/a"}(raw${t.buzz?.score ?? "n/a"})/promote${promoteSuff.sufficient ? "可" : "不可"}` +
+        `/コメント${commentCount ?? "n/a"}`;
       const mark = isEmptyEvidence(evidence) ? "⚠️ 証拠なし" : promoteSuff.sufficient ? "✅" : suff.sufficient ? "△promote不可" : "△証拠薄い";
       console.log(`    ${mark} [${t.discoverySource}] ${t.topic} — ${summary}`);
-      return { t, evidence, suff };
+      return { t, evidence, suff, commentCount };
     }),
   );
 
   if (DRY_RUN) {
     for (const { t, evidence } of researched) printEvidence(t, evidence);
   } else {
-    for (const { t, evidence, suff } of researched) await upsertCandidate(t, evidence, suff);
+    for (const { t, evidence, suff, commentCount } of researched) {
+      await upsertCandidate(t, evidence, suff, commentCount);
+    }
   }
 
   console.log("🔎 Radar discover 完了");
@@ -308,6 +364,10 @@ async function loadCarryOverTopics(excludeKeys: Set<string>): Promise<TopicToRes
       question: "",
       choices: { for: "", against: "", undecided: "" },
       carriedOver: true,
+      debatable: true,
+      // debateType は調査後の見出しで promote 側が機械推定（ここでは未確定のまま可）
+      debateType: null,
+      reignite: false,
     });
   }
   return out;
@@ -351,6 +411,7 @@ async function upsertCandidate(
   t: TopicToResearch,
   evidence: EvidenceBundle,
   suff: ReturnType<typeof evaluateEvidenceSufficiency>,
+  commentCount?: number | null,
 ): Promise<void> {
   const key = dedupKey(t.topic);
   // 関連ニュース（国内+海外）を既存機構が読める sourceUrls 形式に変換（{title,url,feed}）。
@@ -362,11 +423,23 @@ async function upsertCandidate(
     feed: n.source || "google-news",
     publishedAt: n.pubDate || undefined,
   }));
+  const existing = await prisma.topicCandidate.findUnique({
+    where: { dedupKey: key },
+    select: { status: true, evidenceJson: true },
+  });
+  const prevCommentCount = (existing?.evidenceJson as unknown as SavedEvidence | null)?.commentCount;
+  // コメント数が短時間で急増＝炎上が加速中の実測シグナル（絶対値だけでは「元から人気の話題」と区別できない）
+  const commentCountSurge =
+    typeof commentCount === "number" &&
+    typeof prevCommentCount === "number" &&
+    commentCount - prevCommentCount >= RADAR.commentCountSurgeThreshold;
+
   const decision =
     `discover/${t.discoverySource}: ${t.reason} ` +
     `(${evidence.dietSpeeches.length}国会/${evidence.laws.length}法令/${evidence.news.length}国内報道/${evidence.internationalNews.length}海外報道/` +
     `異なる媒体${suff.distinctNewsOutlets}/背景${evidence.background ? "○" : "×"}) ` +
-    `buzzScore=${t.buzz ? buzzEffectiveScore(t.buzz) : "n/a"} sufficient=${suff.sufficient}`;
+    `buzzScore=${t.buzz ? buzzEffectiveScore(t.buzz) : "n/a"} sufficient=${suff.sufficient}` +
+    `${typeof commentCount === "number" ? ` commentCount=${commentCount}${commentCountSurge ? "(急増)" : ""}` : ""}`;
 
   const savedEvidence: SavedEvidence = {
     ...evidence,
@@ -377,6 +450,11 @@ async function upsertCandidate(
     // 引き取り候補で強い媒体一致が確認できれば media consensus 経路で promote 可にする
     mediaConsensus:
       t.carriedOver && suff.distinctNewsOutlets >= CONSENSUS_MIN_OUTLETS ? true : undefined,
+    debatable: t.debatable,
+    debateType: t.debateType ?? undefined,
+    reignite: t.reignite || undefined,
+    commentCount: typeof commentCount === "number" ? commentCount : prevCommentCount,
+    commentCountSurge: commentCountSurge || undefined,
   };
 
   const data = {
@@ -390,11 +468,6 @@ async function upsertCandidate(
     // ④状態判定・⑤記事生成が後続で消費するため PENDING のまま置く
     status: "PENDING" as const,
   };
-
-  const existing = await prisma.topicCandidate.findUnique({
-    where: { dedupKey: key },
-    select: { status: true },
-  });
 
   await prisma.topicCandidate.upsert({
     where: { dedupKey: key },

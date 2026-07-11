@@ -12,6 +12,9 @@ import { PrismaClient, type Prisma, type ConfirmationStatus } from "@prisma/clie
 import { RADAR } from "../../src/lib/constants";
 import { shouldRegenerateFollowUp, jstDayStart } from "../../src/lib/radar";
 import { generateVerifiedArticle, violatesBan } from "../../src/lib/radar-article";
+import { checkArticleQualityGate } from "./lib/article-judge";
+import { buildClaimDiff, formatClaimDiffBlock } from "./lib/claim-diff";
+import { isWithinPeakWindow } from "./lib/schedule";
 import { fetchPrimaryExcerpts } from "./lib/primary-text";
 import { fetchReportExcerpts } from "./lib/report-text";
 import { ensureEvidence, evidenceToArticleFacts, internationalNewsSources, pollingNewsSources } from "./lib/enrich";
@@ -19,6 +22,7 @@ import { notifyRadarFailure } from "./notify";
 import { notifyRevalidate } from "./lib/notify-revalidate";
 
 const prisma = new PrismaClient();
+const FORCE = process.argv.includes("--force"); // 起動時間帯チェックを無視（動作確認用）
 
 interface CandidateRow {
   id: string;
@@ -34,6 +38,14 @@ interface CandidateRow {
 const FOLLOW_UP_LABEL_PREFIX = "続報反映:";
 
 async function main() {
+  const inFollowupWindow =
+    FORCE ||
+    isWithinPeakWindow(new Date(), RADAR.followupWindowsJst, RADAR.followupWindowToleranceMin);
+  if (!inFollowupWindow) {
+    console.log("followup 時間帯外のためスキップ（--forceで無視可）");
+    return;
+  }
+
   const dailyLimit = Number(process.env.FOLLOWUP_DAILY_LIMIT ?? RADAR.followUpDailyLimit);
   const todayStart = jstDayStart();
   const generatedToday = await prisma.issueTimeline.count({
@@ -141,6 +153,21 @@ async function main() {
           ])
         : [[], []];
 
+      let claimDiffBlock = "";
+      try {
+        claimDiffBlock = formatClaimDiffBlock(
+          await buildClaimDiff(
+            [...reportExcerpts, ...internationalReportExcerpts].map((e) => ({
+              feed: e.feed,
+              title: e.title,
+              text: e.text,
+            })),
+          ),
+        );
+      } catch (e) {
+        console.warn(`  ⚠️ 媒体diffのnano失敗（fail-open・生抜粋のみで続行）: ${issue.title} (${e})`);
+      }
+
       const { article, verified, unresolvedClaims } = await generateVerifiedArticle({
         issueTitle: issue.title,
         isReported,
@@ -148,6 +175,7 @@ async function main() {
         primaryExcerpts,
         reportExcerpts,
         internationalReportExcerpts,
+        claimDiffBlock,
         pollingExcerpts,
         dietSpeeches,
         background,
@@ -166,6 +194,20 @@ async function main() {
       if (banned) {
         console.warn(`  ⚠️ 断定表現検出「${banned}」→ 更新せず既存記事を維持`);
         continue;
+      }
+
+      try {
+        const gate = await checkArticleQualityGate({
+          title: issue.title,
+          lead: article.lead,
+          articleHtml: article.articleHtml,
+        });
+        if (!gate.ok) {
+          console.warn(`  ⚠️ 品質ゲート不合格「${gate.reason}」→ 更新せず既存記事を維持`);
+          continue;
+        }
+      } catch (e) {
+        console.warn(`  ⚠️ 品質ゲートnano失敗（fail-open・更新続行）: ${issue.title} (${e})`);
       }
 
       await prisma.$transaction([

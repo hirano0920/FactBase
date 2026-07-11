@@ -55,7 +55,7 @@ export async function fetchYahooRealtimeBuzz(): Promise<YahooBuzzTerm[]> {
   }
 }
 
-/** discover 用: スポーツ・エンタメ genre と政治圏プリフィルタを適用 */
+/** discover 用: スポーツ・エンタメ genre 等のゴミを除外（火種候補は prefilter 経由で通す） */
 export async function fetchYahooRealtimeBuzzPolitics(): Promise<YahooBuzzTerm[]> {
   const all = await fetchYahooRealtimeBuzz();
   return all.filter((b) => shouldKeepBuzzTerm({ term: b.term, source: "yahoo_rt", genre: b.genre }));

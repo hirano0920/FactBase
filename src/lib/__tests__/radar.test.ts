@@ -17,6 +17,8 @@ import {
   computeBuzzScore,
   toIssueCategory,
   shouldDeferToBuzzPipeline,
+  shouldUseInternationalReports,
+  looksLikeDeclarationConflict,
   type DecisionInput,
   type FollowUpAggregate,
 } from "@/lib/radar";
@@ -486,6 +488,26 @@ describe("isOutOfScopeTopic", () => {
     expect(
       isOutOfScopeTopic("スポーツ振興予算案", ["政府、スポーツ基本法改正案を閣議決定"]),
     ).toBe(false);
+  });
+
+  it("声明対立型の芸能ニュース（事務所vs本人の声明）は機械的な除外パターンでも通す", () => {
+    expect(
+      isOutOfScopeTopic("事務所が声明を発表、本人は不倫を否定", ["所属事務所が謝罪声明"]),
+    ).toBe(false);
+    expect(
+      isOutOfScopeTopic("ハラスメント疑惑で契約解除、本人は反論", ["会社側が契約解除を発表"]),
+    ).toBe(false);
+  });
+
+  it("声明対立の無い単なる熱愛・結婚報告は引き続き対象外", () => {
+    expect(isOutOfScopeTopic("芸能人カップルが熱愛発覚", ["交際3年で結婚へ"])).toBe(true);
+  });
+});
+
+describe("looksLikeDeclarationConflict", () => {
+  it("声明・反論・契約解除などの火種シグナルを検出する", () => {
+    expect(looksLikeDeclarationConflict("事務所が声明を発表", "本人は否定")).toBe(true);
+    expect(looksLikeDeclarationConflict("日銀の政策金利判断")).toBe(false);
   });
 });
 
@@ -1000,13 +1022,31 @@ describe("toIssueCategory", () => {
     expect(toIssueCategory("finance")).toBe("FINANCE");
   });
 
-  it("nano独自のカテゴリ(rights/international/society)はPOLITICSに畳み込む", () => {
+  it("nano独自のカテゴリ(rights/international)はPOLITICSに畳み込む", () => {
     expect(toIssueCategory("rights")).toBe("POLITICS");
     expect(toIssueCategory("international")).toBe("POLITICS");
-    expect(toIssueCategory("society")).toBe("POLITICS");
+  });
+
+  it("society/entertainmentは専用カテゴリにマップする", () => {
+    expect(toIssueCategory("society")).toBe("SOCIETY");
+    expect(toIssueCategory("entertainment")).toBe("ENTERTAINMENT");
   });
 
   it("未知のcategoryはPOLITICSにフォールバック", () => {
     expect(toIssueCategory("unknown")).toBe("POLITICS");
+  });
+});
+
+describe("shouldUseInternationalReports", () => {
+  it("internationalカテゴリや戦争・外交トピックは海外報道を使う", () => {
+    expect(shouldUseInternationalReports("international", "何か")).toBe(true);
+    expect(shouldUseInternationalReports(null, "ウクライナ情勢の停戦交渉")).toBe(true);
+    expect(shouldUseInternationalReports("politics", "米国の対中関税引き上げ")).toBe(true);
+  });
+
+  it("国内主の社会・経済トピックは海外報道を使わない", () => {
+    expect(shouldUseInternationalReports("society", "著名人のハラスメント疑惑と本人の反論")).toBe(false);
+    expect(shouldUseInternationalReports("economy", "最低賃金引き上げ論議")).toBe(false);
+    expect(shouldUseInternationalReports("finance", "日銀の政策金利判断")).toBe(false);
   });
 });

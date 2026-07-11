@@ -5,7 +5,7 @@ import { BURST } from "@/lib/constants";
 
 export const runtime = "nodejs";
 
-/** 賛成派・反対派それぞれの「役に立った」最多コメントを1件ずつ返す（対決表示用） */
+/** 賛成派・反対派それぞれの越境評価（bridging）トップコメントを1件ずつ返す（対決表示用） */
 export async function GET(req: NextRequest) {
   const ip = getClientIp(req);
   const allowed = await checkRateLimit("comments-highlights", ip, BURST.commentsGetPerIpPerMin, 60);

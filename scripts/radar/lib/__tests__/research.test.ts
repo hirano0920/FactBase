@@ -10,6 +10,7 @@ import {
   tavilyResultsToNewsItems,
   type EvidenceBundle,
 } from "../research";
+import { resetDomainTrustDenylistCache } from "../domain-trust";
 
 // 5つの外部APIは実fetchを叩くため、fetchをモックして researchTopic の束ね方だけ検証する
 function stubFetch(handler: (url: string) => { ok: boolean; json?: unknown; text?: string }) {
@@ -28,9 +29,12 @@ function stubFetch(handler: (url: string) => { ok: boolean; json?: unknown; text
   );
 }
 
-function fakePrisma(sourceEvents: unknown[] = []) {
+function fakePrisma(sourceEvents: unknown[] = [], denylistHostnames: string[] = []) {
   return {
     sourceEvent: { findMany: vi.fn().mockResolvedValue(sourceEvents) },
+    domainTrustRule: {
+      findMany: vi.fn().mockResolvedValue(denylistHostnames.map((hostname) => ({ hostname }))),
+    },
   } as unknown as PrismaClient;
 }
 
@@ -39,6 +43,7 @@ const LIMITS = { kokkaiRecords: 5, lawRecords: 3, newsRecords: 8, internationalN
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
+  resetDomainTrustDenylistCache();
 });
 
 describe("researchTopic", () => {
@@ -91,6 +96,29 @@ describe("researchTopic", () => {
     expect(bundle.background?.title).toBe("国旗損壊罪");
     expect(bundle.officialEvents).toHaveLength(1);
     expect(isEmptyEvidence(bundle)).toBe(false);
+  });
+
+  it("「トピック 世論調査」でGoogle Newsを検索し、見つかればpollingNewsに含める", async () => {
+    const requestedUrls: string[] = [];
+    stubFetch((url) => {
+      requestedUrls.push(url);
+      if (decodeURIComponent(url).includes("世論調査")) {
+        return {
+          ok: true,
+          text: `<rss><channel><item><title>内閣支持率45% - NHK世論調査</title><link>https://n/poll</link><source url="s">NHK</source></item></channel></rss>`,
+        };
+      }
+      return { ok: false };
+    });
+    const bundle = await researchTopic("国旗損壊罪", LIMITS, fakePrisma([]));
+    expect(requestedUrls.some((u) => decodeURIComponent(u).includes("世論調査"))).toBe(true);
+    expect(bundle.pollingNews?.[0]?.url).toBe("https://n/poll");
+  });
+
+  it("世論調査報道が見つからなければpollingNewsはundefined", async () => {
+    stubFetch(() => ({ ok: false }));
+    const bundle = await researchTopic("国旗損壊罪", LIMITS, fakePrisma([]));
+    expect(bundle.pollingNews).toBeUndefined();
   });
 
   it("全ソースが失敗しても空バンドルを返し例外を投げない", async () => {
@@ -184,6 +212,32 @@ describe("researchTopic", () => {
     const bundle = await researchTopic("国旗損壊罪", LIMITS, fakePrisma([]));
     expect(bundle.internationalNews.some((n) => n.url.includes("rt.com"))).toBe(false);
     expect(bundle.news.some((n) => n.url.includes("rt.com"))).toBe(false);
+  });
+
+  it("DB管理の追加denylist（DomainTrustRule）に一致するTavily結果も採用しない", async () => {
+    vi.stubEnv("TAVILY_API_KEY", "test-key");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) => {
+        if (url.includes("tavily")) {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                results: [{ title: "低品質記事", url: "https://bad-source.example/1", content: "抜粋" }],
+              }),
+          });
+        }
+        return Promise.resolve({ ok: false, status: 500 });
+      }),
+    );
+    const bundle = await researchTopic(
+      "国旗損壊罪",
+      LIMITS,
+      fakePrisma([], ["bad-source.example"]),
+    );
+    expect(bundle.internationalNews.some((n) => n.url.includes("bad-source.example"))).toBe(false);
+    expect(bundle.news.some((n) => n.url.includes("bad-source.example"))).toBe(false);
   });
 });
 

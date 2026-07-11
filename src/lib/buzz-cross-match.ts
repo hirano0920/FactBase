@@ -154,6 +154,11 @@ export function assembleBuzzScore(topic: string, sources: BuzzSourceInputs): Buz
   const inYouTubeTrending =
     buzzTitleMatch([topic], sources.youtubeTrendingTitles) ||
     buzzMatchesTitleCorpus(topic, sources.youtubeTrendingTitles);
+  const commentRankingTitles = sources.commentRankingTitles ?? [];
+  const inCommentRanking =
+    commentRankingTitles.length > 0 &&
+    (buzzTitleMatch([topic], commentRankingTitles) ||
+      buzzMatchesTitleCorpus(topic, commentRankingTitles));
   const score =
     Number(inGoogleTrends) +
     Number(inYahooRealtime) +
@@ -162,7 +167,12 @@ export function assembleBuzzScore(topic: string, sources: BuzzSourceInputs): Buz
 
   const newsClusterCount = countNewsClusterHeadlines(topic, sources.newsRankingTitles);
   const inNewsCluster = newsClusterCount >= RADAR.minNewsClusterHeadlines;
-  const effectiveScore = Math.min(4, score + (inNewsCluster ? 1 : 0));
+  // コメントランキング一致は「賛否が割れている」の直接シグナルなので、他4ソースの合算とは
+  // 別枠でボーナスを乗せる（読まれただけの record と区別するため newsCluster と同じ+1扱い）。
+  const effectiveScore = Math.min(
+    5,
+    score + (inNewsCluster ? 1 : 0) + (inCommentRanking ? 1 : 0),
+  );
 
   return {
     inGoogleTrends,
@@ -170,6 +180,7 @@ export function assembleBuzzScore(topic: string, sources: BuzzSourceInputs): Buz
     inNewsRanking,
     inYouTubeTrending,
     inNewsCluster,
+    inCommentRanking,
     score,
     effectiveScore,
     newsClusterCount,

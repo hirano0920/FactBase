@@ -43,7 +43,7 @@ export function TrendingTicker({ items }: { items: RankingItem[] }) {
             )}
           </div>
           <p className="line-clamp-2 text-sm font-bold leading-snug text-ink">
-            {item.issue.title}
+            {item.issue.shareTitle || item.issue.title}
           </p>
         </Link>
       ))}

@@ -6,6 +6,7 @@ import { cn, formatNumber, formatPercent } from "@/lib/utils";
 import type { VoteChoiceId } from "@/lib/constants";
 import type { VoteLabels, VoteTally } from "@/types";
 import { Button } from "@/components/ui/button";
+import { CountUp } from "@/components/ui/count-up";
 
 interface VotePanelProps {
   tally: VoteTally;
@@ -51,9 +52,12 @@ export function VotePanel({
   celebrate = false,
 }: VotePanelProps) {
   const [revealed, setRevealed] = useState(Boolean(userVote));
-  // 投票が確定した瞬間（nullから何か選んだ瞬間）は自動で結果を開く
+  // 投票を変更したい時だけ、一時的にフル表示（ボタン付き）に戻す
+  const [changingVote, setChangingVote] = useState(false);
+  // 投票が確定した瞬間（nullから何か選んだ瞬間）は自動で結果を開き、変更モードは閉じる
   useEffect(() => {
     if (userVote) setRevealed(true);
+    setChangingVote(false);
   }, [userVote]);
 
   const labelFor = (id: VoteChoiceId) =>
@@ -61,11 +65,46 @@ export function VotePanel({
 
   const callout = leadingCallout(tally, labels);
 
+  // 投票済みなら、議論セクションの真上にコンパクトな結果バーだけを出す（フルUIは「変更する」を押した時だけ）
+  if (userVote && !changingVote) {
+    return (
+      <div className="flex items-center gap-3 rounded-xl border border-border bg-surface px-4 py-2.5">
+        <span className="shrink-0 text-xs font-bold text-ink-secondary">
+          ✅ {labelFor(userVote)}
+        </span>
+        <div className="flex h-2 flex-1 overflow-hidden rounded-sm bg-surface-muted">
+          {VOTE_CHOICES.map((choice) => (
+            <div
+              key={choice.id}
+              className={cn(
+                choice.color === "for" && "bg-for",
+                choice.color === "against" && "bg-against",
+                choice.color === "neutral" && "bg-neutral/60",
+              )}
+              style={{ width: `${tally.percents[countKey(choice.id)]}%` }}
+              title={`${labelFor(choice.id)} ${formatPercent(tally.percents[countKey(choice.id)])}`}
+            />
+          ))}
+        </div>
+        <span className="shrink-0 text-xs tabular-nums text-ink-faint">
+          {formatNumber(tally.totalVoters)}人
+        </span>
+        <button
+          type="button"
+          onClick={() => setChangingVote(true)}
+          className="shrink-0 text-xs font-medium text-link underline-offset-2 hover:underline"
+        >
+          変更する
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-3 sm:space-y-5">
       {!revealed ? (
-        <div className="rounded-xl border border-dashed border-border-strong bg-surface-muted p-5 text-center">
-          <p className="mb-3 text-sm text-ink-muted">
+        <div className="rounded-[20px] border border-dashed border-border-strong bg-surface-muted p-3.5 text-center sm:p-5">
+          <p className="mb-2.5 text-sm text-ink-muted sm:mb-3">
             投票するか、結果を見てから考えるか選べます
           </p>
           <Button variant="secondary" size="sm" onClick={() => setRevealed(true)}>
@@ -87,7 +126,7 @@ export function VotePanel({
             {callout.text}
           </p>
 
-          <div className="flex h-3 overflow-hidden rounded-full bg-surface-muted">
+          <div className="flex h-3 overflow-hidden rounded-sm bg-surface-muted">
             {VOTE_CHOICES.map((choice) => (
               <div
                 key={choice.id}
@@ -104,19 +143,15 @@ export function VotePanel({
           </div>
 
           <p className="mt-3 text-center text-sm text-ink-muted">
-            <span className="tabular-nums font-bold text-ink-secondary">
-              {formatNumber(tally.totalVotes)}
-            </span>
+            <CountUp value={tally.totalVotes} className="tabular-nums font-bold text-ink-secondary" />
             {" 票 · "}
-            <span className="tabular-nums font-bold text-ink-secondary">
-              {formatNumber(tally.totalVoters)}
-            </span>
+            <CountUp value={tally.totalVoters} className="tabular-nums font-bold text-ink-secondary" />
             {" 人が投票"}
           </p>
         </div>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
         {VOTE_CHOICES.map((choice) => {
           const isSelected = userVote === choice.id;
           const variant =
@@ -135,19 +170,19 @@ export function VotePanel({
               disabled={!canVote || userVote === choice.id}
               onClick={() => onVote?.(choice.id)}
               className={cn(
-                "flex-col gap-1 py-4 transition-transform active:scale-95",
+                "flex-col gap-0.5 px-1.5 py-3 transition-transform active:scale-95 sm:gap-1 sm:py-4",
                 isSelected && "ring-2 ring-offset-2 ring-offset-surface",
                 choice.id === "for" && isSelected && "ring-for/40",
                 choice.id === "against" && isSelected && "ring-against/40",
                 choice.id === "undecided" && isSelected && "ring-neutral/40",
               )}
             >
-              <span className="text-base font-bold">
+              <span className="line-clamp-2 text-sm font-bold sm:text-base">
                 {isSelected && "✅ "}
                 {labelFor(choice.id)}
               </span>
               {revealed && (
-                <span className="tabular-nums text-sm opacity-80">
+                <span className="text-xs tabular-nums opacity-80 sm:text-sm">
                   {formatPercent(tally.percents[countKey(choice.id)])}
                 </span>
               )}

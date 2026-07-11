@@ -184,6 +184,13 @@ export const commentsCacheKey = (
 ) => `cache:comments:${issueId}:${ver}:${sort}:${cursor}:${limit}`;
 export const debateHighlightsCacheKey = (issueId: string, ver: number) =>
   `cache:comments:highlights:${issueId}:${ver}`;
+export const splitCommentsCacheKey = (
+  issueId: string,
+  ver: number,
+  side: "for" | "against",
+  cursor: string,
+  limit: number,
+) => `cache:comments:split:${issueId}:${ver}:${side}:${cursor}:${limit}`;
 export const timelineVerKey = (issueId: string) => `cache:timeline:ver:${issueId}`;
 export const timelineCacheKey = (issueId: string, ver: number) => `cache:timeline:${issueId}:${ver}`;
 export const globalTimelineVerKey = () => "cache:timeline:global:ver";

@@ -24,7 +24,7 @@ export function ThemeToggle() {
       aria-label={isDark ? "ライトモードに切り替え" : "ダークモードに切り替え"}
       className={cn(
         "flex h-8 w-8 items-center justify-center rounded-full",
-        "text-ink-secondary transition-colors hover:bg-surface-muted hover:text-ink",
+        "text-ink-secondary transition hover:bg-surface-muted hover:text-ink",
       )}
     >
       {isDark ? (

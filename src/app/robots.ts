@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
+import { SITE } from "@/lib/constants";
 
-const BASE_URL = process.env.AUTH_URL?.replace(/\/$/, "") || "https://factbase.tokyo";
+const BASE_URL = process.env.AUTH_URL?.replace(/\/$/, "") || SITE.url;
 
 export default function robots(): MetadataRoute.Robots {
   return {

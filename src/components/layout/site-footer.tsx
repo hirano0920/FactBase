@@ -2,7 +2,7 @@ import Link from "next/link";
 import { SITE } from "@/lib/constants";
 
 const FOOTER_LINKS = [
-  { href: "/about", label: "FactBaseを知る" },
+  { href: "/about", label: `${SITE.name}を知る` },
   { href: "/transparency", label: "透明性" },
   { href: "/security", label: "セキュリティ" },
   { href: "/pricing", label: "料金" },

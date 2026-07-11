@@ -6,6 +6,7 @@ import { AdSlotGated } from "@/components/layout/ad-slot-gated";
 import { getIssueBySlug, getRelatedIssues } from "@/lib/data";
 import { sanitizeArticleHtml } from "@/lib/sanitize";
 import { extractListItems, splitArticleSections } from "@/lib/article-sections";
+import { SITE } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import type { Metadata } from "next";
 
@@ -183,14 +184,14 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
             {section.heading && (
               <h2 className="mb-3 font-serif text-xl font-semibold text-ink">{section.heading}</h2>
             )}
-            {section.heading === "論点" ? (
+            {section.heading === "賛成の主な理由" || section.heading === "反対の主な理由" || section.heading === "論点" ? (
               <div>
                 <div
                   className="prose-article"
                   dangerouslySetInnerHTML={{ __html: section.bodyHtml }}
                 />
                 <p className="mb-2 mt-4 text-xs font-medium text-ink-faint">
-                  この論点について意見を書く →
+                  この理由を引用してコメントを書く →
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {extractListItems(section.bodyHtml).map((point, j) => (
@@ -216,14 +217,25 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
         ))}
       </div>
 
-      <div className="mt-10 rounded-md border border-accent/20 bg-accent/5 px-5 py-4 text-center">
-        <p className="text-sm text-ink-secondary">
-          この争点について
-          <Link href={`/issues/${issue.slug}`} className="mx-1 font-medium text-link">
-            投票・議論に参加する →
-          </Link>
+      <Link
+        href={`/issues/${issue.slug}`}
+        className="relative mt-10 block overflow-hidden rounded-[20px] border border-border bg-surface-raised px-6 py-7 text-center no-underline transition-transform hover:-translate-y-0.5"
+      >
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -left-16 -top-16 h-56 w-56 rounded-full bg-accent/[0.14] blur-[60px]"
+        />
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -bottom-16 -right-16 h-56 w-56 rounded-full bg-hot/[0.12] blur-[60px]"
+        />
+        <p className="relative bg-gradient-to-r from-accent to-hot bg-clip-text text-lg font-bold text-transparent">
+          投票して、賛成派・反対派の意見を読み比べる
         </p>
-      </div>
+        <p className="relative mt-1.5 text-sm text-ink-secondary">
+          声の大きさではなく納得感で並ぶ、{SITE.name}だけのスプリットスレッドへ →
+        </p>
+      </Link>
 
       {/* 関連する過去の争点 */}
       {relatedIssues.length > 0 && (

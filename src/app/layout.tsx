@@ -3,6 +3,7 @@ import { Noto_Sans_JP } from "next/font/google";
 import { BottomNav } from "@/components/layout/bottom-nav";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
+import { RouteTransition } from "@/components/layout/route-transition";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SITE } from "@/lib/constants";
 import { Suspense } from "react";
@@ -55,7 +56,9 @@ export default function RootLayout({
           >
             <SiteHeader />
           </Suspense>
-          <main className="flex-1 pb-16 lg:pb-0">{children}</main>
+          <main className="flex-1 pb-16 lg:pb-0">
+            <RouteTransition>{children}</RouteTransition>
+          </main>
           <SiteFooter />
           <Suspense fallback={null}>
             <BottomNav />

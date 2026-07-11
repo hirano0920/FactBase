@@ -20,6 +20,7 @@ export const MOCK_ISSUES: Issue[] = DEMO_ISSUES.map((def, index) => ({
   id: `demo-${index + 1}`,
   slug: def.slug,
   title: def.title,
+  shareTitle: null,
   category: def.category,
   status: def.status,
   summary: def.summary,
@@ -32,6 +33,9 @@ export const MOCK_ISSUES: Issue[] = DEMO_ISSUES.map((def, index) => ({
   confirmation: def.confirmation,
   voteLabels: null,
   underReview: false,
+  thumbnailUrl: null,
+  thumbnailSourceUrl: null,
+  thumbnailSourceFeed: null,
 }));
 
 const slugToId = Object.fromEntries(MOCK_ISSUES.map((i) => [i.slug, i.id]));
@@ -50,6 +54,7 @@ export const MOCK_COMMENTS: Comment[] = DEMO_COMMENTS.map((def, index) => ({
   dislikeCount: 0,
   helpfulCount: def.helpfulCount,
   fcResult: null,
+  verifiedBadge: false,
   createdAt: def.createdAt,
   parentId: null,
   replyCount: 0,
@@ -73,6 +78,7 @@ export function getRanking(): RankingItem[] {
         id: issue.id,
         slug: issue.slug,
         title: issue.title,
+        shareTitle: issue.shareTitle,
         category: issue.category,
         status: issue.status,
       },

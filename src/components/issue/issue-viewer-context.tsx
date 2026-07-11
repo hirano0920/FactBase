@@ -1,14 +1,22 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { BookmarkButton } from "@/components/issue/bookmark-button";
 import { CommentSection } from "@/components/issue/comment-section";
 import { QualityReportButton } from "@/components/issue/quality-report-button";
 import { VotePanelLive } from "@/components/issue/vote-panel-live";
+import { SpectrumVote } from "@/components/issue/spectrum-vote";
+import { DebateIntelligencePanel } from "@/components/issue/debate-intelligence-panel";
+import { Button } from "@/components/ui/button";
 import type { VoteChoiceId } from "@/lib/constants";
 import type { Comment, VoteLabels, VoteTally } from "@/types";
 import type { Plan } from "@prisma/client";
-import { canPostComment, canUseFactCheck } from "@/lib/plan-features";
+import {
+  canPostComment,
+  canUseFactCheck,
+  canViewAnalytics,
+  canUseRebuttalAi,
+} from "@/lib/plan-features";
 
 interface ViewerResponseGuest {
   isLoggedIn: false;
@@ -115,6 +123,14 @@ export function IssueViewerProvider({
     };
   }, [slug, issueId, guestComments]);
 
+  // 投票直後の合図(justVoted)だけでなく、コメント欄のゲート判定に使うuserVote本体もここで更新する。
+  // これを怠ると、投票パネル自身は(ローカルstateで)即座に投票済み表示になる一方、
+  // コメント欄は共有コンテキストの古いuserVote(null)を見続けて「投票してください」と出続けるバグになる。
+  const markJustVoted = useCallback((choice: VoteChoiceId) => {
+    setJustVoted(choice);
+    setUserVote(choice);
+  }, []);
+
   const value = useMemo(
     () => ({
       loaded,
@@ -125,9 +141,9 @@ export function IssueViewerProvider({
       comments,
       nextCursor,
       justVoted,
-      markJustVoted: setJustVoted,
+      markJustVoted,
     }),
-    [loaded, isLoggedIn, plan, userVote, bookmarked, comments, nextCursor, justVoted],
+    [loaded, isLoggedIn, plan, userVote, bookmarked, comments, nextCursor, justVoted, markJustVoted],
   );
 
   return (
@@ -167,25 +183,60 @@ export function IssueVoteSlot({ issueId, initialTally, labels }: IssueVoteSlotPr
 }
 
 interface IssueCommentsSlotProps {
+  slug: string;
   issueId: string;
   commentCount: number;
+  voteTally: VoteTally;
 }
 
-export function IssueCommentsSlot({ issueId, commentCount }: IssueCommentsSlotProps) {
-  const { isLoggedIn, plan, comments, nextCursor, justVoted } = useIssueViewer();
+/** ログイン済みだが未投票の人向けの投票ゲート。ゲストにはこれまで通りプレビューを見せる（SEO・コールドスタート対策維持） */
+function VoteToUnlockGate({ commentCount }: { commentCount: number }) {
+  const scrollToVote = () => {
+    document.getElementById("vote-panel")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+  return (
+    <div className="rounded-lg border-2 border-dashed border-border-strong bg-surface-muted px-6 py-10 text-center">
+      <p className="mb-2 text-2xl" aria-hidden="true">
+        🔒
+      </p>
+      <p className="mb-1.5 text-base font-bold text-ink">投票すると議論が見られます</p>
+      <p className="mb-4 text-sm text-ink-secondary">
+        {commentCount > 0
+          ? `すでに${commentCount}件の意見が投稿されています。まずは上の投票からどうぞ。`
+          : "まずは上の投票から参加してください。"}
+      </p>
+      <Button variant="primary" size="sm" onClick={scrollToVote}>
+        投票する
+      </Button>
+    </div>
+  );
+}
+
+export function IssueCommentsSlot({ slug, issueId, commentCount, voteTally }: IssueCommentsSlotProps) {
+  const { isLoggedIn, plan, userVote, comments, nextCursor, justVoted } = useIssueViewer();
   const canComment = canPostComment(isLoggedIn);
   const canFactCheck = canUseFactCheck(plan);
+  const canRebuttalAi = canUseRebuttalAi(plan);
+
+  // ログイン済みだが未投票の人だけゲート対象。未ログインのゲストは従来通りGUEST_COMMENT_LIMIT件のプレビューが見える
+  if (isLoggedIn && !userVote) {
+    return <VoteToUnlockGate commentCount={commentCount} />;
+  }
 
   return (
     <CommentSection
       issueId={issueId}
+      issueSlug={slug}
       initialComments={comments}
       initialCursor={nextCursor}
       commentCount={commentCount}
       canComment={canComment}
       canFactCheck={canFactCheck}
+      canRebuttalAi={canRebuttalAi}
+      userVote={userVote}
       isLoggedIn={isLoggedIn}
       promptStance={justVoted}
+      voteTally={voteTally}
     />
   );
 }
@@ -193,4 +244,18 @@ export function IssueCommentsSlot({ issueId, commentCount }: IssueCommentsSlotPr
 export function IssueQualityReportSlot({ slug }: { slug: string }) {
   const { isLoggedIn } = useIssueViewer();
   return <QualityReportButton slug={slug} isLoggedIn={isLoggedIn} />;
+}
+
+/** 投票済みログインユーザーにのみ「読了後スライダー」を出す(未投票者はそもそも議論が見えていないため) */
+export function IssueSpectrumSlot({ slug }: { slug: string }) {
+  const { isLoggedIn, plan, userVote } = useIssueViewer();
+  if (!isLoggedIn || !userVote) return null;
+  return <SpectrumVote slug={slug} canViewDetail={canViewAnalytics(plan)} />;
+}
+
+/** 層の動き・両陣営マップ・MVP（Freeは概要、Plus/Proは詳細） */
+export function IssueIntelligenceSlot({ slug }: { slug: string }) {
+  const { plan } = useIssueViewer();
+  const isPlus = plan === "COMMENT" || plan === "FACTCHECK";
+  return <DebateIntelligencePanel slug={slug} isPlus={isPlus} />;
 }

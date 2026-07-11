@@ -4,28 +4,37 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { CommentCard } from "@/components/issue/comment-card";
 import { Button } from "@/components/ui/button";
+import { CountUp } from "@/components/ui/count-up";
 import { SectionTitle } from "@/components/layout/page-container";
 import {
   COMMENT_LIMITS,
   COMMENT_SORTS,
   DEBATE_HIGHLIGHT_MIN_COMMENTS,
+  SITE,
   VOTE_CHOICES,
   type CommentSortId,
   type VoteChoiceId,
 } from "@/lib/constants";
 import { cn } from "@/lib/utils";
-import type { Comment, FactCheckResult } from "@/types";
+import { VERDICT_STYLES } from "@/lib/fc-display";
+import { RebuttalAssistButton } from "@/components/issue/rebuttal-assist";
+import type { Comment, FactCheckResult, SplitComment, VoteTally } from "@/types";
 
 interface CommentSectionProps {
   issueId: string;
+  issueSlug?: string;
   initialComments: Comment[];
   initialCursor: string | null;
   commentCount: number;
   canComment: boolean;
   canFactCheck: boolean;
+  canRebuttalAi?: boolean;
+  userVote?: VoteChoiceId | null;
   isLoggedIn: boolean;
   /** 直前に初めて投票した選択肢。投票直後の「その理由を書く」導線に使う */
   promptStance?: VoteChoiceId | null;
+  /** スプリットスレッドのVSバー・タブに使う投票tally（ページ読み込み時点のスナップショット） */
+  voteTally: VoteTally;
 }
 
 const VOTE_CTA_LABEL: Record<VoteChoiceId, string> = {
@@ -42,6 +51,23 @@ interface DebateHighlights {
   for: Comment | null;
   against: Comment | null;
 }
+
+type SplitLayout = "split" | "single";
+type SplitSide = "for" | "against";
+
+interface SplitColumnState {
+  comments: SplitComment[];
+  cursor: string | null;
+}
+
+const OPPOSITE_STANCE: Record<VoteChoiceId, SplitSide | null> = {
+  for: "against",
+  against: "for",
+  undecided: null,
+};
+
+/** 投稿前チェックはcommentIdを持たないため、保存済みコメントのFC結果と違いcheckedAtは無い */
+type DraftFcDisplay = Omit<FactCheckResult, "checkedAt">;
 
 /** トップレベルコメント配列の中から、そのコメント自身または1階層下の返信のidを探して更新する */
 function updateCommentInTree(
@@ -69,13 +95,17 @@ async function readError(res: Response, fallback: string): Promise<string> {
 
 export function CommentSection({
   issueId,
+  issueSlug,
   initialComments,
   initialCursor,
   commentCount,
   canComment,
   canFactCheck,
+  canRebuttalAi = false,
+  userVote = null,
   isLoggedIn,
   promptStance,
+  voteTally,
 }: CommentSectionProps) {
   const searchParams = useSearchParams();
   const [comments, setComments] = useState<Comment[]>(initialComments);
@@ -84,6 +114,12 @@ export function CommentSection({
   const [sort, setSort] = useState<CommentSortId>("new");
   const [sortLoading, setSortLoading] = useState(false);
   const [highlights, setHighlights] = useState<DebateHighlights | null>(null);
+  const [layout, setLayout] = useState<SplitLayout>("split");
+  const [splitFor, setSplitFor] = useState<SplitColumnState>({ comments: [], cursor: null });
+  const [splitAgainst, setSplitAgainst] = useState<SplitColumnState>({ comments: [], cursor: null });
+  const [splitLoading, setSplitLoading] = useState(false);
+  const [splitLoadingMore, setSplitLoadingMore] = useState<SplitSide | null>(null);
+  const [mobileActiveSide, setMobileActiveSide] = useState<SplitSide>("for");
   const bodyRef = useRef<HTMLTextAreaElement | null>(null);
 
   const [stance, setStance] = useState<VoteChoiceId>("for");
@@ -91,9 +127,15 @@ export function CommentSection({
     const quote = searchParams.get("quote");
     return quote ? `> ${quote}\n\n` : "";
   });
+  // 投稿フォームは既定で畳んでおく（縦に長くなりがちなページを短くする）。
+  // 引用リンクからの遷移時だけは最初から開いた状態にする
+  const [composerOpen, setComposerOpen] = useState(() => Boolean(searchParams.get("quote")) && canComment);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [formNotice, setFormNotice] = useState<string | null>(null);
+  const [draftFcChecking, setDraftFcChecking] = useState(false);
+  const [draftFcResult, setDraftFcResult] = useState<DraftFcDisplay | null>(null);
+  const [draftFcError, setDraftFcError] = useState<string | null>(null);
 
   const [actionError, setActionError] = useState<string | null>(null);
   const [fcPendingId, setFcPendingId] = useState<string | null>(null);
@@ -116,18 +158,104 @@ export function CommentSection({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 畳んだフォームを開いて本文にフォーカスする（開いた直後はまだ未マウントなのでrAFで1フレーム待つ）
+  const openComposer = useCallback(() => {
+    setComposerOpen(true);
+    requestAnimationFrame(() => {
+      bodyRef.current?.focus();
+      bodyRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }, []);
+
   // 投票直後: 「その理由をコメントで」導線を一度だけ出す
   useEffect(() => {
     if (promptStance) setVoteCta(promptStance);
+  }, [promptStance]);
+
+  // 投票直後: モバイルは反対側カラムがタブの裏に隠れて「aha moment」を逃すため、
+  // 逆側カラム（越境評価トップ＝相手陣営が最も納得した意見）のタブへ自動で切り替える
+  useEffect(() => {
+    if (!promptStance) return;
+    const opposite = OPPOSITE_STANCE[promptStance];
+    if (opposite) setMobileActiveSide(opposite);
   }, [promptStance]);
 
   const acceptVoteCta = useCallback(() => {
     if (!voteCta) return;
     setStance(voteCta);
     setVoteCta(null);
-    bodyRef.current?.focus();
-    bodyRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [voteCta]);
+    openComposer();
+  }, [voteCta, openComposer]);
+
+  // 空カラムの「最初の一人になる」CTA: そのカラムの立場を投稿フォームに事前セットする
+  const startStanceFromColumn = useCallback(
+    (side: SplitSide) => {
+      setStance(side);
+      openComposer();
+    },
+    [openComposer],
+  );
+
+  const fetchSplitData = useCallback(async () => {
+    const res = await fetch(`/api/comments/split?issueId=${encodeURIComponent(issueId)}`);
+    if (!res.ok) return null;
+    return (await res.json()) as {
+      for: { comments: SplitComment[]; nextCursor: string | null };
+      against: { comments: SplitComment[]; nextCursor: string | null };
+    };
+  }, [issueId]);
+
+  const loadSplit = useCallback(async () => {
+    const data = await fetchSplitData().catch(() => null);
+    if (!data) return;
+    setSplitFor({ comments: data.for.comments, cursor: data.for.nextCursor });
+    setSplitAgainst({ comments: data.against.comments, cursor: data.against.nextCursor });
+  }, [fetchSplitData]);
+
+  // issueId変更時（初回描画含む）にスプリット表示用のデータを取得する
+  useEffect(() => {
+    let cancelled = false;
+    setSplitLoading(true);
+    void loadSplit().finally(() => {
+      if (!cancelled) setSplitLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadSplit]);
+
+  const loadMoreSplit = useCallback(
+    async (side: SplitSide) => {
+      const state = side === "for" ? splitFor : splitAgainst;
+      if (!state.cursor || splitLoadingMore) return;
+      setSplitLoadingMore(side);
+      try {
+        const cursorParam = side === "for" ? "forCursor" : "againstCursor";
+        const res = await fetch(
+          `/api/comments/split?issueId=${encodeURIComponent(issueId)}&${cursorParam}=${encodeURIComponent(state.cursor)}`,
+        );
+        if (!res.ok) {
+          setActionError(await readError(res, "コメントの読み込みに失敗しました"));
+          return;
+        }
+        const data = (await res.json()) as {
+          for: { comments: SplitComment[]; nextCursor: string | null };
+          against: { comments: SplitComment[]; nextCursor: string | null };
+        };
+        const column = data[side];
+        const setState = side === "for" ? setSplitFor : setSplitAgainst;
+        setState((prev) => ({
+          comments: [...prev.comments, ...column.comments],
+          cursor: column.nextCursor,
+        }));
+      } catch {
+        setActionError("通信に失敗しました。接続を確認してお試しください");
+      } finally {
+        setSplitLoadingMore(null);
+      }
+    },
+    [issueId, splitFor, splitAgainst, splitLoadingMore],
+  );
 
   // 賛成派・反対派の代表意見（対決表示）。初回描画を優先するため少し遅延して取得する
   useEffect(() => {
@@ -226,12 +354,43 @@ export function CommentSection({
       setBody("");
       setFormNotice("投稿しました");
       await refresh();
+      await loadSplit();
     } catch {
       setFormError("通信に失敗しました。接続を確認してお試しください");
     } finally {
       setSubmitting(false);
     }
-  }, [body, issueId, refresh, stance, submitting]);
+  }, [body, issueId, loadSplit, refresh, stance, submitting]);
+
+  // 本文を編集したら投稿前チェック結果は無効（その本文に対する判定ではなくなるため）
+  useEffect(() => {
+    setDraftFcResult(null);
+    setDraftFcError(null);
+  }, [body]);
+
+  const runDraftFactCheck = useCallback(async () => {
+    if (draftFcChecking) return;
+    setDraftFcChecking(true);
+    setDraftFcError(null);
+    try {
+      const res = await fetch("/api/comments/factcheck-draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ issueId, body }),
+      });
+      if (!res.ok) {
+        setDraftFcError(await readError(res, "ファクトチェックに失敗しました"));
+        return;
+      }
+      const data = (await res.json()) as DraftFcDisplay & { remaining: number };
+      setDraftFcResult(data);
+      setFcRemaining(data.remaining);
+    } catch {
+      setDraftFcError("通信に失敗しました");
+    } finally {
+      setDraftFcChecking(false);
+    }
+  }, [body, draftFcChecking, issueId]);
 
   const bumpCount = useCallback(
     (id: string, field: "likeCount" | "dislikeCount" | "helpfulCount", value: number) => {
@@ -242,6 +401,14 @@ export function CommentSection({
           c ? updateCommentInTree([c], id, (x) => ({ ...x, [field]: value }))[0] : c;
         return { for: patch(prev.for), against: patch(prev.against) };
       });
+      setSplitFor((prev) => ({
+        ...prev,
+        comments: prev.comments.map((c) => (c.id === id ? { ...c, [field]: value } : c)),
+      }));
+      setSplitAgainst((prev) => ({
+        ...prev,
+        comments: prev.comments.map((c) => (c.id === id ? { ...c, [field]: value } : c)),
+      }));
     },
     [],
   );
@@ -309,6 +476,14 @@ export function CommentSection({
           c ? updateCommentInTree([c], id, (x) => ({ ...x, fcResult: data }))[0] : c;
         return { for: patch(prev.for), against: patch(prev.against) };
       });
+      setSplitFor((prev) => ({
+        ...prev,
+        comments: prev.comments.map((c) => (c.id === id ? { ...c, fcResult: data } : c)),
+      }));
+      setSplitAgainst((prev) => ({
+        ...prev,
+        comments: prev.comments.map((c) => (c.id === id ? { ...c, fcResult: data } : c)),
+      }));
     } catch {
       setActionError("通信に失敗しました");
     } finally {
@@ -323,6 +498,15 @@ export function CommentSection({
       const patch = (c: Comment | null) => (c && c.id === updated.id ? updated : c);
       return { for: patch(prev.for), against: patch(prev.against) };
     });
+    // updatedはcrossHelpfulを持たない通常のCommentなので、既存のcrossHelpful値を保って合成する
+    setSplitFor((prev) => ({
+      ...prev,
+      comments: prev.comments.map((c) => (c.id === updated.id ? { ...updated, crossHelpful: c.crossHelpful } : c)),
+    }));
+    setSplitAgainst((prev) => ({
+      ...prev,
+      comments: prev.comments.map((c) => (c.id === updated.id ? { ...updated, crossHelpful: c.crossHelpful } : c)),
+    }));
   }, []);
 
   const handleReply = useCallback(
@@ -373,13 +557,31 @@ export function CommentSection({
     bodyLength >= COMMENT_LIMITS.minLength && bodyLength <= COMMENT_LIMITS.maxLength;
 
   const hasHighlights = Boolean(highlights?.for || highlights?.against);
+  // 投票直後: 逆側カラムの1位（越境評価スコア最上位＝相手陣営が最も納得した意見）を強調する
+  const highlightSide = promptStance ? OPPOSITE_STANCE[promptStance] : null;
+
+  // VSバー: 賛成/反対/わからないの実際の投票比率のまま3分割する（正規化しない＝過剰主張しない）
+  const forPct = voteTally.percents.for;
+  const againstPct = voteTally.percents.against;
+  const undecidedPct = voteTally.percents.undecided;
+  const hasVotes = voteTally.totalVotes > 0;
 
   return (
     <div>
-      <div className="mb-5 flex items-center justify-between">
-        <SectionTitle className="mb-0">議論</SectionTitle>
+      <div className="mb-1.5 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <SectionTitle className="mb-0 bg-gradient-to-r from-ink to-accent bg-clip-text text-transparent">
+            議論
+          </SectionTitle>
+        </div>
         <span className="text-sm text-ink-faint tabular-nums">{commentCount}件</span>
       </div>
+      <p className="mb-5 text-xs text-ink-faint">
+        <span className="bg-gradient-to-r from-accent to-hot bg-clip-text font-semibold text-transparent">
+          相手陣営からも支持された意見
+        </span>
+        ほど上に表示されます。声の大きさではなく、納得感で並び替える{SITE.name}だけの仕組みです。
+      </p>
 
       {voteCta && canComment && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-accent/30 bg-accent/5 px-4 py-3">
@@ -398,8 +600,19 @@ export function CommentSection({
         </div>
       )}
 
-      {canComment ? (
-        <div className="mb-6 rounded-md border border-border bg-white p-4">
+      {canComment && !composerOpen && (
+        <button
+          type="button"
+          onClick={openComposer}
+          className="mb-6 flex w-full items-center gap-2.5 rounded-full border border-border bg-surface-raised px-4 py-2.5 text-left text-sm text-ink-faint transition hover:border-border-strong hover:bg-surface-muted"
+        >
+          <span aria-hidden="true">💬</span>
+          {commentCount === 0 ? "最初の意見を書く" : "あなたの意見を書く"}
+        </button>
+      )}
+
+      {canComment && composerOpen ? (
+        <div className="mb-6 rounded-[20px] border border-border bg-surface-raised p-5">
           <div className="mb-3 flex gap-2" role="radiogroup" aria-label="スタンス">
             {VOTE_CHOICES.map((choice) => (
               <button
@@ -409,7 +622,7 @@ export function CommentSection({
                 aria-checked={stance === choice.id}
                 onClick={() => setStance(choice.id)}
                 className={cn(
-                  "rounded-full border px-3 py-1 text-sm transition-colors",
+                  "rounded-full border px-3.5 py-1.5 text-sm font-medium transition",
                   stance === choice.id
                     ? "border-accent bg-accent text-white"
                     : "border-border text-ink-secondary hover:bg-surface-muted",
@@ -439,15 +652,46 @@ export function CommentSection({
             >
               {bodyLength} / {COMMENT_LIMITS.maxLength}字（{COMMENT_LIMITS.minLength}字以上）
             </span>
-            <Button
-              variant="primary"
-              size="sm"
-              disabled={!lengthOk || submitting}
-              onClick={submit}
-            >
-              {submitting ? "投稿中…" : "投稿する"}
-            </Button>
+            <div className="flex gap-2">
+              {canFactCheck && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!lengthOk || draftFcChecking}
+                  onClick={runDraftFactCheck}
+                >
+                  {draftFcChecking ? "確認中…" : "投稿前にファクトチェック"}
+                </Button>
+              )}
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={!lengthOk || submitting}
+                onClick={submit}
+              >
+                {submitting ? "投稿中…" : "投稿する"}
+              </Button>
+            </div>
           </div>
+          {draftFcError && (
+            <p role="alert" className="mt-2 text-sm text-against">
+              {draftFcError}
+            </p>
+          )}
+          {draftFcResult && (
+            <div
+              className={cn(
+                "mt-2 rounded-md border px-3 py-2",
+                VERDICT_STYLES[draftFcResult.verdict].className,
+              )}
+            >
+              <p className="text-xs font-semibold">
+                投稿前チェック: {draftFcResult.label ?? VERDICT_STYLES[draftFcResult.verdict].label}
+                {draftFcResult.verdict !== "true" && "（投稿はブロックされません）"}
+              </p>
+              <p className="mt-1 text-sm">{draftFcResult.reason}</p>
+            </div>
+          )}
           {formError && (
             <p role="alert" className="mt-2 text-sm text-against">
               {formError}
@@ -456,15 +700,17 @@ export function CommentSection({
           {formNotice && <p className="mt-2 text-sm text-for">{formNotice}</p>}
         </div>
       ) : (
-        <div className="mb-6 rounded-md border border-border bg-surface-muted px-5 py-4 text-center">
-          <p className="text-sm text-ink-secondary">
-            コメントするには
-            <a href="/login" className="mx-1 font-medium text-link">
-              ログイン
-            </a>
-            してください（無料）
-          </p>
-        </div>
+        !canComment && (
+          <div className="mb-6 rounded-md border border-border bg-surface-muted px-5 py-4 text-center">
+            <p className="text-sm text-ink-secondary">
+              コメントするには
+              <a href="/login" className="mx-1 font-medium text-link">
+                ログイン
+              </a>
+              してください（無料）
+            </p>
+          </div>
+        )
       )}
 
       {actionError && (
@@ -479,121 +725,340 @@ export function CommentSection({
         </p>
       )}
 
-      {hasHighlights && (
-        <div className="mb-6">
-          <p className="mb-2.5 text-xs font-extrabold tracking-wide text-ink-faint">
-            🥊 賛成派・反対派の代表意見
-          </p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {(["for", "against"] as const).map((side) => {
-              const highlight = highlights?.[side];
-              if (!highlight) return null;
-              return (
-                <div
-                  key={side}
-                  className={cn(
-                    "overflow-hidden rounded-xl border",
-                    side === "for" ? "border-for/30 bg-for-muted/30" : "border-against/30 bg-against-muted/30",
-                  )}
-                >
-                  <p
-                    className={cn(
-                      "px-4 pt-3 text-xs font-bold",
-                      side === "for" ? "text-for" : "text-against",
-                    )}
-                  >
-                    {side === "for" ? "賛成派の代表意見" : "反対派の代表意見"}
-                  </p>
-                  <div className="px-2">
-                    <CommentCard
-                      comment={highlight}
-                      canInteract={isLoggedIn}
-                      canFactCheck={canFactCheck && !highlight.fcResult}
-                      fcLoading={fcPendingId === highlight.id}
-                      fcPendingId={fcPendingId}
-                      onLike={handleLike}
-                      onDislike={handleDislike}
-                      onHelpful={handleHelpful}
-                      onFactCheck={handleFactCheck}
-                      onReport={handleReport}
-                      onReply={canComment ? handleReply : undefined}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      <div className="mb-4 flex gap-1.5" role="radiogroup" aria-label="コメントの並び順">
-        {COMMENT_SORTS.map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            role="radio"
-            aria-checked={sort === s.id}
-            onClick={() => changeSort(s.id)}
-            className={cn(
-              "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-              sort === s.id
-                ? "border-accent bg-accent text-white"
-                : "border-border text-ink-secondary hover:bg-surface-muted",
-            )}
-          >
-            {s.label}
-          </button>
-        ))}
-      </div>
-
-      <div aria-busy={fcPendingId !== null || sortLoading}>
-        {comments.length === 0 ? (
-          <p className="py-8 text-center text-sm text-ink-faint">
-            まだコメントはありません。最初の意見を投稿してみませんか。
-          </p>
-        ) : (
-          comments.map((comment, i) => (
-            <div
-              key={comment.id}
-              className="animate-fade-slide-up"
-              style={{ animationDelay: `${Math.min(i, 8) * 60}ms` }}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex gap-1.5" role="radiogroup" aria-label="表示形式">
+          {(
+            [
+              { id: "split" as const, label: "賛成・反対で見る" },
+              { id: "single" as const, label: "一覧で見る" },
+            ]
+          ).map((l) => (
+            <button
+              key={l.id}
+              type="button"
+              role="radio"
+              aria-checked={layout === l.id}
+              onClick={() => setLayout(l.id)}
+              className={cn(
+                "rounded-full border px-3 py-1 text-xs font-medium transition",
+                layout === l.id
+                  ? "border-accent bg-accent text-white"
+                  : "border-border text-ink-secondary hover:bg-surface-muted",
+              )}
             >
-              <CommentCard
-                comment={comment}
-                canInteract={isLoggedIn}
-                canFactCheck={canFactCheck && !comment.fcResult}
-                fcLoading={fcPendingId === comment.id}
-                fcPendingId={fcPendingId}
-                onLike={handleLike}
-                onDislike={handleDislike}
-                onHelpful={handleHelpful}
-                onFactCheck={handleFactCheck}
-                onReport={handleReport}
-                onReply={canComment ? handleReply : undefined}
-              />
-            </div>
-          ))
+              {l.label}
+            </button>
+          ))}
+        </div>
+
+        {layout === "single" && (
+          <div className="flex gap-1.5" role="radiogroup" aria-label="コメントの並び順">
+            {COMMENT_SORTS.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                role="radio"
+                aria-checked={sort === s.id}
+                onClick={() => changeSort(s.id)}
+                className={cn(
+                  "rounded-full border px-3 py-1 text-xs font-medium transition",
+                  sort === s.id
+                    ? "border-accent bg-accent text-white"
+                    : "border-border text-ink-secondary hover:bg-surface-muted",
+                )}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
         )}
       </div>
 
-      {cursor && (
-        <div className="mt-4 text-center">
-          <Button variant="ghost" size="sm" disabled={loadingMore} onClick={loadMore}>
-            {loadingMore ? "読み込み中…" : "さらに読み込む"}
-          </Button>
-        </div>
-      )}
+      {layout === "split" ? (
+        <div aria-busy={splitLoading}>
+          {/* VSバー(デスクトップ): 実際の投票比率のまま3分割。正規化して埋めない＝過剰主張しない */}
+          <div className="mb-5 hidden sm:block">
+            <div className="mb-1.5 flex items-center justify-between text-xs font-bold">
+              <span className="text-for">
+                賛成 <CountUp value={forPct} format={(n) => `${n}%`} />
+              </span>
+              <span className="text-ink-faint">
+                わからない <CountUp value={undecidedPct} format={(n) => `${n}%`} />
+              </span>
+              <span className="text-against">
+                反対 <CountUp value={againstPct} format={(n) => `${n}%`} />
+              </span>
+            </div>
+            <div className="relative flex h-2.5 overflow-hidden rounded-full border border-border bg-surface-muted">
+              {hasVotes && (
+                <>
+                  <div className="bg-for transition-[width] duration-500 ease-out" style={{ width: `${forPct}%` }} />
+                  <div
+                    className="bg-ink-faint/30 transition-[width] duration-500 ease-out"
+                    style={{ width: `${undecidedPct}%` }}
+                  />
+                  <div
+                    className="bg-against transition-[width] duration-500 ease-out"
+                    style={{ width: `${againstPct}%` }}
+                  />
+                  {/* 賛成/反対がぶつかる境界の小さな鼓動。「二陣営が対峙している」ことの象徴 */}
+                  <span
+                    aria-hidden="true"
+                    className="animate-pulse-hot absolute top-1/2 h-2.5 w-2.5 rounded-full bg-hot shadow-[0_0_0_2px_var(--color-surface)] transition-[left] duration-500 ease-out"
+                    style={{ left: `${forPct + undecidedPct}%`, transform: "translate(-50%, -50%)" }}
+                  />
+                </>
+              )}
+            </div>
+          </div>
 
-      {!isLoggedIn && commentCount > comments.length && (
-        <div className="mt-4 rounded-xl border border-border bg-surface-muted px-5 py-4 text-center">
-          <p className="text-sm text-ink-secondary">
-            残り{commentCount - comments.length}件のコメントを見るには
-            <a href="/login" className="mx-1 font-semibold text-link">
-              ログイン
-            </a>
-            してください（無料）
-          </p>
+          {/* スコアボード風タブ(モバイル): 縦積みで対決感が消えないよう、常に片側だけを全幅表示する */}
+          <div
+            className="mb-5 flex overflow-hidden rounded-full border border-border sm:hidden"
+            role="tablist"
+            aria-label="賛成派・反対派の切り替え"
+          >
+            {(["for", "against"] as const).map((side) => (
+              <button
+                key={side}
+                type="button"
+                role="tab"
+                aria-selected={mobileActiveSide === side}
+                onClick={() => setMobileActiveSide(side)}
+                className={cn(
+                  "flex-1 py-2 text-center text-xs font-bold transition",
+                  mobileActiveSide === side
+                    ? side === "for"
+                      ? "bg-for text-white"
+                      : "bg-against text-white"
+                    : "bg-surface text-ink-secondary",
+                )}
+              >
+                {side === "for" ? (
+                  <>
+                    賛成 <CountUp value={forPct} format={(n) => `${n}%`} />
+                  </>
+                ) : (
+                  <>
+                    反対 <CountUp value={againstPct} format={(n) => `${n}%`} />
+                  </>
+                )}
+              </button>
+            ))}
+          </div>
+
+          <div className="relative">
+            <div className="grid gap-5 sm:grid-cols-2">
+              {(["for", "against"] as const).map((side) => {
+                const state = side === "for" ? splitFor : splitAgainst;
+                const label = side === "for" ? "賛成" : "反対";
+                const oppositeLabel = side === "for" ? "反対" : "賛成";
+                return (
+                  <div key={side} className={cn(mobileActiveSide !== side && "hidden", "sm:block")}>
+                    <div
+                      className={cn(
+                        "mb-2.5 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold tracking-wide",
+                        side === "for" ? "bg-for-muted text-for" : "bg-against-muted text-against",
+                      )}
+                    >
+                      <span>{label}派</span>
+                      <span className="ml-auto font-normal opacity-70">{state.comments.length}件</span>
+                    </div>
+                    {state.comments.length === 0 ? (
+                      <div className="rounded-[20px] border border-dashed border-border-strong px-4 py-8 text-center">
+                        <p className="mb-3 text-sm text-ink-faint">
+                          {splitLoading ? "読み込み中…" : `まだ${label}派の意見はありません。`}
+                        </p>
+                        {!splitLoading && canComment && (
+                          <Button variant="secondary" size="sm" onClick={() => startStanceFromColumn(side)}>
+                            最初の一人になる👉
+                          </Button>
+                        )}
+                      </div>
+                    ) : (
+                      state.comments.map((comment, i) => {
+                        const isTopOpposing = i === 0 && highlightSide === side && !comment.isAiSteelman;
+                        const showCrossBadge = i === 0 && comment.crossHelpful > 0 && !comment.isAiSteelman;
+                        return (
+                          <div
+                            key={comment.id}
+                            className={cn(
+                              "animate-fade-slide-up",
+                              isTopOpposing && "rounded-2xl ring-1 ring-accent/50",
+                            )}
+                            style={{ animationDelay: `${Math.min(i, 8) * 60}ms` }}
+                          >
+                            {comment.isAiSteelman ? (
+                              <p className="px-2 pt-2 text-xs font-bold text-ink-faint">
+                                🤖 AIによる論点提示（まだ人間の投稿がないため、記事の材料だけを根拠に代弁しています）
+                              </p>
+                            ) : (
+                              isTopOpposing && (
+                                <p className="px-2 pt-2 text-xs font-bold text-accent">
+                                  👀 最も説得力のある{label}派の意見
+                                </p>
+                              )
+                            )}
+                            {showCrossBadge && (
+                              <div className="mx-2 mt-2 inline-flex items-center gap-1 rounded-full border border-transparent bg-gradient-to-r from-accent to-hot px-2.5 py-1 text-[11px] font-semibold text-white shadow-[0_2px_10px_rgb(79_70_229_/_0.25)]">
+                                🔀 越境評価 no.1・{oppositeLabel}派の{comment.crossHelpful}人も支持
+                              </div>
+                            )}
+                            <CommentCard
+                              comment={comment}
+                              canInteract={!comment.isAiSteelman && isLoggedIn}
+                              canFactCheck={!comment.isAiSteelman && canFactCheck && !comment.fcResult}
+                              fcLoading={fcPendingId === comment.id}
+                              fcPendingId={fcPendingId}
+                              onLike={handleLike}
+                              onDislike={handleDislike}
+                              onHelpful={handleHelpful}
+                              onFactCheck={handleFactCheck}
+                              onReport={comment.isAiSteelman ? undefined : handleReport}
+                              onReply={!comment.isAiSteelman && canComment ? handleReply : undefined}
+                            />
+                            {canRebuttalAi &&
+                              issueSlug &&
+                              userVote &&
+                              comment.stance !== userVote &&
+                              !comment.isAiSteelman && (
+                                <div className="px-2 pb-2">
+                                  <RebuttalAssistButton slug={issueSlug} commentId={comment.id} />
+                                </div>
+                              )}
+                            {comment.isAiSteelman && canComment && (
+                              <div className="mt-3 text-center">
+                                <Button variant="secondary" size="sm" onClick={() => startStanceFromColumn(side)}>
+                                  最初の一人になる👉
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                    {state.cursor && (
+                      <div className="mt-3 text-center">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={splitLoadingMore === side}
+                          onClick={() => loadMoreSplit(side)}
+                        >
+                          {splitLoadingMore === side ? "読み込み中…" : "さらに読み込む"}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {/* 中央の対戦線+VSバッジ(デスクトップのみ)。装飾なのでクリックは透過させる */}
+            <div className="pointer-events-none absolute inset-y-0 left-1/2 hidden w-px -translate-x-1/2 bg-border sm:block" />
+            <div className="pointer-events-none absolute left-1/2 top-7 hidden h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-transparent bg-gradient-to-br from-accent to-hot text-[11px] font-bold text-white shadow-[0_2px_12px_rgb(79_70_229_/_0.3)] sm:flex">
+              VS
+            </div>
+          </div>
         </div>
+      ) : (
+        <>
+          {hasHighlights && (
+            <div className="mb-6">
+              <p className="mb-2.5 text-xs font-extrabold tracking-wide text-ink-faint">
+                🥊 賛成派・反対派の代表意見
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {(["for", "against"] as const).map((side) => {
+                  const highlight = highlights?.[side];
+                  if (!highlight) return null;
+                  return (
+                    <div
+                      key={side}
+                      className={cn(
+                        "overflow-hidden rounded-xl border",
+                        side === "for" ? "border-for/30 bg-for-muted/30" : "border-against/30 bg-against-muted/30",
+                      )}
+                    >
+                      <p
+                        className={cn(
+                          "px-4 pt-3 text-xs font-bold",
+                          side === "for" ? "text-for" : "text-against",
+                        )}
+                      >
+                        {side === "for" ? "賛成派の代表意見" : "反対派の代表意見"}
+                      </p>
+                      <div className="px-2">
+                        <CommentCard
+                          comment={highlight}
+                          canInteract={isLoggedIn}
+                          canFactCheck={canFactCheck && !highlight.fcResult}
+                          fcLoading={fcPendingId === highlight.id}
+                          fcPendingId={fcPendingId}
+                          onLike={handleLike}
+                          onDislike={handleDislike}
+                          onHelpful={handleHelpful}
+                          onFactCheck={handleFactCheck}
+                          onReport={handleReport}
+                          onReply={canComment ? handleReply : undefined}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div aria-busy={fcPendingId !== null || sortLoading}>
+            {comments.length === 0 ? (
+              <p className="py-8 text-center text-sm text-ink-faint">
+                まだコメントはありません。最初の意見を投稿してみませんか。
+              </p>
+            ) : (
+              comments.map((comment, i) => (
+                <div
+                  key={comment.id}
+                  className="animate-fade-slide-up"
+                  style={{ animationDelay: `${Math.min(i, 8) * 60}ms` }}
+                >
+                  <CommentCard
+                    comment={comment}
+                    canInteract={isLoggedIn}
+                    canFactCheck={canFactCheck && !comment.fcResult}
+                    fcLoading={fcPendingId === comment.id}
+                    fcPendingId={fcPendingId}
+                    onLike={handleLike}
+                    onDislike={handleDislike}
+                    onHelpful={handleHelpful}
+                    onFactCheck={handleFactCheck}
+                    onReport={handleReport}
+                    onReply={canComment ? handleReply : undefined}
+                  />
+                </div>
+              ))
+            )}
+          </div>
+
+          {cursor && (
+            <div className="mt-4 text-center">
+              <Button variant="ghost" size="sm" disabled={loadingMore} onClick={loadMore}>
+                {loadingMore ? "読み込み中…" : "さらに読み込む"}
+              </Button>
+            </div>
+          )}
+
+          {!isLoggedIn && commentCount > comments.length && (
+            <div className="mt-4 rounded-xl border border-border bg-surface-muted px-5 py-4 text-center">
+              <p className="text-sm text-ink-secondary">
+                残り{commentCount - comments.length}件のコメントを見るには
+                <a href="/login" className="mx-1 font-semibold text-link">
+                  ログイン
+                </a>
+                してください（無料）
+              </p>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

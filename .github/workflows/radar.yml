@@ -1,8 +1,12 @@
-# FactBase Radar — 検知〜速報公開〜GPT-5まとめの定期実行。
-# publicリポジトリならGitHub Actionsは無料（無制限分数）。
-# 日中(JST 06:00-24:00)は15分間隔、深夜(JST 00:00-06:00)は誰も見ていない前提で
-# 30分間隔に間引いている（cronはUTC基準: JST 00:00-06:00 = UTC 15:00-20:59）。
-name: FactBase Radar
+# TwoSides Radar — detect（RSS/🔴LIVE速報・30分おき）→ discover（バズ能動調査）→ promote（ピーク公開）
+#   → followup（続報反映・1時間おき）。summarize はコスト削減のため引き続き cron から外している。
+# スクリプト自体は残してあり、必要なら手動実行可能。
+# 日中(JST 06:00-24:00)は15分間隔、深夜(JST 00:00-06:00)は30分間隔
+# （cronはUTC基準: JST 00:00-06:00 = UTC 15:00-20:59）。
+# detect は JST 30分おきの窓（🔴LIVE速報公開・RSS carry-over候補生成・sustained更新）、
+# discover は JST 1日7回の窓、promote はピーク3回（7:30/12:00/19:30）、
+# followup は JST 1時間おきの窓（Writer呼び出しを伴い高コストなためdetectより間隔を空ける）。
+name: TwoSides Radar
 
 on:
   schedule:
@@ -29,66 +33,66 @@ jobs:
       - run: npm ci
       - run: npx prisma generate
 
-      - name: "Discover: buzz-driven topic research (Diet/law/news)"
+      - name: "Detect: RSS/breaking-news scan + carry-over candidates (every 30min JST)"
         env:
           DATABASE_URL: ${{ secrets.DIRECT_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          ARTICLE_API_KEY: ${{ secrets.ARTICLE_API_KEY }}
+          ARTICLE_BASE_URL: ${{ secrets.ARTICLE_BASE_URL }}
+          ARTICLE_MODEL: ${{ secrets.ARTICLE_MODEL }}
+          RADAR_ALERT_WEBHOOK_URL: ${{ secrets.RADAR_ALERT_WEBHOOK_URL }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          YOUTUBE_DATA_API_KEY: ${{ secrets.YOUTUBE_DATA_API_KEY }}
+        run: npx tsx scripts/radar/detect.ts
+
+      - name: "Discover: buzz research (7 windows/day JST)"
+        env:
+          DATABASE_URL: ${{ secrets.DIRECT_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
           RADAR_TOPIC_FILTER_MODEL: ${{ secrets.RADAR_TOPIC_FILTER_MODEL }}
           RADAR_ALERT_WEBHOOK_URL: ${{ secrets.RADAR_ALERT_WEBHOOK_URL }}
           YOUTUBE_DATA_API_KEY: ${{ secrets.YOUTUBE_DATA_API_KEY }}
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
         run: npx tsx scripts/radar/discover.ts
 
-      - name: Detect & publish breaking issues
+      - name: "Promote: publish buzz articles at peak times (3/day JST)"
         env:
           DATABASE_URL: ${{ secrets.DIRECT_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
-          RADAR_CLASSIFY_MODEL: ${{ secrets.RADAR_CLASSIFY_MODEL }}
-          RADAR_AUTO_PUBLISH_PER_DAY: "8"
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          ARTICLE_API_KEY: ${{ secrets.ARTICLE_API_KEY }}
+          ARTICLE_BASE_URL: ${{ secrets.ARTICLE_BASE_URL }}
+          ARTICLE_MODEL: ${{ secrets.ARTICLE_MODEL }}
           RADAR_ALERT_WEBHOOK_URL: ${{ secrets.RADAR_ALERT_WEBHOOK_URL }}
           RADAR_INTERNAL_SECRET: ${{ secrets.RADAR_INTERNAL_SECRET }}
           AUTH_URL: ${{ secrets.AUTH_URL }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           YOUTUBE_DATA_API_KEY: ${{ secrets.YOUTUBE_DATA_API_KEY }}
-          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
-        run: npx tsx scripts/radar/detect.ts
-
-      - name: Generate Level-2 summaries (GPT-5)
-        env:
-          DATABASE_URL: ${{ secrets.DIRECT_URL }}
-          DIRECT_URL: ${{ secrets.DIRECT_URL }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
-          ARTICLE_DAILY_ARTICLE_LIMIT: "10"
-          RADAR_ALERT_WEBHOOK_URL: ${{ secrets.RADAR_ALERT_WEBHOOK_URL }}
-          RADAR_INTERNAL_SECRET: ${{ secrets.RADAR_INTERNAL_SECRET }}
-          AUTH_URL: ${{ secrets.AUTH_URL }}
-          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
-        run: npx tsx scripts/radar/summarize.ts
-
-      - name: "Follow-up: link new events & refresh live articles"
-        env:
-          DATABASE_URL: ${{ secrets.DIRECT_URL }}
-          DIRECT_URL: ${{ secrets.DIRECT_URL }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
-          FOLLOWUP_DAILY_LIMIT: "15"
-          RADAR_ALERT_WEBHOOK_URL: ${{ secrets.RADAR_ALERT_WEBHOOK_URL }}
-          RADAR_INTERNAL_SECRET: ${{ secrets.RADAR_INTERNAL_SECRET }}
-          AUTH_URL: ${{ secrets.AUTH_URL }}
-          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
-        run: npx tsx scripts/radar/followup.ts
-
-      - name: "Promote: publish buzz-driven articles at peak times"
-        env:
-          DATABASE_URL: ${{ secrets.DIRECT_URL }}
-          DIRECT_URL: ${{ secrets.DIRECT_URL }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
-          RADAR_ALERT_WEBHOOK_URL: ${{ secrets.RADAR_ALERT_WEBHOOK_URL }}
-          RADAR_INTERNAL_SECRET: ${{ secrets.RADAR_INTERNAL_SECRET }}
-          AUTH_URL: ${{ secrets.AUTH_URL }}
         run: npx tsx scripts/radar/promote.ts
+
+      - name: "Followup: regenerate articles with new evidence (hourly JST)"
+        env:
+          DATABASE_URL: ${{ secrets.DIRECT_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          ARTICLE_API_KEY: ${{ secrets.ARTICLE_API_KEY }}
+          ARTICLE_BASE_URL: ${{ secrets.ARTICLE_BASE_URL }}
+          ARTICLE_MODEL: ${{ secrets.ARTICLE_MODEL }}
+          RADAR_ALERT_WEBHOOK_URL: ${{ secrets.RADAR_ALERT_WEBHOOK_URL }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          YOUTUBE_DATA_API_KEY: ${{ secrets.YOUTUBE_DATA_API_KEY }}
+        run: npx tsx scripts/radar/followup.ts

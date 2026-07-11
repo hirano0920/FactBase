@@ -27,6 +27,11 @@ const OPTIONAL = [
   "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY", // 現状コードは未使用（Checkoutのみ）
   "AZURE_OPENAI_API_KEY",
   "AZURE_OPENAI_BASE_URL",
+  "XAI_API_KEY", // 記事主筆（xAI 直）。未設定なら ARTICLE_* / Azure Foundry を使う
+  "XAI_BASE_URL",
+  "ARTICLE_API_KEY",
+  "ARTICLE_BASE_URL",
+  "ARTICLE_MODEL", // Foundry の Grok デプロイ名
   "YOUTUBE_DATA_API_KEY", // 未設定でもRadarは動く（YouTubeソースのみスキップ）
   "TAVILY_API_KEY", // 未設定でもRadarは動く（Tavily検索による収集拡張のみスキップ）
   "RADAR_INTERNAL_SECRET", // 未設定でもRadarは動くがrevalidate通知がスキップされる

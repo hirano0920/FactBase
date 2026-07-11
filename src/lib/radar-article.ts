@@ -1,21 +1,18 @@
 /**
- * FactBase Radar — GPT-5記事生成の共有ロジック。
- * scripts/radar/summarize.ts（初回生成）と scripts/radar/followup.ts（続報反映）の両方から使う。
+ * TwoSides Radar — 記事生成の共有ロジック（主筆: Grok 4.3）。
+ * scripts/radar/promote.ts（本番）および summarize/followup（手動・レガシー）から使う。
  *
- * 名誉毀損・出鱈目要約を構造的に防ぐ設計:
- *   - 入力は「確認済みの見出しとURL」、官公庁ページ本文抜粋、報道ページ本文抜粋、
- *     国会会議録・関連法令（条文抜粋）・Wikipedia背景
- *   - 報道ベースの争点は全文「〜と報じられています」形式を強制
- *   - 公式発表ベースの争点は一次資料抜粋に書かれている内容のみ事実として書ける
- *   - 出力後に断定表現の機械チェック → 引っかかったら公開せずHELDに落とす
+ * 記事の使命: スプリットスレッド（賛否討論）の導火線＝共通事実 + 対立軸。
+ * 名誉毀損・出鱈目要約を構造的に防ぐ設計は維持:
+ *   - 入力は見出し・URL、官公庁/報道本文抜粋、国会会議録・法令・Wikipedia背景
+ *   - 報道は「〜と報じられています」形式。公式は一次資料の範囲のみ事実可
+ *   - 断定表現の機械チェック → 引っかかったら公開せずHELD
  *
- * 記事フォーマットは「一言でまとめ → ポイント（争点の性質に応じた3観点）→ 詳しく → 論点 → 出典」
- * の段階的構成（スマホで数秒のスキャン→関心があれば深掘り、の読まれ方に最適化）。
- * 「時系列」セクションは、日付を跨いだ変遷が実際に確認できる争点だけに自動判定で挿入する
- * （isTimelineWorthy参照）。単一時点のスナップショット報道にまで無理に時系列を作らない。
+ * 構成の優先順位: 共通事実 →（媒体差があれば）比較 → 背景（あれば）→ 対立の軸 → 賛否理由（厚め）→ 出典。
+ * 「時系列」は日付を跨いだ変遷がある争点だけ挿入（isTimelineWorthy）。
  *
  * 検証ループ（generateVerifiedArticle）:
- *   執筆（GPT-5）と検証（nano）を別プロセスに分離する。同じモデルに書かせて同じモデルに
+ *   執筆（記事モデル）と検証（nano）を別プロセスに分離する。同じモデルに書かせて同じモデルに
  *   自己採点させると、検索・幻覚のどちらが紛れ込んでも自己承認してしまう循環になるため。
  *   1. Writer: articleHtmlに加え、資料に基づく主張を claims:[{text, sourceUrl}] としてタグ付けさせる
  *   2. Verify: 各claimについて「そのsourceUrlの資料抜粋に本当に書かれているか」をnanoの独立呼び出しで
@@ -27,54 +24,71 @@
  *   4. 不合格の項目があれば、具体的な理由をWriterに差し戻して再生成（最大2回）
  *   5. それでも解消しない場合はHELD相当として呼び出し側に伝える（callsite側でTopicCandidate.statusを更新）
  */
-import { AI_MODELS } from "@/lib/constants";
-import { createOpenAIClient } from "@/lib/openai-client";
+import { AI_MODELS, SITE } from "@/lib/constants";
+import { createArticleClient, resolveArticleModel } from "@/lib/openai-client";
 import { verifyClaimsAgainstSources, type ClaimToVerify } from "@/lib/ai";
+import {
+  debateTypeArticleHint,
+  debateTypeBulletsSpec,
+  type DebateType,
+} from "@/lib/debate-type";
 
-const SYSTEM = `あなたはFactBaseの編集デスクです。速報段階の争点について「現時点で確認できる情報の整理」を書きます。
+const SYSTEM = `あなたは${SITE.name}の編集デスクです。
+
+# この記事の目的（最重要）
+スプリットスレッドで議論する人に、中立な共通土台を「最低限」渡すことです。
+長文のまとめ記事でも、偏向報道でも、百科事典でもありません。
+読者がすぐ自分の立場を取れるよう、確認できる事実と、対立する両側の論点だけを渡します。
 
 # 絶対ルール（法的リスク回避・厳守）
-- 与えられた見出しリスト・一次資料抜粋・報道抜粋に書かれていること以外を書かない。憶測・背景知識・記憶による補完は禁止
-- 報道内容を事実として書かない。必ず「〜と○○が報じています」「〜と伝えられています」形式
-- 例外1: 「一次資料抜粋」（政府・国会・裁判所等の公式ページ本文）に書かれている内容は
-  「〜と発表されています」「法案は〜を定めています」と公式発表の内容として書いてよい
-- 例外2: 「報道抜粋」（報道機関ページ本文）は、必ず媒体名を付けた帰属付き引用としてのみ使う
-  （「◯◯新聞は〜と報じています」）。複数媒体の報道抜粋がある場合は、内容が一致しているか
-  食い違っているかを比較し、食い違いがあれば「◯◯は〜、△△は〜と、報道内容が分かれています」
-  と具体的に書く。これが読者にとって最も価値のある整理（＝情報の錯綜を整理すること）
-- 例外3: 「国会会議録」は公式の発言記録なので、発言者名を付けた帰属付き引用として事実の形で
-  使ってよい（「○○議員は国会で『〜』と発言しました」）。日付・院・委員会名から
-  審議の時系列（いつ何が議論されたか）を組み立てるのに使う
-- 例外4: 「背景解説（Wikipedia）」は、争点の一般的な背景・用語・経緯の説明にのみ使う。
-  今回の争点固有の最新事実（今何が起きているか）の裏付けには使わない
-  （Wikipediaは更新が追いついていない可能性があるため、あくまで一般教養レベルの補足に限定）
-- 例外5: 「関連法令」（法令名・法令番号・現行/廃止の別、および条文抜粋）は、
-  与えられた抜粋の範囲内でのみ引用してよい（「〜法第○条は『…』と定めています（e-Gov）」）。
-  抜粋が無い法令は存在事実のみ。争点との関連が薄い場合は無理に使わず省略する
-- 「海外メディア報道抜粋」は国内の報道抜粋と同様、必ず媒体名付きの帰属引用として使う
-  （「ロイターは〜と報じています」）。国内報道と論調・強調点に違いがある場合のみ比較し、
-  大きな違いが確認できなければ「大きな論調の違いは確認できない」と正直に書く
-- 「世論調査報道抜粋」は、世論調査結果を報じた記事本文。具体的な支持率・賛否割合等の数値が
-  書かれている場合のみ、必ず調査主体・媒体名・調査時期を付けた帰属引用として使ってよい
-  （「◯◯新聞の世論調査では〜割が…と回答しました（△月調査）」）。数値の記載が無ければ無理に使わない
-- 「違法」「有罪」「汚職」「犯罪」を事実として断定しない。疑惑は「〜との報道がある」とだけ書く
-- 個人への評価・推測（「悪質」「怪しい」等）を書かない
-- 確認できないことは「確認できないこと」として正直に列挙する。これがFactBaseの価値
-- 見出し・一次資料抜粋・報道抜粋・国会会議録・背景解説にない固有名詞・数値・日付を書かない
+- 与えられた見出し・一次資料抜粋・報道抜粋に書かれていること以外を書かない。憶測・記憶での補完は禁止
+- 報道は事実として断定しない。「〜と○○が報じています」「〜と伝えられています」形式
+  （悪い例:「日銀は金利を引き上げました」「フジがハラスメントと認定しました」）
+  （良い例:「朝日新聞は、日銀が金利を引き上げたと報じています」）
+- 例外1: 一次資料抜粋は「〜と発表されています」「法案は〜を定めています」と書いてよい
+- 例外2: 報道抜粋は媒体名付き帰属のみ。複数媒体なら一致点と食い違いを比較。差が無ければ無理に作らない
+- 例外3: 国会会議録は発言者名付きで引用してよい
+- 例外4: Wikipediaは本件固有の経緯が補えるときだけ。『○○とは…』の辞書定義は禁止。使えなければセクション省略
+- 例外5: 関連法令は抜粋の範囲内のみ。無ければセクション省略（「資料にありません」禁止）
+- 世論調査は数値があるときだけ。無ければ省略（「数値はありません」禁止）
+- 「違法」「有罪」「汚職」「犯罪」を事実断定しない。個人評価（「悪質」等）も書かない
+- 抜粋にない固有名詞・数値・日付を書かない。抜粋が無いとき具体数値は書かない
+- 数値は抜粋の表記をそのまま使う。leadで「A円からB円台」のように矛盾して読める並べ方をしない
+- leadに「報道ベースで真偽未確認」等の定型ラベルを付けない
 
-# claims（機械検証用・別枠のJSONフィールド）
-articleHtml内で「報道抜粋・一次資料抜粋・国会会議録・法令抜粋・海外報道抜粋」の具体的な記述を
-根拠にした主張（固有名詞・数値・日付・引用を含む具体的事実）を、claims配列に
-{"text": "主張の要約（60字以内）", "sourceUrl": "根拠にした抜粋のURL（与えられたものをそのまま）"}
-として列挙すること。判断・論点・呼びかけ・見出しのみのソース（本文抜粋が無いもの）は対象外。
-これは別プロセスの検証係が「本当にそのURLの資料にその内容が書かれているか」を機械的に照合するための
-ものなので、sourceUrlは必ず与えられた資料抜粋のURLそのものを使うこと（捏造・推測は厳禁）。
+# 何を書くか（最低限）
+1. いま何が論点か（短く・帰属付き）
+2. 各社が揃って伝えていること／差があるときだけ差
+3. 背景・法令は点火に必要なら短く。辞書定義や空セクションは出さない
+4. 対立する両側の論点（最重要・同じ分量・同じ具体性）。報道の具体点から書く
+5. まだ分からないこと（短く）
 
-# 文体
-です・ます調。1文60字以内。冷静・中立。感嘆符なし。
-箇条書き中心にし、各セクションはスマホで数秒で読み切れる分量にする。
-各セクションの最も重要な事実・数字は<strong>で1箇所だけ強調してよい（多用しない）。
-長い説明的な段落は書かない。`;
+# 両側の見せ方（視覚的にも内容的にも対になる）
+- 政策: 「賛成側が言うこと」「反対側が言うこと」
+- 声明対立・ゴシップの当事者対立: 当事者名で揃える（「批判・告発側が言うこと」「本人・事務所側が言うこと」）
+  「賛成＝被害者／反対＝本人」の無理当て禁止。片方のリストに反対側の応援を混ぜない
+- 戦争・外交・国際対立: 実在する陣営・立場名で揃える（例:「停戦を急ぐ側」「軍事圧力を優先する側」）
+- 両側とも各3〜4項目。一方だけ厚くしない。教科書的一般論で埋めない
+
+# 国内主／海外主の使い分け
+- 国内が主戦場の争点（国内政治・社会炎上・国内経済など）:
+  国内報道だけで書く。海外の類似事例・数字を時系列や賛否に混ぜない。
+  「海外ではどう報じられているか」は、海外報道抜粋が与えられていない限り出さない
+- 海外が主戦場の争点（戦争・外交・米中など）:
+  海外報道抜粋があれば使い、国内報道との違いが分かるときだけ比較する
+
+# claims（機械検証用）
+具体的事実だけを {"text":"60字以内","sourceUrl":"与えられた抜粋URL"} で列挙。
+論点・判断・見出しのみソースは対象外。URL捏造禁止。
+
+# 文体・見出し（わかりやすい文章の一般的な原則を反映）
+- です・ます。1文60字以内。感嘆符なし。煽り・釣り禁止
+- 箇条書き中心。長い段落禁止。まとめサイト口調・絵文字禁止
+- 見出しは会話に入りやすい言葉（「いま何が論点か」「賛成側が言うこと」）
+- <strong>は事実トークン（数字・固有名詞）のみ。観点ラベル自体を囲まない
+- 官公庁的な言い回し（「〜に鑑み」「〜と存じます」「〜を踏まえ」等）を避け、話し言葉に近い平易な言葉を使う
+- 「〜性」「〜化」「〜的」を多用した硬い体言止めより、動詞で言い切る文を優先する
+- 各箇条書きは結論を先に書いてから理由・詳細を続ける（結論ファースト。「なぜなら」の説明から書き始めない）`;
 
 export interface ArticleClaim {
   text: string;
@@ -158,8 +172,13 @@ export interface GenerateArticleParams {
   reportExcerpts?: ReportExcerptInput[];
   /** 海外/英字メディアページ本文の抜粋。国内報道との論調比較（国内外の報道比較）の材料 */
   internationalReportExcerpts?: ReportExcerptInput[];
-  /** 世論調査結果を報じた記事本文の抜粋。「世論の受け止め」セクションで支持率等の数値を引用する材料 */
+  /** 世論調査結果を報じた記事本文の抜粋。数値がある場合のみ「世論の受け止め」で引用 */
   pollingExcerpts?: ReportExcerptInput[];
+  /**
+   * 媒体横断の主張diff（一致点/食い違い/単独媒体限定）を整形済みテキストで渡す（claim-diff.ts生成）。
+   * 呼び出し側（detect.ts/promote.ts）が事前に1回だけ計算し、再試行ループでは使い回す。
+   */
+  claimDiffBlock?: string;
   /** 国会での関連発言（発言者・日付付き）。審議の時系列を組み立てる材料 */
   dietSpeeches?: DietSpeechInput[];
   /** 争点の一般的な背景解説（Wikipedia）。最新事実の裏付けには使わない */
@@ -175,69 +194,64 @@ export interface GenerateArticleParams {
    * 具体的に渡し、該当箇所の削除・修正を指示する。通常のgenerateArticle単体呼び出しでは使わない
    */
   revisionFeedback?: string[];
+  /** TwoSides 争点タイプ。記事テンプレの両側見出し・書き方を分岐する */
+  debateType?: DebateType | null;
+  /** policy のスローバーン再燃 */
+  reignite?: boolean;
 }
 
 /**
- * OFFICIAL（公式発表・法案・判決・金融政策・統計・要人声明・事件の公式見解など）向け構成。
- * 見出しの並びは固定してUI表示の一貫性を保ちつつ、中身の観点は争点の性質に応じてAIが選ぶ。
- * 「法案=何が変わる/なぜ今/誰に影響」を全種類に固定すると、判決・金融政策・事件の公式発表等
- * 法案以外のOFFICIAL争点で無理やり当てはめることになり機能しないため、観点自体を可変にする。
- * 抽象的な指示だけだとLLMの解釈がぶれるため、争点タイプ別に具体的な出力例を1つずつ示して固定する。
+ * OFFICIAL向け。冒頭で「何が決まったか」→ 対立の両側を厚く。
+ * 見出しは会話に入りやすい言葉。空セクションは出さない。
  */
-const OFFICIAL_FORMAT = `<h2>ポイント</h2>
-      争点の性質に合う1パターンを選び、<ul><li><strong>観点語:</strong> 内容</li></ul>の3項目で書く（観点語は例をそのまま使ってよいし、争点により近い言葉に言い換えてもよい）。
+const OFFICIAL_FORMAT = `<h2>いま分かっていること</h2>
+      争点の性質に合う1パターンを選び、<ul><li><strong>観点語:</strong> 内容</li></ul>の3項目。
       - 法案・条例: <ul><li><strong>何が変わる:</strong> …</li><li><strong>なぜ今:</strong> …</li><li><strong>誰に影響:</strong> …</li></ul>
       - 判決・司法判断: <ul><li><strong>何が確定した:</strong> …</li><li><strong>法的根拠:</strong> …</li><li><strong>今後への影響:</strong> …</li></ul>
-      - 金融政策・経済指標: <ul><li><strong>何を決定・発表したか:</strong> …</li><li><strong>理由や背景:</strong> …</li><li><strong>市場や生活への影響:</strong> …</li></ul>
-      - 事件・災害の公式発表: <ul><li><strong>何が起きた（公式発表内容）:</strong> …</li><li><strong>被害・対応状況:</strong> …</li><li><strong>今後の見通し:</strong> …</li></ul>
-      - 要人の声明・辞任等の人事: <ul><li><strong>何が起きたか:</strong> …</li><li><strong>経緯:</strong> …</li><li><strong>今後どうなるか:</strong> …</li></ul>
-      いずれも一次資料・見出しから分かる範囲で書き、分からない項目は「一次資料からは確認できない」と書く
-    <h2>詳しく（背景と経緯）</h2><ul><li>…</li></ul>（何がどう進んできたか。国会会議録があれば日付・発言者付きの時系列として、
-      背景解説（Wikipedia）があれば一般的な経緯の補足として使う）
-    <h2>法的な位置づけ</h2><ul><li>…</li></ul>（関連法令が与えられている場合のみ書く。法令名・現行/廃止の別など存在レベルの
-      事実を1〜2件。争点との関連が薄い場合はこのセクション自体を省略する）
-    <h2>国内外の報道比較</h2><ul><li><strong>国内:</strong> …</li><li><strong>海外:</strong> …</li></ul>
-      （海外メディア報道抜粋が与えられている場合のみ書く。論調・強調点の違いを中立に。大きな違いが無ければ
-      「大きな論調の違いは確認できない」と1行で書く。海外メディア報道抜粋が無い場合はこのセクション自体を省略する）
-    <h2>各立場の主張</h2><ul><li><strong>与党（自民・公明）:</strong> …</li><li><strong>野党:</strong> …</li><li><strong>専門家・業界団体:</strong> …</li></ul>
-      （見出しリスト・報道抜粋・国会会議録に各立場の主張が明示されている場合のみ書く。
-      記載が無い立場は「報道から確認できない」と書く。推測・一般論で埋めない。
-      立場が分かれない争点（天災の公式発表・司法判決の確定事実等）はこのセクション自体を省略する）
-    <h2>論点</h2><ul><li>…</li></ul>（意見・評価が分かれうるポイントを中立に2〜3個。読者が自分の立場を考えられる問いの形で。事実が確定していて論点が特にない場合は無理に作らず1個でもよい）
-    <h2>世論の受け止め</h2><ul><li>…</li></ul>（世論調査報道抜粋に具体的な支持率・賛否割合の数値がある場合のみ書く。
-      調査主体・媒体名・調査時期を明記し、数値をそのまま引用する。世論調査報道抜粋が無い、または数値の記載が無い場合は
-      このセクション自体を省略する）
-    <h2>現時点で確認できないこと</h2><ul><li>…</li></ul>（正直に列挙）
-    <h2>今後の見通し</h2><ul><li>…</li></ul>（次に何が起きるか・見るべき一次情報。国会審議中なら次の審議段階、係争中なら次の期日等）
+      - 金融政策・経済指標: <ul><li><strong>何を決めたか:</strong> …</li><li><strong>理由:</strong> …</li><li><strong>暮らし・市場への影響:</strong> …</li></ul>
+      - 事件・災害の公式発表: <ul><li><strong>何が起きたか:</strong> …</li><li><strong>被害・対応:</strong> …</li><li><strong>これから:</strong> …</li></ul>
+      - 要人の声明・人事: <ul><li><strong>何が起きたか:</strong> …</li><li><strong>経緯:</strong> …</li><li><strong>これから:</strong> …</li></ul>
+      分からない項目は「一次資料からは確認できない」と書く
+    <h2>背景</h2><ul><li>…</li></ul>（国会会議録またはWikipediaで本件固有の経緯が補える場合のみ。辞書定義は禁止。使えなければ省略）
+    <h2>法律ではどうなっているか</h2><ul><li>…</li></ul>（関連法令の抜粋がある場合のみ。無ければ省略。「資料にありません」禁止）
+    <h2>海外ではどう報じられているか</h2><ul><li><strong>共通:</strong> …</li><li><strong>国内:</strong> …</li><li><strong>海外:</strong> …</li></ul>
+      （海外報道抜粋があり、海外が主戦場または意味ある差がある場合のみ。国内主なら省略）
+    <h2>どこで意見が分かれるか</h2><ul><li><strong>立場A:</strong> …</li><li><strong>立場B:</strong> …</li></ul>
+      （資料の言い分だけ。両側が対になるラベル。与党/野党固定はしない。
+      立場が分かれない争点はこのセクションを省略）
+    <h2>賛成側が言うこと</h2><ul><li>…</li><li>…</li><li>…</li></ul>
+    <h2>反対側が言うこと</h2><ul><li>…</li><li>…</li><li>…</li></ul>
+      （声明対立なら h2 を当事者名に置き換える。各3〜4項目・同じ分量。具体点から。一般論禁止。
+      天災の公式発表など一方の立場が無い場合のみ両セクション省略可）
+    <h2>数字で見る世論</h2><ul><li>…</li></ul>（世論調査の数値がある場合のみ。無ければ省略）
+    <h2>まだ分からないこと</h2><ul><li>…</li></ul>（未確定点を1〜3項目）
     <h2>出典</h2><ul><li><a href>…</a></li></ul>（与えられたURLのみ）`;
 
 /**
- * REPORTED（報道ベース・🔴LIVE）向け構成。
- * 「確認できること/できないこと」を分けて情報の錯綜を整理するのが役割。
+ * REPORTED向け。導火線優先・見出しは読みたくなる言葉。
+ * 空セクション・プレースホルダ・他国混入・一般論賛否を禁止。
  */
-const REPORTED_FORMAT = `<h2>何が報じられているか</h2><p>2〜3文で要点を具体的に</p>（報道抜粋があれば固有名詞・数字を含めて何が起きたとされているか）
-    <h2>各社の報道はどう食い違っているか</h2><ul><li><strong>媒体名:</strong> その媒体固有の報道内容</li></ul>
-      （報道抜粋が複数媒体分ある場合のみ。全社が同じ内容なら「食い違いは確認できない（各社ほぼ同内容）」と1行で書く。
-      報道抜粋が1媒体以下しか無い場合はこのセクション自体を省略してよい）
-    <h2>詳しく（背景と経緯）</h2><ul><li>…</li></ul>（国会会議録または背景解説（Wikipedia）が与えられている場合のみ書く。
-      国会会議録があれば日付・発言者付きの時系列として、背景解説があれば一般的な経緯の補足として使う。
-      どちらも無い場合はこのセクション自体を省略する）
-    <h2>国内外の報道比較</h2><ul><li><strong>国内:</strong> …</li><li><strong>海外:</strong> …</li></ul>
-      （海外メディア報道抜粋が与えられている場合のみ書く。論調・強調点の違いを中立に。大きな違いが無ければ
-      「大きな論調の違いは確認できない」と1行で書く。海外メディア報道抜粋が無い場合はこのセクション自体を省略する）
-    <h2>法的な位置づけ</h2><ul><li>…</li></ul>（関連法令が与えられている場合のみ書く。法令名・現行/廃止の別など存在レベルの
-      事実を1〜2件。争点との関連が薄い場合や関連法令が無い場合はこのセクション自体を省略する）
-    <h2>現時点で確認できること</h2><ul><li>…</li></ul>（報道の存在・公式発表の有無。箇条書き）
-    <h2>現時点で確認できないこと</h2><ul><li>…</li></ul>（正直に列挙。箇条書き）
-    <h2>各立場の主張</h2><ul><li><strong>報道している側の立場:</strong> …</li><li><strong>当事者・政府の公式見解:</strong> …</li><li><strong>専門家・識者の見方:</strong> …</li></ul>
-      （見出しリスト・報道抜粋・国会会議録に各立場の主張が明示されている場合のみ書く。
-      記載が無い立場は「報道から確認できない」と書く。推測・一般論で埋めない。
-      立場が分かれない争点はこのセクション自体を省略する）
-    <h2>論点</h2><ul><li>…</li></ul>（この争点で意見が分かれるポイントを中立に2〜3個。読者が自分の立場を持てる問いの形にする）
-    <h2>世論の受け止め</h2><ul><li>…</li></ul>（世論調査報道抜粋に具体的な支持率・賛否割合の数値がある場合のみ書く。
-      調査主体・媒体名・調査時期を明記し、数値をそのまま引用する。世論調査報道抜粋が無い、または数値の記載が無い場合は
-      このセクション自体を省略する）
-    <h2>今後見るべき一次情報</h2><ul><li>…</li></ul>（本人声明・政府発表・資料など種類を挙げる。URLは捏造しない）
+const REPORTED_FORMAT = `<h2>いま何が論点か</h2><p>2〜3文。媒体名付きで「〜と報じています」形式。固有名詞・数字を入れ、何について意見が分かれているかを具体的に。断定禁止</p>
+    <h2>各社は何を伝えているか</h2><ul><li><strong>各社が揃って伝えていること:</strong> …</li><li><strong>媒体名:</strong> 固有の内容（差がある場合のみ）</li></ul>
+      （報道抜粋が複数媒体分ある場合のみ。差が無ければ共通点だけ＋「大きな差は確認できない」1行。
+      1媒体以下ならセクション省略可）
+    <h2>背景</h2><ul><li>…</li></ul>（国会会議録またはWikipediaで本件固有の経緯が補える場合のみ。
+      『○○とは…』の辞書定義は禁止。使えなければセクションごと省略）
+    <h2>海外ではどう報じられているか</h2><ul><li><strong>共通:</strong> …</li><li><strong>国内:</strong> …</li><li><strong>海外:</strong> …</li></ul>
+      （海外報道抜粋が与えられていて、かつ海外が主戦場の争点、または国内報道との意味ある差がある場合のみ。
+      国内主の争点で海外類似事例を足すのは禁止。該当しなければセクションごと省略）
+    <h2>法律ではどうなっているか</h2><ul><li>…</li></ul>（関連法令の抜粋がある場合のみ。無ければ省略。「資料にありません」禁止）
+    <h2>どこで意見が分かれるか</h2><ul><li><strong>立場A:</strong> …</li><li><strong>立場B:</strong> …</li></ul>
+      （資料の言い分だけ。両側が視覚的に対になるラベル。声明対立は当事者名。戦争・外交は実陣営名。
+      曖昧ラベル禁止。立場が分かれない争点は省略）
+    <h2>賛成側が言うこと</h2><ul><li>…</li><li>…</li><li>…</li></ul>
+    <h2>反対側が言うこと</h2><ul><li>…</li><li>…</li><li>…</li></ul>
+      （最重要。声明対立なら h2 を当事者名に置き換え、bullets とも揃える。
+      各3〜4項目・同じ分量。報道の具体争点から。一般論禁止。他国の数字を混ぜない。
+      片方のリストに反対側の応援や両論を混ぜない。
+      本当に一方の立場が無い争点に限り両セクション省略可）
+    <h2>数字で見る世論</h2><ul><li>…</li></ul>（世論調査の数値がある場合のみ。無ければ省略）
+    <h2>まだ分からないこと</h2><ul><li>…</li></ul>（未確定点を1〜3項目。URL捏造禁止）
     <h2>出典</h2><ul><li><a href>…</a></li></ul>（与えられたURLのみ）`;
 
 /**
@@ -272,16 +286,14 @@ export function isTimelineWorthy(
 }
 
 /**
- * 「詳しく（背景と経緯）」の直後に挿入する追加セクション。isTimelineWorthy=trueの時だけformatに足す。
- * 単なる日付の列挙で終わらせず、「当初の報道と後の確定情報の違い」を明記させるのが狙い
- * （ユーザーの言う「最初はこう報じられてたけど実はこうでした」を拾う）。
+ * 「背景」または「詳しく（背景と経緯）」の直後に挿入。isTimelineWorthy=trueの時だけ。
  */
 const TIMELINE_SECTION_ADDENDUM = `
-    追加セクション（今回は日付を跨いだ変遷が確認できるため、上記「詳しく（背景と経緯）」の直後に挿入すること）:
-    <h2>時系列</h2><ul><li><strong>M月D日:</strong> 出来事・報道内容</li></ul>
-      （sourcesリストに付記された日付、または国会会議録の日付だけを根拠に古い順で並べる。日付が分からない事実は含めない。
-      特に「当初は〜と報じられていたが、後に〜と判明/確定した」という変遷があれば明記する。単なる列挙で終わらせず、
-      何がどう変わったかが伝わるようにする）`;
+    追加セクション（日付を跨いだ変遷があるため、「背景」の直後に挿入。背景が無い場合は「いま何が論点か」または「いま分かっていること」の直後）:
+    <h2>これまでの流れ</h2><ul><li><strong>M月D日:</strong> 出来事・報道内容</li></ul>
+      （sourcesまたは国会会議録の日付だけを根拠に古い順。日付不明は含めない。
+      日本の争点に他国の類似事例を混ぜない。
+      「当初は〜と報じられていたが、後に〜と判明した」変遷があれば明記する）`;
 
 export async function generateArticle(params: GenerateArticleParams): Promise<ArticleJson> {
   const {
@@ -292,14 +304,17 @@ export async function generateArticle(params: GenerateArticleParams): Promise<Ar
     reportExcerpts = [],
     internationalReportExcerpts = [],
     pollingExcerpts = [],
+    claimDiffBlock = "",
     dietSpeeches = [],
     background = null,
     laws = [],
     estatStats = [],
     previousArticle,
     revisionFeedback = [],
+    debateType = null,
+    reignite = false,
   } = params;
-  const openai = createOpenAIClient({ timeout: 60_000, maxRetries: 1 });
+  const openai = createArticleClient({ timeout: 180_000, maxRetries: 1 });
   const sourceList = sources
     .map(
       (s, i) =>
@@ -321,15 +336,14 @@ ${reportExcerpts.map((e, i) => `【報道${i + 1}: ${e.feed}】${e.title}\n${e.u
 
   const internationalReportExcerptBlock =
     internationalReportExcerpts.length > 0
-      ? `\n\n# 海外/英字メディア報道抜粋（各社ページ本文。必ず媒体名付きの帰属引用として使い、
-「国内外の報道比較」セクションで国内報道との論調・強調点の違いを比較する材料にする）
+      ? `\n\n# 海外/英字メディア報道抜粋（媒体名付き帰属のみ。「海外ではどう報じられているか」で使う。
+国内主の争点ならこのブロックがあっても海外セクションは出さず、賛否にも混ぜない）
 ${internationalReportExcerpts.map((e, i) => `【海外報道${i + 1}: ${e.feed}】${e.title}\n${e.url}\n${e.text}`).join("\n---\n")}`
       : "";
 
   const pollingExcerptBlock =
     pollingExcerpts.length > 0
-      ? `\n\n# 世論調査報道抜粋（世論調査結果を報じた記事本文。具体的な支持率・賛否割合等の数値がある場合のみ、
-調査主体・媒体名・調査時期を付けた帰属引用として「世論の受け止め」セクションで使う。数値の記載が無ければ無理に使わない）
+      ? `\n\n# 世論調査報道抜粋（数値がある場合のみ「数字で見る世論」で使う。無ければセクション省略）
 ${pollingExcerpts.map((e, i) => `【世論調査${i + 1}: ${e.feed}】${e.title}\n${e.url}\n${e.text}`).join("\n---\n")}`
       : "";
 
@@ -388,22 +402,31 @@ ${revisionFeedback.map((f, i) => `${i + 1}. ${f}`).join("\n")}`
   const format =
     (isReported ? REPORTED_FORMAT : OFFICIAL_FORMAT) + (includeTimeline ? TIMELINE_SECTION_ADDENDUM : "");
   const leadSpec = isReported
-    ? "一言でまとめ。①何が報じられているか ②現時点で確認できること/できないこと ③今の段階。150字以内"
-    : "一言でまとめ。この発表・法案・判決・声明等で結局何がどうなるのかを結論ファーストで。150字以内";
-  const bulletsSpec = isReported
-    ? `["確認できること: …", "確認できないこと: …", "今後見るべき一次情報: …"]`
-    : `articleHtmlの「ポイント」セクションと同じ3項目を同じ観点語で（例: ["何が変わる: …", "なぜ今: …", "誰に影響: …"] や ["何を決定したか: …", "理由: …", "市場・生活への影響: …"] など、争点の性質に応じて選んだ観点語を使う）`;
+    ? "結論ファーストで争点を一文目に。何が論点でどこで意見が分かれるかを具体的に。帰属付き・断定禁止。150字以内。定型ラベル禁止"
+    : "この発表・法案・判決・声明で結局何がどうなるかを結論ファーストで。150字以内";
+  const effectiveType: DebateType = debateType ?? "policy";
+  const bulletsSpec = debateTypeBulletsSpec(effectiveType, isReported);
+  const typeHint = debateTypeArticleHint(effectiveType, reignite);
+
+  const intlHint =
+    internationalReportExcerpts.length > 0
+      ? "\n# 海外報道抜粋あり: 海外が主戦場の争点、または国内との意味ある差があるときだけ「海外ではどう報じられているか」を書く。国内主なら使わずセクション省略。"
+      : "\n# 海外報道抜粋なし: 「海外ではどう報じられているか」は出さない。他国の類似事例も書かない。";
 
   const res = await openai.chat.completions.create({
-    model: AI_MODELS.article,
+    model: resolveArticleModel(AI_MODELS.article),
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: SYSTEM },
       {
         role: "user",
         content: `争点: ${issueTitle}
-種別: ${isReported ? "報道ベース（真偽未確認ラベル必須）" : "公式発表ベース"}
-${excerptBlock}${reportExcerptBlock}${internationalReportExcerptBlock}${pollingExcerptBlock}${dietBlock}${backgroundBlock}${lawsBlock}${estatBlock}${previousBlock}${revisionBlock}
+種別: ${isReported ? "報道ベース（断定禁止・帰属付き）" : "公式発表ベース"}
+目的: スプリットスレッド参加者への最低限の中立土台（長文まとめ・偏向報道にしない）${intlHint}
+
+# この争点の書き方（厳守）
+${typeHint}
+${excerptBlock}${reportExcerptBlock}${internationalReportExcerptBlock}${claimDiffBlock}${pollingExcerptBlock}${dietBlock}${backgroundBlock}${lawsBlock}${estatBlock}${previousBlock}${revisionBlock}
 
 # 確認済みの報道見出し（前回分含む最新の全件）
 ${sourceList}
@@ -497,24 +520,71 @@ export function extractGroundableNumbers(articleHtml: string): string[] {
 }
 
 /**
+ * テンプレの観点ラベル（「共通して報じられていること:」「媒体名:」「6月4日:」等）は
+ * 事実ではないのに <strong> で囲まれやすい。検証の誤爆を防ぐため除外する。
+ */
+const HIGHLIGHT_LABEL_ONLY =
+  /^(?:共通して報じられていること|各社が揃って伝えていること|媒体名|国内|海外|共通|与党[^:：]*|野党[^:：]*|専門家[^:：]*|推進側|慎重・反対側|擁護[^:：]*|批判[^:：]*|告発側|報道している側の立場|当事者[^:：]*|本人(?:・事務所)?側|事務所[^:：]*|企業側|日銀[^:：]*|政府[^:：]*|何が変わる|なぜ今|誰に影響|何を決定したか|何を決めたか|理由|市場・生活への影響|暮らし・市場への影響|確認できること|確認できないこと|今後見るべき一次情報|共通事実|賛成側の芯|反対側の芯|いま分かっていること|A側が言うこと|B側が言うこと|賛成側が言うこと|反対側が言うこと)[:：]?$/;
+/**
+ * 「6月4日:」「今年6月26日:」「2026年7月1日:」に加え、正確な日が分からない時系列見出し
+ * 「4月:」「今年7月:」も日付ラベルとして除外する（実例: 日にちまで分からないタイムライン項目が
+ * 「4月:」という<strong>見出しになり、事実トークンとして誤検出されHELDになった）。
+ */
+const HIGHLIGHT_DATE_LABEL = /^(?:今年|昨年|本年|\d{4}年)?\d{1,2}月(?:\d{1,2}日)?[:：]?$/;
+/** 数字・％・円・人など、捏造されると実害の大きいトークンを含むか */
+const HIGHLIGHT_HAS_FACT_TOKEN =
+  /[0-9０-９]|[%％]|円|人|件|条|倍|ポイント|兆|億|万|議席|票/;
+
+/**
  * articleHtml内の<strong>強調箇所を抽出する。
  * プロンプトで「最も重要な事実・数字は<strong>で1箇所だけ強調してよい」と指示しているため、
  * Writerが自ら「これが一番大事」と示した箇所であり、claims配列への自己申告漏れが最も痛いのもここ。
+ * ただしテンプレのラベルだけの strong は検証対象外（誤爆防止）。
  */
 export function extractHighlightedFacts(articleHtml: string): string[] {
   const matches = [...articleHtml.matchAll(/<strong>([\s\S]*?)<\/strong>/g)].map((m) =>
     stripHtmlTags(m[1]).trim(),
   );
-  return [...new Set(matches.filter((m) => m.length >= 2))];
+  return [
+    ...new Set(
+      matches.filter((m) => {
+        if (m.length < 2) return false;
+        if (HIGHLIGHT_LABEL_ONLY.test(m)) return false;
+        if (HIGHLIGHT_DATE_LABEL.test(m)) return false;
+        // 「ダイヤモンド・オンライン:」「日経:」など、コロン終わりで事実トークン無しは観点ラベル
+        if (/[:：]$/.test(m) && !HIGHLIGHT_HAS_FACT_TOKEN.test(m)) return false;
+        // ラベル以外でも、事実トークンが無い短い見出しはスキップ（「賛成」「反対」等）
+        if (m.length <= 24 && !HIGHLIGHT_HAS_FACT_TOKEN.test(m)) return false;
+        return true;
+      }),
+    ),
+  ];
+}
+
+/**
+ * 全角数字・全角％を半角に正規化する。claim検証は部分文字列マッチのため、
+ * Writerが資料の全角表記を半角で書き直した（またはその逆）だけで「裏付けなし」と
+ * 誤判定していた（言い換え数字・全角半角の表記ゆれ）。比較直前にこれを通すだけで解消する。
+ */
+export function normalizeDigits(s: string): string {
+  return s
+    .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+    .replace(/％/g, "%");
 }
 
 function containsEitherWay(a: string, b: string): boolean {
-  return a.includes(b) || b.includes(a);
+  const na = normalizeDigits(a);
+  const nb = normalizeDigits(b);
+  return na.includes(nb) || nb.includes(na);
 }
 
 /** 与えた資料本文（+見出し）のどこにも出現しない数値を検出する */
 export function findUngroundedNumbers(numbers: string[], haystacks: string[]): string[] {
-  return numbers.filter((n) => !haystacks.some((h) => h.includes(n)));
+  const normalizedHaystacks = haystacks.map(normalizeDigits);
+  return numbers.filter((n) => {
+    const normalized = normalizeDigits(n);
+    return !normalizedHaystacks.some((h) => h.includes(normalized));
+  });
 }
 
 /**
@@ -526,9 +596,14 @@ export function findUnclaimedHighlights(
   claimTexts: string[],
   haystacks: string[],
 ): string[] {
-  return highlights.filter(
-    (h) => !claimTexts.some((c) => containsEitherWay(c, h)) && !haystacks.some((hay) => hay.includes(h)),
-  );
+  const normalizedHaystacks = haystacks.map(normalizeDigits);
+  return highlights.filter((h) => {
+    const normalizedH = normalizeDigits(h);
+    return (
+      !claimTexts.some((c) => containsEitherWay(c, h)) &&
+      !normalizedHaystacks.some((hay) => hay.includes(normalizedH))
+    );
+  });
 }
 
 export interface VerifiedArticleResult {
@@ -600,4 +675,51 @@ export async function generateVerifiedArticle(
     );
   }
   return { article, verified: false, unresolvedClaims: [], attempts: maxRetries + 1 };
+}
+
+/**
+ * 「どこで意見が分かれるか」以降の対立軸セクション（賛成側/反対側、または声明対立なら当事者名など
+ * debateTypeで見出しが変わる）だけをarticleHtmlから抜き出す。
+ * レスバ支援AI（rebuttal）・スティールマンAIは従来summaryJson.bullets（1行要約×2〜3項目）しか見ておらず、
+ * 記事本文にある3〜4項目・具体点付きの厚い両論セクションが渡っていなかった。
+ * 見出し文言はdebateTypeごとに変わる（OFFICIAL_FORMAT/REPORTED_FORMAT参照）ため、
+ * 既知の非論点セクション（背景・出典等）を除外方式で弾き、残りを「対立軸セクション」とみなす。
+ */
+const NON_ARGUMENT_HEADINGS = new Set([
+  "いま分かっていること",
+  "いま何が論点か",
+  "各社は何を伝えているか",
+  "背景",
+  "法律ではどうなっているか",
+  "海外ではどう報じられているか",
+  "どこで意見が分かれるか",
+  "数字で見る世論",
+  "まだ分からないこと",
+  "出典",
+  "これまでの流れ",
+]);
+
+export interface ArgumentSection {
+  heading: string;
+  items: string[];
+}
+
+export function extractArgumentSections(articleHtml: string): ArgumentSection[] {
+  const sections: ArgumentSection[] = [];
+  for (const m of articleHtml.matchAll(/<h2>([^<]+)<\/h2>([\s\S]*?)(?=<h2>|$)/g)) {
+    const heading = stripHtmlTags(m[1]).trim();
+    if (!heading || NON_ARGUMENT_HEADINGS.has(heading)) continue;
+    const items = [...m[2].matchAll(/<li>([\s\S]*?)<\/li>/g)]
+      .map((li) => stripHtmlTags(li[1]).trim())
+      .filter(Boolean);
+    if (items.length > 0) sections.push({ heading, items });
+  }
+  return sections;
+}
+
+/** レスバ支援AI等のプロンプトに埋め込む用のプレーンテキスト（長すぎる場合は呼び出し側でtrim） */
+export function formatArgumentSectionsForPrompt(sections: ArgumentSection[]): string {
+  return sections
+    .map((s) => `【${s.heading}】\n${s.items.map((i) => `- ${i}`).join("\n")}`)
+    .join("\n\n");
 }
