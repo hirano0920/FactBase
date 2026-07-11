@@ -12,6 +12,9 @@ type ParticipatedState =
   | { kind: "guest" }
   | { kind: "user"; issues: ParticipatedIssue[] };
 
+/** 親の再マウント（旧 StickySidebar の portal 切替等）でも再取得しない */
+let participatedCache: ParticipatedState | null = null;
+
 function statusLine(issue: ParticipatedIssue) {
   if (issue.hasUpdate) return { text: "新しいコメントがあります", className: "text-hot" };
   if (issue.hasCommented) return { text: "コメント参加済み・新着なし", className: "text-ink-faint" };
@@ -20,9 +23,13 @@ function statusLine(issue: ParticipatedIssue) {
 
 /** 左カラム「あなたが参加したスレッド」。SSRをブロックせず、ログイン時だけ遅延取得する。 */
 export function ParticipatedRail() {
-  const [state, setState] = useState<ParticipatedState>({ kind: "loading" });
+  const [state, setState] = useState<ParticipatedState>(
+    () => participatedCache ?? { kind: "loading" },
+  );
 
   useEffect(() => {
+    if (participatedCache && participatedCache.kind !== "loading") return;
+
     let cancelled = false;
 
     const load = async () => {
@@ -30,21 +37,25 @@ export function ParticipatedRail() {
         const res = await fetch("/api/issues/participated");
         if (cancelled) return;
         if (res.status === 401) {
-          setState({ kind: "guest" });
+          participatedCache = { kind: "guest" };
+          setState(participatedCache);
           return;
         }
         if (!res.ok) return;
         const data = (await res.json()) as { issues: ParticipatedIssue[] };
-        setState({ kind: "user", issues: data.issues });
+        participatedCache = { kind: "user", issues: data.issues };
+        setState(participatedCache);
       } catch {
-        if (!cancelled) setState({ kind: "guest" });
+        if (!cancelled) {
+          participatedCache = { kind: "guest" };
+          setState(participatedCache);
+        }
       }
     };
 
-    const timer = setTimeout(load, 2000);
+    void load();
     return () => {
       cancelled = true;
-      clearTimeout(timer);
     };
   }, []);
 

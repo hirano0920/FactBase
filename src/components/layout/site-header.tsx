@@ -66,16 +66,16 @@ export async function SiteHeader() {
         </div>
       </div>
 
-      {/* ワイド画面のみフルヘッダー */}
-      <div className="mx-auto hidden h-14 max-w-wide items-center justify-between px-page lg:flex">
+      {/* ワイド画面のみフルヘッダー（nav を画面中央に固定する 3 列グリッド） */}
+      <div className="mx-auto hidden h-14 max-w-wide grid-cols-[1fr_auto_1fr] items-center gap-4 px-page lg:grid">
         <Link
           href="/"
-          className="text-lg font-extrabold tracking-tighter text-ink no-underline hover:text-accent"
+          className="justify-self-start text-lg font-extrabold tracking-tighter text-ink no-underline hover:text-accent"
         >
           {SITE.displayName}
         </Link>
 
-        <nav className="flex items-center gap-6" aria-label="メイン">
+        <nav className="flex items-center justify-center gap-6" aria-label="メイン">
           {DESKTOP_NAV.map((item) => (
             <Link
               key={item.href}
@@ -88,7 +88,7 @@ export async function SiteHeader() {
           ))}
         </nav>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-self-end gap-2">
           <ThemeToggle />
           {user && <NotificationBell isLoggedIn />}
           {user ? (
