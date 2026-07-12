@@ -5,7 +5,10 @@ import type { IssueSummary } from "@/types";
 interface SummaryCardProps {
   summary: IssueSummary;
   articleSlug?: string;
-  /** ページ上部の第一印象を軽くするための省略表示（詳細解説へのリンクで補う） */
+  /**
+   * フィード内の折りたたみ用。スレッド詳細・展開では使わず、
+   * 報道の具体内容＋両論を十分読める密度で出す。
+   */
   compact?: boolean;
 }
 
@@ -21,29 +24,51 @@ function parseBullet(bullet: string): ParsedBullet {
   return { label: match[1].trim(), text: match[2].trim() };
 }
 
+/**
+ * 要点カード。
+ * 二項対立のラベル（「否定」「事実」）だけでは薄いので、
+ * 1項目目＝何が報じられたか／何が起きているかを必ず見せ、その下に両側を置く。
+ */
 export function SummaryCard({ summary, articleSlug, compact = false }: SummaryCardProps) {
-  const bullets = compact ? summary.bullets.slice(0, 3) : summary.bullets;
-
-  // 1項目目=中立の前提（いま分かっていること）、2・3項目目=対立する両論。
-  // これが揃っている時だけ「賛成/反対を左右に対置する」表示にする。揃わない場合は従来通りの単純リストにフォールバック。
+  const bullets = summary.bullets.slice(0, 3);
   const [context, sideA, sideB] = bullets;
-  const canSplit = bullets.length === 3 && sideA && sideB;
+  const canSplit = bullets.length === 3 && Boolean(sideA && sideB);
+  const parsedContext = context ? parseBullet(context) : null;
   const parsedSideA = canSplit ? parseBullet(sideA) : null;
   const parsedSideB = canSplit ? parseBullet(sideB) : null;
 
   return (
-    <div className={compact ? "space-y-2" : "space-y-5"}>
+    <div className={compact ? "space-y-2.5" : "space-y-4"}>
       <p
         className={cn(
           "leading-relaxed text-ink-secondary",
-          compact ? "line-clamp-2 text-sm" : "text-base",
+          compact ? "line-clamp-4 text-sm" : "text-base",
         )}
       >
         {summary.lead}
       </p>
 
-      {canSplit && parsedSideA && parsedSideB ? (
-        <div className={compact ? "space-y-2" : "space-y-3"}>
+      {canSplit && parsedContext && parsedSideA && parsedSideB ? (
+        <div className={compact ? "space-y-2.5" : "space-y-3"}>
+          <div
+            className={cn(
+              "rounded-lg border border-border bg-surface-muted/60",
+              compact ? "px-3 py-2.5" : "px-3.5 py-3",
+            )}
+          >
+            <p className="mb-1 text-[10px] font-bold tracking-wide text-ink-faint">
+              {parsedContext.label ?? "いま分かっていること"}
+            </p>
+            <p
+              className={cn(
+                "leading-relaxed text-ink-secondary",
+                compact ? "line-clamp-3 text-xs" : "text-sm",
+              )}
+            >
+              {parsedContext.text}
+            </p>
+          </div>
+
           <div className="grid gap-2 sm:grid-cols-2">
             <div
               className={cn(
@@ -52,12 +77,12 @@ export function SummaryCard({ summary, articleSlug, compact = false }: SummaryCa
               )}
             >
               <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-for">
-                {parsedSideA.label ?? "賛成側"}
+                {parsedSideA.label ?? "一方の立場"}
               </p>
               <p
                 className={cn(
                   "leading-relaxed text-ink-secondary",
-                  compact ? "line-clamp-2 text-xs" : "text-sm",
+                  compact ? "line-clamp-3 text-xs" : "text-sm",
                 )}
               >
                 {parsedSideA.text}
@@ -70,12 +95,12 @@ export function SummaryCard({ summary, articleSlug, compact = false }: SummaryCa
               )}
             >
               <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-against">
-                {parsedSideB.label ?? "反対側"}
+                {parsedSideB.label ?? "もう一方の立場"}
               </p>
               <p
                 className={cn(
                   "leading-relaxed text-ink-secondary",
-                  compact ? "line-clamp-2 text-xs" : "text-sm",
+                  compact ? "line-clamp-3 text-xs" : "text-sm",
                 )}
               >
                 {parsedSideB.text}
@@ -91,14 +116,24 @@ export function SummaryCard({ summary, articleSlug, compact = false }: SummaryCa
               compact ? "pl-3.5 text-xs" : "space-y-2.5 pl-5 text-sm",
             )}
           >
-            {bullets.map((bullet) => (
-              <li
-                key={bullet}
-                className={cn("leading-relaxed text-ink-secondary", compact && "line-clamp-1")}
-              >
-                {bullet}
-              </li>
-            ))}
+            {bullets.map((bullet) => {
+              const parsed = parseBullet(bullet);
+              return (
+                <li
+                  key={bullet}
+                  className={cn("leading-relaxed text-ink-secondary", compact && "line-clamp-2")}
+                >
+                  {parsed.label ? (
+                    <>
+                      <span className="font-semibold text-ink-muted">{parsed.label}: </span>
+                      {parsed.text}
+                    </>
+                  ) : (
+                    bullet
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )
       )}

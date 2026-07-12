@@ -30,6 +30,7 @@ import { sortByBridgingScore } from "@/lib/bridging";
 import { qualifiesVerifiedBadge } from "@/lib/fc-display";
 import { generateSteelman } from "@/lib/ai";
 import { extractOpeningSummary } from "@/lib/article-sections";
+import { enrichSummaryForDisplay } from "@/lib/article-quality";
 import {
   filterIssues,
   paginateIssues,
@@ -131,10 +132,13 @@ function tallyFromCounters(issue: DbIssue): VoteTally {
 
 function mapIssue(issue: DbIssue): Issue {
   const rawSummary = issue.summaryJson as unknown as IssueSummary;
-  const summary: IssueSummary = {
+  const withLead: IssueSummary = {
     ...rawSummary,
     lead: extractOpeningSummary(issue.articleHtml, rawSummary.lead ?? ""),
+    bullets: rawSummary.bullets ?? [],
+    sources: rawSummary.sources ?? [],
   };
+  const summary = enrichSummaryForDisplay(withLead, issue.articleHtml) as IssueSummary;
   return {
     id: issue.id,
     slug: issue.slug,

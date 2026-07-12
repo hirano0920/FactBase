@@ -15,9 +15,10 @@ import { CategoryBadge, StatusBadge } from "@/components/ui/badge";
 import { AppSidebarStatic } from "@/components/layout/app-sidebar";
 import { AdSlotGated } from "@/components/layout/ad-slot-gated";
 import { PageContainer, Section, SectionTitle } from "@/components/layout/page-container";
+import { LeftRail } from "@/components/layout/left-rail";
 import { ScrollReveal } from "@/components/ui/scroll-reveal";
 import { getComments, getIssueBySlug, getIssueTimeline, isDbEnabled } from "@/lib/data";
-import { GUEST_COMMENT_LIMIT } from "@/lib/constants";
+import { GUEST_COMMENT_LIMIT, HOME_THREE_COL_GRID } from "@/lib/constants";
 import type { Metadata } from "next";
 
 /** ゲスト向け静的シェル。auth() を呼ばず ISR/CDN が効く。ログイン要素はクライアントで hydrate */
@@ -71,7 +72,11 @@ export default async function IssuePage({ params }: IssuePageProps) {
   return (
     <IssueViewerProvider slug={issue.slug} issueId={issue.id} guestComments={commentPage.comments}>
       <PageContainer>
-        <div className="grid gap-8 lg:grid-cols-[1fr_300px]">
+        <div className={`grid gap-6 lg:gap-8 ${HOME_THREE_COL_GRID}`}>
+          <div className="hidden xl:block">
+            <LeftRail />
+          </div>
+
           <div className="min-w-0">
             <AdSlotGated slug={issue.slug} className="mb-8" />
 
@@ -109,7 +114,6 @@ export default async function IssuePage({ params }: IssuePageProps) {
                   <SummaryCard
                     summary={issue.summary}
                     articleSlug={issue.articleHtml ? issue.slug : undefined}
-                    compact
                   />
                   {timeline.length > 0 && (
                     <div className="mt-4 border-t border-border pt-4">
@@ -168,7 +172,9 @@ export default async function IssuePage({ params }: IssuePageProps) {
             </div>
           </div>
 
-          <AppSidebarStatic />
+          <div className="hidden lg:block">
+            <AppSidebarStatic />
+          </div>
         </div>
       </PageContainer>
     </IssueViewerProvider>

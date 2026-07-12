@@ -447,6 +447,7 @@ describe("generateArticle（TwoSides導火線フォーマット）", () => {
     expect(sentContent).toContain("必須スロット");
     expect(sentContent).toContain("報道の行為・発言の要約");
     expect(sentContent).toContain("報道の内容:");
+    expect(sentContent).toContain("メタ表現禁止");
     expect(sentContent).toContain("A側（当事者名）");
   });
 

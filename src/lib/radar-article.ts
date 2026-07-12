@@ -497,7 +497,8 @@ export interface UngroundedClaim extends ArticleClaim {
     | "unclaimed_highlight"
     | "opening_too_thin"
     | "incident_first_missing"
-    | "duplicate_facts";
+    | "duplicate_facts"
+    | "bullets_too_thin";
 }
 
 /**
@@ -701,7 +702,8 @@ export async function generateVerifiedArticle(
       if (
         f.reason === "opening_too_thin" ||
         f.reason === "incident_first_missing" ||
-        f.reason === "duplicate_facts"
+        f.reason === "duplicate_facts" ||
+        f.reason === "bullets_too_thin"
       ) {
         return f.text;
       }

@@ -144,7 +144,8 @@ export function debateTypeArticleHint(debateType: DebateType, reignite = false):
   ① [報道の行為・発言の要約] ← 何をした／何と言ったと報じたかを具体語で。否定の前に置く
   ② [時期・場面]
   ③ [否定・反応と対立軸]
-両側セクションは事実の再掲禁止。各側の主張・反論・論点だけ。`;
+両側セクションは事実の再掲禁止。各側の主張・反論・論点だけ。
+きれいに対称でなくてもよい（実争点は非対称が多い）。`;
     case "policy":
       return `争点タイプ: policy（政策・法案賛否）${reigniteLine}
 両側見出し:「賛成側が言うこと」「反対側が言うこと」。
@@ -214,24 +215,29 @@ export function debateTypeChoiceHint(debateType: DebateType): string {
   }
 }
 
-/** bullets 指示を型に合わせる */
+/** bullets 指示を型に合わせる。メタ立場（「虚偽」「事実」だけ）は禁止し、具体内容を必須にする */
 export function debateTypeBulletsSpec(debateType: DebateType, isReported: boolean): string {
+  const density =
+    "各項目80〜140字。1項目目に何が起きたか／何が報じられたかの具体（行為・発言・数字・決定）を必ず入れる。" +
+    "2・3項目目は「虚偽だ／事実だ」「支持／反対」だけのメタ表現禁止。何についてそう主張するかを1つ以上具体的に書く。" +
+    "両側がきれいに対称でなくてもよい（現実の争点は非対称が多い）。無理に二項のラベルを美しく揃えない。";
+
   if (!isReported) {
-    return `articleHtmlの「いま分かっていること」セクションと同じ3項目を同じ観点語で`;
+    return `articleHtmlの「いま分かっていること」と同じ3観点語で、各項目に具体内容。${density}`;
   }
   switch (debateType) {
     case "declaration":
-      return `["報道の内容: …（何が報じられたか）", "A側（当事者名）: …", "B側（当事者名）: …"]`;
+      return `["報道の内容: …（何をした／何と言ったと報じたか。否定は書かない）", "A側（当事者名）: …（その内容について何と反論・主張するか）", "B側（当事者名）: …（報道・相手側が何を根拠にそう言うか）"]。${density}`;
     case "org_response":
-      return `["いま分かっていること: …", "対応を支持する側: …", "問題だとする側: …"]`;
+      return `["いま分かっていること: …（何が起き、組織が何をしたか）", "対応を支持する側: …", "問題だとする側: …"]。${density}`;
     case "norm_flare":
-      return `["争点の軸: …", "擁護側: …", "批判側: …"]`;
+      return `["争点の軸: …（何の規範・行為が問題になっているか具体的に）", "擁護側: …", "批判側: …"]。${density} 当事者名が無い炎上でも軸は具体行為で書く。`;
     case "indicator":
-      return `["公式の数字・判断: …", "支持する側: …", "問題視する側: …"]`;
+      return `["公式の数字・判断: …（数値をそのまま）", "支持する側: …", "問題視する側: …"]。${density}`;
     case "geopolitics":
-      return `["いま分かっていること: …", "陣営A: …", "陣営B: …"]`;
+      return `["いま分かっていること: …", "陣営A: …", "陣営B: …"]。${density} 実在陣営名。きれいに対称でなくてよい。`;
     case "policy":
     default:
-      return `["いま分かっていること: …", "賛成側が言うこと: …", "反対側が言うこと: …"]`;
+      return `["いま分かっていること: …（何が決まろうとしているか）", "賛成側が言うこと: …", "反対側が言うこと: …"]。${density}`;
   }
 }
