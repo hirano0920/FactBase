@@ -4,6 +4,7 @@ import { AboutDifferentiatorCard } from "@/components/about/about-differentiator
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { PageContainer } from "@/components/layout/page-container";
 import { MAIN_SIDEBAR_GRID, SITE } from "@/lib/constants";
+import { cn } from "@/lib/utils";
 import { ScrollReveal } from "@/components/ui/scroll-reveal";
 import type { Metadata } from "next";
 
@@ -13,49 +14,43 @@ export const metadata: Metadata = {
     `${SITE.name}の目的、他SNS・メディアとの違い、Radar、議論インテリジェンス。第3のメディアとしての中立な討論会場。`,
 };
 
-const ENEMIES = [
+/**
+ * 「敵→対抗策」を1つのトラックとして持たせる。以前は敵カードと対抗策カードを別々のグリッドに
+ * 並べていたが、見た目上つながりが分からず単なる同型カードの羅列に見えていた。
+ * トラックにすることで、色付きの縦線1本で問題→解決の因果を直接つなぐ。
+ */
+const TRACKS = [
   {
     tag: "オールドメディア型",
-    title: "偏向報道",
+    enemy: "偏向報道",
     description: "1社の切り取り方だけを読まされ、他の見方があることに気づけない。",
     tone: "warm",
+    counters: [
+      {
+        title: "複数媒体を横断参照",
+        description: "1つの争点につき複数の報道・一次情報を突き合わせてから要約するので、1社の偏向に引っ張られません。",
+      },
+      {
+        title: "複数AIモデルで品質チェック",
+        description: "記事を書くAIと、出典と照合して採点するAIを分離（Grok 4.3で生成→ChatGPT 5 nanoが独立照合）。書いた本人に採点させないので、AI自身の偏りも防ぎます。",
+      },
+    ],
   },
   {
     tag: "SNS型",
-    title: "フィルターバブル",
+    enemy: "フィルターバブル",
     description: "おすすめアルゴリズムが同意見ばかり並べ、声の大きい極端な意見が勝つ。",
     tone: "accent",
-  },
-] as const;
-
-const COUNTERS = [
-  {
-    num: 1,
-    title: "複数媒体を横断参照",
-    description: "1つの争点につき複数の報道・一次情報を突き合わせてから要約するので、1社の偏向に引っ張られません。",
-    against: "対・偏向報道",
-    tone: "warm",
-  },
-  {
-    num: 2,
-    title: "スプリットスレッド",
-    description: "画面を最初からFOR/AGAINSTに分けて表示。相手陣営からも支持された意見（越境評価）が上に来る仕組みで、声の大きい極端な意見だけが目立つ状態を防ぎます。",
-    against: "対・フィルターバブル",
-    tone: "accent",
-  },
-  {
-    num: 3,
-    title: "複数AIモデルで品質チェック",
-    description: "記事を書くAIと、出典と照合して採点するAIを分離（Grok 4.3で生成→ChatGPT 5 nanoが独立照合）。書いた本人に採点させないので、AI自身の偏りも防ぎます。",
-    against: "対・偏向報道",
-    tone: "warm",
-  },
-  {
-    num: 4,
-    title: "おすすめアルゴリズムなし",
-    description: "あなたの好みに最適化されたタイムラインは存在しません。争点・新着・投票結果だけが並びます。",
-    against: "対・フィルターバブル",
-    tone: "accent",
+    counters: [
+      {
+        title: "スプリットスレッド",
+        description: "画面を最初からFOR/AGAINSTに分けて表示。相手陣営からも支持された意見（越境評価）が上に来る仕組みで、声の大きい極端な意見だけが目立つ状態を防ぎます。",
+      },
+      {
+        title: "おすすめアルゴリズムなし",
+        description: "あなたの好みに最適化されたタイムラインは存在しません。争点・新着・投票結果だけが並びます。",
+      },
+    ],
   },
 ] as const;
 
@@ -76,16 +71,15 @@ export default function AboutPage() {
       <div className={`grid gap-8 ${MAIN_SIDEBAR_GRID}`}>
         <div className="min-w-0 max-w-content space-y-12">
           <ScrollReveal>
-            <header className="rounded-[20px] border border-border bg-surface-raised px-6 py-10 text-center sm:px-10">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-accent-soft px-3 py-1.5 text-xs font-extrabold tracking-wide text-accent">
-                🎯 究極の命題
-              </span>
-              <h1 className="mx-auto mt-4 max-w-[18ch] text-2xl font-extrabold leading-snug tracking-tight text-ink sm:text-3xl">
+            <header className="max-w-2xl">
+              <div className="mb-5 h-1 w-12 rounded-full bg-gradient-to-r from-accent to-hot" aria-hidden />
+              <p className="mb-3 text-xs font-extrabold tracking-[0.2em] text-ink-faint">究極の命題</p>
+              <h1 className="max-w-[16ch] text-3xl font-extrabold leading-[1.4] tracking-tight text-ink text-balance sm:text-4xl">
                 まともな
                 <span className="bg-gradient-to-r from-accent to-hot bg-clip-text text-transparent">議論</span>
                 ができる環境を、日本のネットに作る。
               </h1>
-              <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-ink-secondary">
+              <p className="mt-5 max-w-prose text-base leading-relaxed text-ink-secondary">
                 オールドメディアの偏向と、SNSのフィルターバブル。この2つに挟まれた人が、
                 声の大きさでなく納得感で意見を磨ける場所を目指しています。
               </p>
@@ -94,59 +88,59 @@ export default function AboutPage() {
 
           <ScrollReveal delay={60}>
             <section>
-              <div className="mb-4 flex items-center gap-2">
-                <h2 className="text-sm font-extrabold tracking-wide text-ink-faint">
-                  {SITE.name}が対抗している2つの敵
+              <div className="mb-6 flex items-center gap-2">
+                <h2 className="text-xs font-extrabold tracking-[0.15em] text-ink-faint">
+                  2つの敵と、{SITE.name}の対抗策
                 </h2>
                 <span className="h-px flex-1 bg-border" aria-hidden />
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2">
-                {ENEMIES.map((enemy) => (
+              <div className="grid gap-8 sm:grid-cols-2 sm:gap-10">
+                {TRACKS.map((track) => (
                   <div
-                    key={enemy.title}
+                    key={track.enemy}
                     className={
-                      enemy.tone === "warm"
-                        ? "rounded-2xl border border-warm/35 bg-gradient-to-br from-warm-muted to-surface-raised p-5"
-                        : "rounded-2xl border border-accent/30 bg-gradient-to-br from-accent-soft to-surface-raised p-5"
+                      track.tone === "warm"
+                        ? "border-l-[3px] border-warm/60 pl-5"
+                        : "border-l-[3px] border-accent/60 pl-5"
                     }
                   >
                     <span
                       className={
-                        enemy.tone === "warm"
-                          ? "inline-block rounded-full bg-warm/15 px-2.5 py-1 text-[10.5px] font-extrabold tracking-wide text-warm"
-                          : "inline-block rounded-full bg-accent/10 px-2.5 py-1 text-[10.5px] font-extrabold tracking-wide text-accent"
+                        track.tone === "warm"
+                          ? "text-[11px] font-extrabold tracking-wide text-warm"
+                          : "text-[11px] font-extrabold tracking-wide text-accent"
                       }
                     >
-                      {enemy.tag}
+                      {track.tag}
                     </span>
-                    <p className="mt-2.5 text-base font-extrabold text-ink">{enemy.title}</p>
-                    <p className="mt-1.5 text-sm leading-relaxed text-ink-secondary">{enemy.description}</p>
-                  </div>
-                ))}
-              </div>
+                    <p className="mt-1 text-xl font-extrabold tracking-tight text-ink">{track.enemy}</p>
+                    <p className="mt-2 text-sm leading-relaxed text-ink-secondary">{track.description}</p>
 
-              <p className="my-4 text-center text-xs font-bold tracking-wide text-ink-faint">
-                ↓ {SITE.name}の対抗策 ↓
-              </p>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                {COUNTERS.map((counter) => (
-                  <div key={counter.title} className="rounded-2xl border border-border bg-surface-raised p-5">
-                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-ink text-[10.5px] font-extrabold text-white">
-                      {counter.num}
-                    </span>
-                    <p className="mt-2.5 text-sm font-extrabold text-ink">{counter.title}</p>
-                    <p className="mt-1.5 text-sm leading-relaxed text-ink-secondary">{counter.description}</p>
-                    <span
-                      className={
-                        counter.tone === "warm"
-                          ? "mt-2.5 inline-block text-xs font-bold text-warm"
-                          : "mt-2.5 inline-block text-xs font-bold text-accent"
-                      }
-                    >
-                      {counter.against}
-                    </span>
+                    <div className="mt-6 space-y-4">
+                      {track.counters.map((counter) => (
+                        <div key={counter.title} className="flex gap-2.5">
+                          <svg
+                            className={cn(
+                              "mt-0.5 h-4 w-4 shrink-0",
+                              track.tone === "warm" ? "text-warm" : "text-accent",
+                            )}
+                            viewBox="0 0 20 20"
+                            fill="none"
+                            aria-hidden="true"
+                          >
+                            <path
+                              d="M16.7 5.3a1 1 0 0 1 0 1.4l-8 8a1 1 0 0 1-1.4 0l-4-4a1 1 0 1 1 1.4-1.4L8 12.6l7.3-7.3a1 1 0 0 1 1.4 0Z"
+                              fill="currentColor"
+                            />
+                          </svg>
+                          <div>
+                            <p className="text-sm font-bold text-ink">{counter.title}</p>
+                            <p className="mt-0.5 text-xs leading-relaxed text-ink-muted">{counter.description}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>
