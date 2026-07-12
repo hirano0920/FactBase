@@ -14,41 +14,30 @@ export const metadata: Metadata = {
 };
 
 /**
- * 「敵→対抗策」を1つのトラックとして持たせる。以前は敵カードと対抗策カードを別々のグリッドに
- * 並べていたが、見た目上つながりが分からず単なる同型カードの羅列に見えていた。
- * トラックにすることで、色付きの縦線1本で問題→解決の因果を直接つなぐ。
+ * 「敵→対抗策」を1つのトラックとして持たせる。以前は敵と対抗策を1つの2カラムグリッドに
+ * 詰め込んでいたが、1箇所に情報が密集して単調な文字の壁になっていた。
+ * 今回は敵1つにつき横幅いっぱいの帯を1枚使い、縦の余白と左右反転で読むリズムを作る。
+ * コピーも「説明文」から「短いラベル」に削って、密度そのものを落とす。
  */
 const TRACKS = [
   {
     tag: "オールドメディア型",
     enemy: "偏向報道",
-    description: "1社の切り取り方だけを読まされ、他の見方があることに気づけない。",
+    description: "1社の切り取り方だけを読まされ、他の見方に気づけない。",
     tone: "warm",
     counters: [
-      {
-        title: "複数媒体を横断参照",
-        description: "1つの争点につき複数の報道・一次情報を突き合わせてから要約するので、1社の偏向に引っ張られません。",
-      },
-      {
-        title: "複数AIモデルで品質チェック",
-        description: "記事を書くAIと、出典と照合して採点するAIを分離（Grok 4.3で生成→ChatGPT 5 nanoが独立照合）。書いた本人に採点させないので、AI自身の偏りも防ぎます。",
-      },
+      { title: "複数媒体を横断参照", description: "報道・一次情報を複数突き合わせてから要約。" },
+      { title: "複数AIモデルで品質チェック", description: "書くAIと採点するAIを分離。書いた本人には採点させない。" },
     ],
   },
   {
     tag: "SNS型",
     enemy: "フィルターバブル",
-    description: "おすすめアルゴリズムが同意見ばかり並べ、声の大きい極端な意見が勝つ。",
+    description: "アルゴリズムが同意見ばかり並べ、極端な意見が勝つ。",
     tone: "accent",
     counters: [
-      {
-        title: "スプリットスレッド",
-        description: "画面を最初からFOR/AGAINSTに分けて表示。相手陣営からも支持された意見（越境評価）が上に来る仕組みで、声の大きい極端な意見だけが目立つ状態を防ぎます。",
-      },
-      {
-        title: "おすすめアルゴリズムなし",
-        description: "あなたの好みに最適化されたタイムラインは存在しません。争点・新着・投票結果だけが並びます。",
-      },
+      { title: "スプリットスレッド", description: "画面を最初からFOR/AGAINSTに分割し、越境評価で並び替え。" },
+      { title: "おすすめアルゴリズムなし", description: "好みに最適化されたタイムラインは存在しない。" },
     ],
   },
 ] as const;
@@ -74,66 +63,66 @@ export default function AboutPage() {
             </header>
           </ScrollReveal>
 
-          <ScrollReveal delay={60}>
-            <section>
-              <div className="mb-6 flex items-center gap-2">
-                <h2 className="text-xs font-extrabold tracking-[0.15em] text-ink-faint">
-                  2つの敵と、{SITE.name}の対抗策
-                </h2>
-                <span className="h-px flex-1 bg-border" aria-hidden />
-              </div>
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <h2 className="text-xs font-extrabold tracking-[0.15em] text-ink-faint">
+                2つの敵と、{SITE.name}の対抗策
+              </h2>
+              <span className="h-px flex-1 bg-border" aria-hidden />
+            </div>
 
-              <div className="grid gap-8 sm:grid-cols-2 sm:gap-10">
-                {TRACKS.map((track) => (
-                  <div
-                    key={track.enemy}
-                    className={
-                      track.tone === "warm"
-                        ? "border-l-[3px] border-warm/60 pl-5"
-                        : "border-l-[3px] border-accent/60 pl-5"
-                    }
-                  >
+            {TRACKS.map((track, i) => (
+              <ScrollReveal key={track.enemy} delay={i * 80}>
+                <section
+                  className={cn(
+                    "flex flex-col gap-6 rounded-[28px] px-6 py-10 sm:gap-10 sm:px-10 sm:py-12 lg:flex-row lg:items-center",
+                    track.tone === "warm" ? "bg-warm-muted/60" : "bg-accent-soft/70",
+                    i % 2 === 1 && "lg:flex-row-reverse",
+                  )}
+                >
+                  <div className="lg:w-[38%] lg:shrink-0">
                     <span
-                      className={
-                        track.tone === "warm"
-                          ? "text-[11px] font-extrabold tracking-wide text-warm"
-                          : "text-[11px] font-extrabold tracking-wide text-accent"
-                      }
+                      className={cn(
+                        "text-[11px] font-extrabold tracking-wide",
+                        track.tone === "warm" ? "text-warm" : "text-accent",
+                      )}
                     >
                       {track.tag}
                     </span>
-                    <p className="mt-1 text-xl font-extrabold tracking-tight text-ink">{track.enemy}</p>
-                    <p className="mt-2 text-sm leading-relaxed text-ink-secondary">{track.description}</p>
-
-                    <div className="mt-6 space-y-4">
-                      {track.counters.map((counter) => (
-                        <div key={counter.title} className="flex gap-2.5">
-                          <svg
-                            className={cn(
-                              "mt-0.5 h-4 w-4 shrink-0",
-                              track.tone === "warm" ? "text-warm" : "text-accent",
-                            )}
-                            viewBox="0 0 20 20"
-                            fill="none"
-                            aria-hidden="true"
-                          >
-                            <path
-                              d="M16.7 5.3a1 1 0 0 1 0 1.4l-8 8a1 1 0 0 1-1.4 0l-4-4a1 1 0 1 1 1.4-1.4L8 12.6l7.3-7.3a1 1 0 0 1 1.4 0Z"
-                              fill="currentColor"
-                            />
-                          </svg>
-                          <div>
-                            <p className="text-sm font-bold text-ink">{counter.title}</p>
-                            <p className="mt-0.5 text-xs leading-relaxed text-ink-muted">{counter.description}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                    <p className="mt-2 text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">
+                      {track.enemy}
+                    </p>
+                    <p className="mt-3 max-w-xs text-sm leading-relaxed text-ink-secondary">
+                      {track.description}
+                    </p>
                   </div>
-                ))}
-              </div>
-            </section>
-          </ScrollReveal>
+
+                  <div className="grid flex-1 gap-4 sm:grid-cols-2">
+                    {track.counters.map((counter) => (
+                      <div
+                        key={counter.title}
+                        className="rounded-2xl bg-surface/80 p-5 backdrop-blur-sm dark:bg-surface-raised/70"
+                      >
+                        <svg
+                          className={cn("h-5 w-5", track.tone === "warm" ? "text-warm" : "text-accent")}
+                          viewBox="0 0 20 20"
+                          fill="none"
+                          aria-hidden="true"
+                        >
+                          <path
+                            d="M16.7 5.3a1 1 0 0 1 0 1.4l-8 8a1 1 0 0 1-1.4 0l-4-4a1 1 0 1 1 1.4-1.4L8 12.6l7.3-7.3a1 1 0 0 1 1.4 0Z"
+                            fill="currentColor"
+                          />
+                        </svg>
+                        <p className="mt-2.5 text-sm font-bold text-ink">{counter.title}</p>
+                        <p className="mt-1 text-xs leading-relaxed text-ink-muted">{counter.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              </ScrollReveal>
+            ))}
+          </div>
 
           <ScrollReveal delay={60}>
             <section>
