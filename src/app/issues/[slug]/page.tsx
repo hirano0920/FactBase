@@ -116,15 +116,6 @@ export default async function IssuePage({ params }: IssuePageProps) {
                     articleSlug={issue.articleHtml ? issue.slug : undefined}
                     debateType={issue.debateType}
                   />
-                  {timeline.length > 0 && (
-                    <div className="mt-4 border-t border-border pt-4">
-                      <IssueTimelineLive
-                        issueId={issue.id}
-                        initialEntries={timeline}
-                        compact
-                      />
-                    </div>
-                  )}
                 </Section>
               </ScrollReveal>
 
@@ -158,6 +149,14 @@ export default async function IssuePage({ params }: IssuePageProps) {
                   </div>
                 </Section>
               </ScrollReveal>
+
+              {/* 更新タイムラインは「要点→投票」の間に挟むと読了までの距離が伸びるため、
+                  投票・議論より後ろに退避する（記事はおまけ・スレッドが主役という前提） */}
+              {timeline.length > 0 && (
+                <ScrollReveal>
+                  <IssueTimelineLive issueId={issue.id} initialEntries={timeline} />
+                </ScrollReveal>
+              )}
 
               <IssueSpectrumSlot slug={issue.slug} />
 

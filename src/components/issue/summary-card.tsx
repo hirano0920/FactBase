@@ -86,7 +86,6 @@ export function SummaryCard({
               <StancePanel
                 label={parsedSideA.label ?? "一方の立場"}
                 claim={sideAParts.claim}
-                points={sideAParts.points}
                 tone={hasPolarity ? "for" : "accent"}
                 compact={compact}
               />
@@ -104,7 +103,6 @@ export function SummaryCard({
               <StancePanel
                 label={parsedSideB.label ?? "もう一方の立場"}
                 claim={sideBParts.claim}
-                points={sideBParts.points}
                 tone={hasPolarity ? "against" : "warm"}
                 compact={compact}
               />
@@ -159,13 +157,11 @@ export function SummaryCard({
 function StancePanel({
   label,
   claim,
-  points,
   tone,
   compact,
 }: {
   label: string;
   claim: string;
-  points: string[];
   tone: "for" | "against" | "accent" | "warm";
   compact: boolean;
 }) {
@@ -214,16 +210,6 @@ function StancePanel({
       >
         {claim}
       </p>
-      {points.length > 0 && (
-        <ul className={cn("mt-2 space-y-1.5 pl-2", compact ? "text-xs" : "text-sm")}>
-          {points.map((point) => (
-            <li key={point} className="flex gap-2 leading-relaxed text-ink-secondary">
-              <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-ink-faint" aria-hidden />
-              <span>{point}</span>
-            </li>
-          ))}
-        </ul>
-      )}
     </div>
   );
 }

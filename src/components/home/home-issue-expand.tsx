@@ -64,24 +64,30 @@ export function HomeIssueExpand({ issue, guestComments, onBack, scrollToVote = f
           />
         </Section>
 
-        <Section id="vote-panel" variant="arena">
-          <SectionTitle>あなたの一票</SectionTitle>
-          <div className="mx-auto max-w-md">
-            <IssueVoteSlot
+        {/* 投票と議論は1枚のカードに統合する（issues/[slug]/page.tsxと同じ理由:
+            別々の箱だと二陣営の対立が分断されて見える上、投票→スレッドの導線が途切れる） */}
+        <Section id="vote-panel" variant="arena" className="!p-0 overflow-hidden">
+          <div className="p-4 pb-2 sm:p-8 sm:pb-3">
+            <SectionTitle className="mb-1">投票 &amp; 議論</SectionTitle>
+            <p className="mb-4 text-xs text-ink-faint sm:mb-5">
+              投票すると議論に参加でき、相手陣営にも響く意見が上位に並びます
+            </p>
+            <div className="mx-auto max-w-md">
+              <IssueVoteSlot
+                issueId={issue.id}
+                initialTally={issue.voteTally}
+                labels={issue.voteLabels}
+              />
+            </div>
+          </div>
+          <div className="border-t border-border p-4 pt-4 sm:p-8 sm:pt-6">
+            <IssueCommentsSlot
+              slug={issue.slug}
               issueId={issue.id}
-              initialTally={issue.voteTally}
-              labels={issue.voteLabels}
+              commentCount={issue.commentCount}
+              voteTally={issue.voteTally}
             />
           </div>
-        </Section>
-
-        <Section variant="arena">
-          <IssueCommentsSlot
-            slug={issue.slug}
-            issueId={issue.id}
-            commentCount={issue.commentCount}
-            voteTally={issue.voteTally}
-          />
         </Section>
 
         {issue.confirmation !== null && (
