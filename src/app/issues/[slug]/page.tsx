@@ -108,27 +108,21 @@ export default async function IssuePage({ params }: IssuePageProps) {
             </header>
 
             <div className="space-y-6">
+              {/* 要点→投票→議論を1枚のカードで最後まで流す。
+                  「要点カード」「投票カード」と箱を分けると、読み終えるたびに区切りが入って
+                  投票への勢いが途切れるため、対立の芯を読んだ流れのままボタンに指を伸ばせるようにする。
+                  議論は投票するまで完全に隠す（プレビューも出さない）＝投票が唯一の入口にする */}
               <ScrollReveal>
-                <Section variant="arena">
+                <Section id="vote-panel" variant="arena">
                   <SectionTitle>要点</SectionTitle>
                   <SummaryCard
                     summary={issue.summary}
                     articleSlug={issue.articleHtml ? issue.slug : undefined}
                     debateType={issue.debateType}
                   />
-                </Section>
-              </ScrollReveal>
 
-              {/* 投票と議論は「別々の箱」だと二陣営の対立が分断されて見えるため、1枚のカードに統合する。
-                  上段=投票（賛否バー）と下段=議論（賛否カラム）で色（for/against）を連続させ、
-                  スプリット構造そのものを画面の主役にする */}
-              <ScrollReveal delay={80}>
-                <Section id="vote-panel" variant="arena" className="!p-0 overflow-hidden">
-                  <div className="p-4 pb-2 sm:p-8 sm:pb-3">
-                    <SectionTitle className="mb-1">投票 &amp; 議論</SectionTitle>
-                    <p className="mb-4 text-xs text-ink-faint sm:mb-5">
-                      投票すると議論に参加でき、相手陣営にも響く意見が上位に並びます
-                    </p>
+                  <div className="mt-6 border-t border-border pt-6 text-center">
+                    <p className="mb-4 text-base font-bold text-ink">あなたはどう思いますか？</p>
                     <div className="mx-auto max-w-md">
                       <IssueVoteSlot
                         issueId={issue.id}
@@ -137,7 +131,8 @@ export default async function IssuePage({ params }: IssuePageProps) {
                       />
                     </div>
                   </div>
-                  <div className="border-t border-border p-4 pt-4 sm:p-8 sm:pt-6">
+
+                  <div id="discussion" className="mt-6 border-t border-border pt-6">
                     <Suspense fallback={null}>
                       <IssueCommentsSlot
                         slug={issue.slug}

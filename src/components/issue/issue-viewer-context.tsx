@@ -209,10 +209,13 @@ interface IssueCommentsSlotProps {
   voteTally: VoteTally;
 }
 
-/** ログイン済みだが未投票の人向けの投票ゲート。ゲストにはこれまで通りプレビューを見せる（SEO・コールドスタート対策維持） */
+/**
+ * 未投票者向けの投票ゲート。ゲスト・ログイン済み未投票の両方が対象
+ * （以前はゲストだけプレビューを見せていたが、「一票入れるまで議論は見せない」に統一した）。
+ */
 function VoteToUnlockGate({ commentCount }: { commentCount: number }) {
   const scrollToVote = () => {
-    document.getElementById("vote-panel")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    document.getElementById("vote-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
   return (
     <div className="rounded-lg border-2 border-dashed border-border-strong bg-surface-muted px-6 py-10 text-center">
@@ -256,8 +259,8 @@ export function IssueCommentsSlot({ slug, issueId, commentCount, voteTally }: Is
   // チラつきが起きるため、loadedが確定するまではスケルトンだけ見せる
   if (!loaded) return <CommentsSkeleton />;
 
-  // ログイン済みだが未投票の人だけゲート対象。未ログインのゲストは従来通りGUEST_COMMENT_LIMIT件のプレビューが見える
-  if (isLoggedIn && !userVote) {
+  // 一票入れるまでは議論を一切見せない（ゲストもログイン済み未投票も同じ扱い）
+  if (!userVote) {
     return <VoteToUnlockGate commentCount={commentCount} />;
   }
 

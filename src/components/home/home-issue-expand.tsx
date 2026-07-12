@@ -55,23 +55,18 @@ export function HomeIssueExpand({ issue, guestComments, onBack, scrollToVote = f
           </div>
         </header>
 
-        <Section variant="arena">
+        {/* 要点→投票→議論を1枚のカードで最後まで流す（issues/[slug]/page.tsxと同じ理由）。
+            議論は投票するまで完全に隠す＝投票が唯一の入口にする */}
+        <Section id="vote-panel" variant="arena">
           <SectionTitle>要点</SectionTitle>
           <SummaryCard
             summary={issue.summary}
             articleSlug={issue.articleHtml ? issue.slug : undefined}
             debateType={issue.debateType}
           />
-        </Section>
 
-        {/* 投票と議論は1枚のカードに統合する（issues/[slug]/page.tsxと同じ理由:
-            別々の箱だと二陣営の対立が分断されて見える上、投票→スレッドの導線が途切れる） */}
-        <Section id="vote-panel" variant="arena" className="!p-0 overflow-hidden">
-          <div className="p-4 pb-2 sm:p-8 sm:pb-3">
-            <SectionTitle className="mb-1">投票 &amp; 議論</SectionTitle>
-            <p className="mb-4 text-xs text-ink-faint sm:mb-5">
-              投票すると議論に参加でき、相手陣営にも響く意見が上位に並びます
-            </p>
+          <div className="mt-6 border-t border-border pt-6 text-center">
+            <p className="mb-4 text-base font-bold text-ink">あなたはどう思いますか？</p>
             <div className="mx-auto max-w-md">
               <IssueVoteSlot
                 issueId={issue.id}
@@ -80,7 +75,8 @@ export function HomeIssueExpand({ issue, guestComments, onBack, scrollToVote = f
               />
             </div>
           </div>
-          <div className="border-t border-border p-4 pt-4 sm:p-8 sm:pt-6">
+
+          <div id="discussion" className="mt-6 border-t border-border pt-6">
             <IssueCommentsSlot
               slug={issue.slug}
               issueId={issue.id}

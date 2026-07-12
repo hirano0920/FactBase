@@ -179,6 +179,16 @@ export function CommentSection({
     if (promptStance) setVoteCta(promptStance);
   }, [promptStance]);
 
+  // 投票直後、ロック画面からこのコンポーネントに切り替わった瞬間に議論欄までスクロールする。
+  // promptStanceは「今まさに投票した」時だけ立つ合図なので、既に投票済みで再訪した場合は動かさない
+  useEffect(() => {
+    if (!promptStance) return;
+    requestAnimationFrame(() => {
+      document.getElementById("discussion")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // 投票直後: モバイルは反対側カラムがタブの裏に隠れて「aha moment」を逃すため、
   // 逆側カラム（越境評価トップ＝相手陣営が最も納得した意見）のタブへ自動で切り替える
   useEffect(() => {
@@ -712,60 +722,56 @@ export function CommentSection({
         </p>
       )}
 
-      {/* 未ログインは賛成・反対それぞれ上位1件だけ見せる形に固定する（ぼかしプレビュー）。
-          一覧表示・並び替えは投票済みユーザー向けの機能なので出さない */}
-      {isLoggedIn && (
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex gap-1.5" role="radiogroup" aria-label="表示形式">
-            {(
-              [
-                { id: "split" as const, label: "賛成・反対で見る" },
-                { id: "single" as const, label: "一覧で見る" },
-              ]
-            ).map((l) => (
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex gap-1.5" role="radiogroup" aria-label="表示形式">
+          {(
+            [
+              { id: "split" as const, label: "賛成・反対で見る" },
+              { id: "single" as const, label: "一覧で見る" },
+            ]
+          ).map((l) => (
+            <button
+              key={l.id}
+              type="button"
+              role="radio"
+              aria-checked={layout === l.id}
+              onClick={() => setLayout(l.id)}
+              className={cn(
+                "rounded-full border px-3 py-1 text-xs font-medium transition",
+                layout === l.id
+                  ? "border-accent bg-accent text-white"
+                  : "border-border text-ink-secondary hover:bg-surface-muted",
+              )}
+            >
+              {l.label}
+            </button>
+          ))}
+        </div>
+
+        {layout === "single" && (
+          <div className="flex gap-1.5" role="radiogroup" aria-label="コメントの並び順">
+            {COMMENT_SORTS.map((s) => (
               <button
-                key={l.id}
+                key={s.id}
                 type="button"
                 role="radio"
-                aria-checked={layout === l.id}
-                onClick={() => setLayout(l.id)}
+                aria-checked={sort === s.id}
+                onClick={() => changeSort(s.id)}
                 className={cn(
                   "rounded-full border px-3 py-1 text-xs font-medium transition",
-                  layout === l.id
+                  sort === s.id
                     ? "border-accent bg-accent text-white"
                     : "border-border text-ink-secondary hover:bg-surface-muted",
                 )}
               >
-                {l.label}
+                {s.label}
               </button>
             ))}
           </div>
+        )}
+      </div>
 
-          {layout === "single" && (
-            <div className="flex gap-1.5" role="radiogroup" aria-label="コメントの並び順">
-              {COMMENT_SORTS.map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={sort === s.id}
-                  onClick={() => changeSort(s.id)}
-                  className={cn(
-                    "rounded-full border px-3 py-1 text-xs font-medium transition",
-                    sort === s.id
-                      ? "border-accent bg-accent text-white"
-                      : "border-border text-ink-secondary hover:bg-surface-muted",
-                  )}
-                >
-                  {s.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {!isLoggedIn || layout === "split" ? (
+      {layout === "split" ? (
         <div aria-busy={splitLoading}>
           {/* VSバー(デスクトップ): 実際の投票比率のまま3分割。正規化して埋めない＝過剰主張しない */}
           <div className="mb-5 hidden sm:block">
@@ -866,32 +872,6 @@ export function CommentSection({
                           </Button>
                         )}
                       </div>
-                    ) : !isLoggedIn ? (
-                      // 未ログインは各側1件だけ素で見せ、その先はぼかして「ログインして続きを見る」に誘導する
-                      <>
-                        <CommentCard comment={state.comments[0]} canInteract={false} />
-                        {state.comments.length > 1 && (
-                          <div className="relative mt-2 overflow-hidden rounded-[20px]">
-                            <div
-                              aria-hidden="true"
-                              className="pointer-events-none select-none space-y-2 blur-[3px]"
-                            >
-                              {state.comments.slice(1, 3).map((c) => (
-                                <CommentCard key={c.id} comment={c} canInteract={false} />
-                              ))}
-                            </div>
-                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-gradient-to-b from-surface/30 via-surface/85 to-surface px-4 text-center">
-                              <p className="text-sm font-bold text-ink">続きはログインして見る</p>
-                              <a
-                                href="/login"
-                                className="rounded-full bg-accent px-4 py-1.5 text-xs font-semibold text-white no-underline hover:bg-accent-hover"
-                              >
-                                ログイン（無料）
-                              </a>
-                            </div>
-                          </div>
-                        )}
-                      </>
                     ) : (
                       state.comments.map((comment, i) => {
                         const isTopOpposing = i === 0 && highlightSide === side && !comment.isAiSteelman;
@@ -1069,18 +1049,6 @@ export function CommentSection({
               <Button variant="ghost" size="sm" disabled={loadingMore} onClick={loadMore}>
                 {loadingMore ? "読み込み中…" : "さらに読み込む"}
               </Button>
-            </div>
-          )}
-
-          {!isLoggedIn && commentCount > comments.length && (
-            <div className="mt-4 rounded-xl border border-border bg-surface-muted px-5 py-4 text-center">
-              <p className="text-sm text-ink-secondary">
-                残り{commentCount - comments.length}件のコメントを見るには
-                <a href="/login" className="mx-1 font-semibold text-link">
-                  ログイン
-                </a>
-                してください（無料）
-              </p>
             </div>
           )}
         </>
