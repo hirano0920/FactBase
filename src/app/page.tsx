@@ -3,21 +3,27 @@ import { HomeFeed } from "@/components/home/home-feed";
 import { HomeIntro } from "@/components/home/home-intro";
 import { AppSidebarStatic } from "@/components/layout/app-sidebar";
 import { SidebarSkeleton } from "@/components/layout/sidebar-skeleton";
-import { ParticipatedRail } from "@/components/layout/participated-rail";
-import { IssueSearchBox } from "@/components/layout/issue-search-box";
-import { StickySidebar } from "@/components/layout/sticky-sidebar";
+import { LeftRail } from "@/components/layout/left-rail";
 import { PageContainer } from "@/components/layout/page-container";
 import { HOME_THREE_COL_GRID } from "@/lib/constants";
-import { getIssues, getRanking } from "@/lib/data";
+import { getIssues, getRankingBySort } from "@/lib/data";
 
 // searchParams をサーバーで読むと dynamic 化して ISR が効かなくなる（毎回 Neon 直撃）
 export const revalidate = 300;
 
 export default async function HomePage() {
-  const [allIssues, ranking] = await Promise.all([getIssues(), getRanking()]);
+  const [allIssues, byVotes, byComments] = await Promise.all([
+    getIssues(),
+    getRankingBySort("votes", 5),
+    getRankingBySort("comments", 5),
+  ]);
 
-  const hotId = ranking[0]?.issue.id;
-  const hotIssue = hotId ? allIssues.find((i) => i.id === hotId) : undefined;
+  const byId = Object.fromEntries(allIssues.map((i) => [i.id, i]));
+  const mostRead = byVotes[0] ? byId[byVotes[0].issue.id] : undefined;
+  // 盛り上がり1位が読まれてると同じなら2位を使い、左右で別スレにする
+  const mostActiveItem =
+    byComments.find((r) => r.issue.id !== mostRead?.id) ?? byComments[0];
+  const mostActive = mostActiveItem ? byId[mostActiveItem.issue.id] : undefined;
 
   const totalVoters = allIssues.reduce((sum, i) => sum + i.voteTally.totalVoters, 0);
   const totalComments = allIssues.reduce((sum, i) => sum + i.commentCount, 0);
@@ -27,12 +33,7 @@ export default async function HomePage() {
     <PageContainer>
       <div className={`grid gap-6 lg:gap-8 ${HOME_THREE_COL_GRID}`}>
         <div className="hidden xl:block">
-          <StickySidebar>
-            <div className="space-y-4">
-              <IssueSearchBox />
-              <ParticipatedRail />
-            </div>
-          </StickySidebar>
+          <LeftRail />
         </div>
 
         <div className="min-w-0 space-y-6">
@@ -41,7 +42,11 @@ export default async function HomePage() {
           </Suspense>
 
           <Suspense fallback={null}>
-            <HomeFeed allIssues={allIssues} hotIssue={hotIssue} />
+            <HomeFeed
+              allIssues={allIssues}
+              mostRead={mostRead}
+              mostActive={mostActive}
+            />
           </Suspense>
         </div>
 

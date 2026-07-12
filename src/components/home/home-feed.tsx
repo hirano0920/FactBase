@@ -3,24 +3,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { IssueCard } from "@/components/issue/issue-card";
-import { HotIssueCard } from "@/components/issue/hot-issue-card";
+import { HotIssueDuo } from "@/components/issue/hot-issue-card";
 import { ScrollReveal } from "@/components/ui/scroll-reveal";
 import { FeedFilterBar } from "@/components/home/feed-filter-bar";
 import { HomeIssueExpand } from "@/components/home/home-issue-expand";
-import { PaginationBar } from "@/components/home/pagination-bar";
 import { AdSlot } from "@/components/layout/page-container";
-import { type CategoryId, type IssueSortId } from "@/lib/constants";
-import {
-  categoryCounts,
-  filterIssues,
-  paginateIssues,
-  sortIssuesList,
-} from "@/lib/issues-feed-utils";
+import { HOME_FEED_PAGE_SIZE, type CategoryId, type IssueSortId } from "@/lib/constants";
+import { categoryCounts, filterIssues, sortIssuesList } from "@/lib/issues-feed-utils";
 import type { Comment, Issue } from "@/types";
 
 interface HomeFeedProps {
   allIssues: Issue[];
-  hotIssue?: Issue;
+  mostRead?: Issue;
+  mostActive?: Issue;
 }
 
 function chunk<T>(arr: T[], size: number): T[][] {
@@ -29,7 +24,7 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
-export function HomeFeed({ allIssues, hotIssue }: HomeFeedProps) {
+export function HomeFeed({ allIssues, mostRead, mostActive }: HomeFeedProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [category, setCategory] = useState<CategoryId | undefined>();
@@ -44,7 +39,11 @@ export function HomeFeed({ allIssues, hotIssue }: HomeFeedProps) {
   }, [searchParams]);
 
   const issueParam = searchParams.get("issue");
-  const displayHotIssue = issueParam ? undefined : hotIssue;
+  const showHotDuo = !issueParam && Boolean(mostRead || mostActive);
+  const excludeIds = useMemo(() => {
+    if (!showHotDuo) return [] as string[];
+    return [mostRead?.id, mostActive?.id].filter((id): id is string => Boolean(id));
+  }, [showHotDuo, mostRead?.id, mostActive?.id]);
 
   const issueBySlug = useMemo(
     () => Object.fromEntries(allIssues.map((i) => [i.slug, i])),
@@ -53,8 +52,8 @@ export function HomeFeed({ allIssues, hotIssue }: HomeFeedProps) {
   const expandedIssue = expandedSlug ? (issueBySlug[expandedSlug] ?? null) : null;
 
   const pool = useMemo(
-    () => filterIssues(allIssues, { excludeIds: displayHotIssue ? [displayHotIssue.id] : [] }),
-    [allIssues, displayHotIssue],
+    () => filterIssues(allIssues, { excludeIds }),
+    [allIssues, excludeIds],
   );
 
   const counts = useMemo(() => categoryCounts(pool), [pool]);
@@ -64,10 +63,9 @@ export function HomeFeed({ allIssues, hotIssue }: HomeFeedProps) {
     [pool, category, sort],
   );
 
-  const { items: pageIssues, totalPages } = useMemo(
-    () => paginateIssues(filtered, page),
-    [filtered, page],
-  );
+  const visibleCount = page * HOME_FEED_PAGE_SIZE;
+  const pageIssues = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
+  const hasMore = filtered.length > visibleCount;
 
   useEffect(() => {
     if (!expandedIssue) {
@@ -131,16 +129,16 @@ export function HomeFeed({ allIssues, hotIssue }: HomeFeedProps) {
     );
   }
 
-  const groups = chunk(pageIssues, 3);
+  const groups = chunk(pageIssues, 2);
 
   return (
     <div className="space-y-6">
-      {displayHotIssue && (
+      {showHotDuo && (
         <ScrollReveal>
-          <HotIssueCard
-            issue={displayHotIssue}
-            hideResults
-            onSelect={(opts) => openIssue(displayHotIssue.slug, opts)}
+          <HotIssueDuo
+            mostRead={mostRead}
+            mostActive={mostActive}
+            onSelect={openIssue}
           />
         </ScrollReveal>
       )}
@@ -179,7 +177,17 @@ export function HomeFeed({ allIssues, hotIssue }: HomeFeedProps) {
         </div>
       )}
 
-      <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage} />
+      {hasMore && (
+        <div className="flex justify-center py-2">
+          <button
+            type="button"
+            onClick={() => setPage((p) => p + 1)}
+            className="rounded-full border border-border px-5 py-2.5 text-sm font-medium text-ink-secondary transition-colors hover:border-border-strong hover:bg-surface-muted"
+          >
+            もっと見る
+          </button>
+        </div>
+      )}
     </div>
   );
 }

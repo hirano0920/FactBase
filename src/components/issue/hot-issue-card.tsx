@@ -6,25 +6,30 @@ import { IssueThumbnail } from "@/components/issue/issue-thumbnail";
 import Link from "next/link";
 import type { Issue } from "@/types";
 
+export type HotIssueBadge = "most-read" | "most-active";
+
+const BADGE_LABEL: Record<HotIssueBadge, string> = {
+  "most-read": "今一番読まれてる",
+  "most-active": "今一番盛り上がってる",
+};
+
 interface HotIssueCardProps {
   issue: Issue;
-  hideResults?: boolean;
-  /** 指定時はリンクではなくホーム内展開。scrollToVoteがtrueなら投票パネルまで飛ばして開く */
+  badge: HotIssueBadge;
+  /** 指定時はリンクではなくホーム内展開 */
   onSelect?: (opts?: { scrollToVote?: boolean }) => void;
 }
 
 /**
- * いちばん議論が活発な争点の強調カード。グローは控えめに1箇所だけ、他は通常カードと同じ静かなトーン。
- * タイトルと「投票する」でクリック先を分ける設計はIssueCardと同じ（記事派/スレッド派の分岐）。
- * サムネイルは全面表示し、「今、一番読まれている」バッジを画像上に重ねる（案B: IssueCardと
- * 同じくメタ情報を画像に統合する方針）。
+ * ホーム上部の小型ハイライト。大きなヒーローではなく、2カラムで並ぶコンパクトカード。
  */
-export function HotIssueCard({ issue, onSelect }: HotIssueCardProps) {
+export function HotIssueCard({ issue, badge, onSelect }: HotIssueCardProps) {
   const { totalVoters } = issue.voteTally;
+  const isActive = badge === "most-active";
 
-  const headlineBlock = (
+  const body = (
     <>
-      <div className="relative w-full aspect-[2.4/1] max-h-[220px] sm:max-h-[260px]">
+      <div className="relative aspect-[16/9] w-full overflow-hidden sm:aspect-[2/1]">
         <IssueThumbnail
           src={issue.thumbnailUrl}
           alt=""
@@ -33,46 +38,52 @@ export function HotIssueCard({ issue, onSelect }: HotIssueCardProps) {
         />
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-black/60 to-transparent"
+          className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-black/55 to-transparent"
         />
-        <div className="pointer-events-none absolute left-2 top-2 flex items-center gap-1.5 rounded-full bg-black/70 px-2.5 py-1 backdrop-blur-sm">
-          <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-          <span className="text-[11px] font-semibold tracking-[0.05em] text-white">
-            今、一番読まれている
+        <div
+          className={`pointer-events-none absolute left-2 top-2 flex items-center gap-1.5 rounded-full px-2 py-0.5 backdrop-blur-sm ${
+            isActive ? "bg-hot/90" : "bg-black/70"
+          }`}
+        >
+          <span
+            className={`h-1.5 w-1.5 rounded-full ${isActive ? "bg-white" : "bg-accent"}`}
+          />
+          <span className="text-[10px] font-semibold tracking-wide text-white">
+            {BADGE_LABEL[badge]}
           </span>
         </div>
       </div>
-      <div className="p-6 pb-0 sm:p-7 sm:pb-0">
-        <h3 className="text-[22px] font-semibold leading-snug tracking-tight text-ink sm:text-2xl">
+      <div className="flex flex-1 flex-col p-3.5 pb-0">
+        <h3 className="line-clamp-2 text-[15px] font-semibold leading-snug tracking-tight text-ink">
           {issue.shareTitle || issue.title}
         </h3>
-        <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-ink-secondary">{issue.summary.lead}</p>
+        <p className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-ink-muted">
+          {issue.summary.lead}
+        </p>
       </div>
     </>
   );
 
   return (
-    <div className="relative overflow-hidden rounded-[20px] border border-border bg-surface-raised transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_4px_16px_rgb(15_20_25_/_0.06)]">
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute -right-16 -top-16 z-10 h-52 w-52 rounded-full bg-accent/[0.08] blur-[60px]"
-      />
-
+    <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-surface-raised transition-colors hover:bg-surface-muted">
       {onSelect ? (
-        <button type="button" onClick={() => onSelect()} className="block w-full text-left">
-          {headlineBlock}
+        <button type="button" onClick={() => onSelect()} className="flex flex-1 flex-col text-left">
+          {body}
         </button>
       ) : (
-        <Link href={`/issues/${issue.slug}`} className="block w-full text-left no-underline">
-          {headlineBlock}
+        <Link
+          href={`/issues/${issue.slug}`}
+          className="flex flex-1 flex-col text-left no-underline"
+        >
+          {body}
         </Link>
       )}
 
-      <div className="flex items-center justify-between border-t border-border p-6 pt-3.5 sm:p-7 sm:pt-3.5">
-        <span className="flex items-center gap-3 text-xs text-ink-muted tabular-nums">
+      <div className="mt-auto flex items-center justify-between border-t border-border px-3.5 py-2.5">
+        <span className="flex items-center gap-2.5 text-xs text-ink-faint tabular-nums">
           <span className="flex items-center gap-1">
             <ChartBarIcon className="h-[13px] w-[13px]" />
-            {formatNumber(totalVoters)}人
+            {formatNumber(totalVoters)}
           </span>
           <span className="flex items-center gap-1">
             <MessageCircleIcon className="h-[13px] w-[13px]" />
@@ -83,25 +94,49 @@ export function HotIssueCard({ issue, onSelect }: HotIssueCardProps) {
           <button
             type="button"
             onClick={() => onSelect({ scrollToVote: true })}
-            className="group -my-2 -mr-2 flex min-h-11 items-center gap-1 rounded-md px-2 py-2 text-xs font-medium text-accent hover:bg-accent/10"
+            className="text-xs font-medium text-accent hover:underline"
           >
-            {totalVoters > 0 ? "投票する" : "最初の一票を"}
-            <span aria-hidden="true" className="transition-transform group-hover:translate-x-0.5">
-              →
-            </span>
+            投票 →
           </button>
         ) : (
           <Link
             href={`/issues/${issue.slug}#vote-panel`}
-            className="group -my-2 -mr-2 flex min-h-11 items-center gap-1 rounded-md px-2 py-2 text-xs font-medium text-accent no-underline hover:bg-accent/10"
+            className="text-xs font-medium text-accent no-underline hover:underline"
           >
-            {totalVoters > 0 ? "投票する" : "最初の一票を"}
-            <span aria-hidden="true" className="transition-transform group-hover:translate-x-0.5">
-              →
-            </span>
+            投票 →
           </Link>
         )}
       </div>
+    </div>
+  );
+}
+
+interface HotIssueDuoProps {
+  mostRead?: Issue;
+  mostActive?: Issue;
+  onSelect: (slug: string, opts?: { scrollToVote?: boolean }) => void;
+}
+
+/** ホーム先頭の「読まれてる / 盛り上がってる」2分割 */
+export function HotIssueDuo({ mostRead, mostActive, onSelect }: HotIssueDuoProps) {
+  if (!mostRead && !mostActive) return null;
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      {mostRead && (
+        <HotIssueCard
+          issue={mostRead}
+          badge="most-read"
+          onSelect={(opts) => onSelect(mostRead.slug, opts)}
+        />
+      )}
+      {mostActive && (
+        <HotIssueCard
+          issue={mostActive}
+          badge="most-active"
+          onSelect={(opts) => onSelect(mostActive.slug, opts)}
+        />
+      )}
     </div>
   );
 }
