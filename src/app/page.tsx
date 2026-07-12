@@ -1,6 +1,5 @@
 import { Suspense } from "react";
 import { HomeFeed } from "@/components/home/home-feed";
-import { HomeIntro } from "@/components/home/home-intro";
 import { AppSidebarStatic } from "@/components/layout/app-sidebar";
 import { SidebarSkeleton } from "@/components/layout/sidebar-skeleton";
 import { LeftRail } from "@/components/layout/left-rail";
@@ -38,14 +37,11 @@ export default async function HomePage() {
 
         <div className="min-w-0 space-y-6">
           <Suspense fallback={null}>
-            <HomeIntro participants={participants} />
-          </Suspense>
-
-          <Suspense fallback={null}>
             <HomeFeed
               allIssues={allIssues}
               mostRead={mostRead}
               mostActive={mostActive}
+              participants={participants}
             />
           </Suspense>
         </div>

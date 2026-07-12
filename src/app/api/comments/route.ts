@@ -7,6 +7,7 @@ import { invalidateOnCommentCreated } from "@/lib/cache-invalidate";
 import { getComments } from "@/lib/data";
 import { canPostComment } from "@/lib/plan-features";
 import { prisma } from "@/lib/prisma";
+import { enumToChoice } from "@/lib/votes";
 import {
   BURST,
   COMMENT_LIMITS,
@@ -110,13 +111,17 @@ export async function POST(req: NextRequest) {
   }
 
   // クライアント側のVoteToUnlockGateはUIの誘導に過ぎず、直接APIを叩けば回避できてしまう。
-  // 「投票した側にしかコメントできない」を実効あるものにするため、サーバー側でも投票済みを必須にする
-  const hasVoted = await prisma.vote.findUnique({
+  // 「投票した側にしかコメントできない」を実効あるものにするため、サーバー側でも投票済みを必須にし、
+  // 新規トップレベルコメントは自分が投票した立場でしか書けないようにする（返信はstance省略＝親を継承なので対象外）
+  const vote = await prisma.vote.findUnique({
     where: { userId_issueId: { userId: session.user.id, issueId: issue.id } },
-    select: { id: true },
+    select: { choice: true },
   });
-  if (!hasVoted) {
+  if (!vote) {
     return errors.forbidden("コメントするには先に投票してください");
+  }
+  if (!isReply && parsed.data.stance !== enumToChoice[vote.choice]) {
+    return errors.forbidden("コメントは自分が投票した立場でのみ投稿できます");
   }
 
   try {

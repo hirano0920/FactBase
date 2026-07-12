@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { VOTE_CHOICES } from "@/lib/constants";
-import { cn, formatNumber, formatPercent } from "@/lib/utils";
+import { cn, formatPercent } from "@/lib/utils";
 import type { VoteChoiceId } from "@/lib/constants";
 import type { VoteLabels, VoteTally } from "@/types";
 import { Button } from "@/components/ui/button";
@@ -65,36 +65,18 @@ export function VotePanel({
 
   const callout = leadingCallout(tally, labels);
 
-  // 投票済みなら、議論セクションの真上にコンパクトな結果バーだけを出す（フルUIは「変更する」を押した時だけ）
+  // 投票済みなら、この下の議論セクションに賛否の結果バーがそのまま出るため、ここでは
+  // 二重に結果を出さない。「✅ 自分の投票」+「投票し直す」の1行だけにする
   if (userVote && !changingVote) {
     return (
-      <div className="flex items-center gap-3 rounded-xl border border-border bg-surface px-4 py-2.5">
-        <span className="shrink-0 text-xs font-bold text-ink-secondary">
-          ✅ {labelFor(userVote)}
-        </span>
-        <div className="flex h-2 flex-1 overflow-hidden rounded-sm bg-surface-muted">
-          {VOTE_CHOICES.map((choice) => (
-            <div
-              key={choice.id}
-              className={cn(
-                choice.color === "for" && "bg-for",
-                choice.color === "against" && "bg-against",
-                choice.color === "neutral" && "bg-neutral/60",
-              )}
-              style={{ width: `${tally.percents[countKey(choice.id)]}%` }}
-              title={`${labelFor(choice.id)} ${formatPercent(tally.percents[countKey(choice.id)])}`}
-            />
-          ))}
-        </div>
-        <span className="shrink-0 text-xs tabular-nums text-ink-faint">
-          {formatNumber(tally.totalVoters)}人
-        </span>
+      <div className="flex items-center justify-center gap-3 text-sm">
+        <span className="font-bold text-ink-secondary">✅ {labelFor(userVote)}に投票しました</span>
         <button
           type="button"
           onClick={() => setChangingVote(true)}
-          className="shrink-0 text-xs font-medium text-link underline-offset-2 hover:underline"
+          className="font-medium text-link underline-offset-2 hover:underline"
         >
-          変更する
+          投票し直す
         </button>
       </div>
     );

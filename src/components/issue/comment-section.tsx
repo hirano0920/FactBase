@@ -127,7 +127,9 @@ export function CommentSection({
   const [mobileActiveSide, setMobileActiveSide] = useState<SplitSide>("for");
   const bodyRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const [stance, setStance] = useState<VoteChoiceId>("for");
+  // コメントは「投票した側」でしか書けない（自由に立場を選べると投票と主張がズレる）。
+  // このコンポーネントに到達している時点でcanComment=trueならuserVoteは必ず確定している
+  const stance: VoteChoiceId = userVote ?? "for";
   const [body, setBody] = useState(() => {
     const quote = searchParams.get("quote");
     return quote ? `> ${quote}\n\n` : "";
@@ -187,19 +189,14 @@ export function CommentSection({
 
   const acceptVoteCta = useCallback(() => {
     if (!voteCta) return;
-    setStance(voteCta);
     setVoteCta(null);
     openComposer();
   }, [voteCta, openComposer]);
 
-  // 空カラムの「最初の一人になる」CTA: そのカラムの立場を投稿フォームに事前セットする
-  const startStanceFromColumn = useCallback(
-    (side: SplitSide) => {
-      setStance(side);
-      openComposer();
-    },
-    [openComposer],
-  );
+  // 空カラムの「最初の一人になる」CTA。投票した側のカラムでしか表示しない（他側には投稿できないため）
+  const startStanceFromColumn = useCallback(() => {
+    openComposer();
+  }, [openComposer]);
 
   const fetchSplitData = useCallback(async () => {
     const res = await fetch(`/api/comments/split?issueId=${encodeURIComponent(issueId)}`);
@@ -618,25 +615,10 @@ export function CommentSection({
 
       {canComment && composerOpen ? (
         <div className="mb-6 rounded-[20px] border border-border bg-surface-raised p-5">
-          <div className="mb-3 flex gap-2" role="radiogroup" aria-label="スタンス">
-            {VOTE_CHOICES.map((choice) => (
-              <button
-                key={choice.id}
-                type="button"
-                role="radio"
-                aria-checked={stance === choice.id}
-                onClick={() => setStance(choice.id)}
-                className={cn(
-                  "rounded-full border px-3.5 py-1.5 text-sm font-medium transition",
-                  stance === choice.id
-                    ? "border-accent bg-accent text-white"
-                    : "border-border text-ink-secondary hover:bg-surface-muted",
-                )}
-              >
-                {choice.label}
-              </button>
-            ))}
-          </div>
+          {/* 立場は選ばせない。投票した側としてしかコメントできない（主張と投票がズレるのを防ぐ） */}
+          <p className="mb-3 inline-flex w-fit items-center gap-1.5 rounded-full border border-accent bg-accent px-3.5 py-1.5 text-sm font-medium text-white">
+            {VOTE_CHOICES.find((c) => c.id === stance)?.label ?? stance}として投稿
+          </p>
           <textarea
             id="comment-form"
             ref={bodyRef}
@@ -730,56 +712,60 @@ export function CommentSection({
         </p>
       )}
 
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex gap-1.5" role="radiogroup" aria-label="表示形式">
-          {(
-            [
-              { id: "split" as const, label: "賛成・反対で見る" },
-              { id: "single" as const, label: "一覧で見る" },
-            ]
-          ).map((l) => (
-            <button
-              key={l.id}
-              type="button"
-              role="radio"
-              aria-checked={layout === l.id}
-              onClick={() => setLayout(l.id)}
-              className={cn(
-                "rounded-full border px-3 py-1 text-xs font-medium transition",
-                layout === l.id
-                  ? "border-accent bg-accent text-white"
-                  : "border-border text-ink-secondary hover:bg-surface-muted",
-              )}
-            >
-              {l.label}
-            </button>
-          ))}
-        </div>
-
-        {layout === "single" && (
-          <div className="flex gap-1.5" role="radiogroup" aria-label="コメントの並び順">
-            {COMMENT_SORTS.map((s) => (
+      {/* 未ログインは賛成・反対それぞれ上位1件だけ見せる形に固定する（ぼかしプレビュー）。
+          一覧表示・並び替えは投票済みユーザー向けの機能なので出さない */}
+      {isLoggedIn && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex gap-1.5" role="radiogroup" aria-label="表示形式">
+            {(
+              [
+                { id: "split" as const, label: "賛成・反対で見る" },
+                { id: "single" as const, label: "一覧で見る" },
+              ]
+            ).map((l) => (
               <button
-                key={s.id}
+                key={l.id}
                 type="button"
                 role="radio"
-                aria-checked={sort === s.id}
-                onClick={() => changeSort(s.id)}
+                aria-checked={layout === l.id}
+                onClick={() => setLayout(l.id)}
                 className={cn(
                   "rounded-full border px-3 py-1 text-xs font-medium transition",
-                  sort === s.id
+                  layout === l.id
                     ? "border-accent bg-accent text-white"
                     : "border-border text-ink-secondary hover:bg-surface-muted",
                 )}
               >
-                {s.label}
+                {l.label}
               </button>
             ))}
           </div>
-        )}
-      </div>
 
-      {layout === "split" ? (
+          {layout === "single" && (
+            <div className="flex gap-1.5" role="radiogroup" aria-label="コメントの並び順">
+              {COMMENT_SORTS.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={sort === s.id}
+                  onClick={() => changeSort(s.id)}
+                  className={cn(
+                    "rounded-full border px-3 py-1 text-xs font-medium transition",
+                    sort === s.id
+                      ? "border-accent bg-accent text-white"
+                      : "border-border text-ink-secondary hover:bg-surface-muted",
+                  )}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {!isLoggedIn || layout === "split" ? (
         <div aria-busy={splitLoading}>
           {/* VSバー(デスクトップ): 実際の投票比率のまま3分割。正規化して埋めない＝過剰主張しない */}
           <div className="mb-5 hidden sm:block">
@@ -874,12 +860,38 @@ export function CommentSection({
                         <p className="mb-3 text-sm text-ink-faint">
                           {splitLoading ? "読み込み中…" : `まだ${label}派の意見はありません。`}
                         </p>
-                        {!splitLoading && canComment && (
-                          <Button variant="secondary" size="sm" onClick={() => startStanceFromColumn(side)}>
+                        {!splitLoading && canComment && side === userVote && (
+                          <Button variant="secondary" size="sm" onClick={startStanceFromColumn}>
                             最初の一人になる👉
                           </Button>
                         )}
                       </div>
+                    ) : !isLoggedIn ? (
+                      // 未ログインは各側1件だけ素で見せ、その先はぼかして「ログインして続きを見る」に誘導する
+                      <>
+                        <CommentCard comment={state.comments[0]} canInteract={false} />
+                        {state.comments.length > 1 && (
+                          <div className="relative mt-2 overflow-hidden rounded-[20px]">
+                            <div
+                              aria-hidden="true"
+                              className="pointer-events-none select-none space-y-2 blur-[3px]"
+                            >
+                              {state.comments.slice(1, 3).map((c) => (
+                                <CommentCard key={c.id} comment={c} canInteract={false} />
+                              ))}
+                            </div>
+                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-gradient-to-b from-surface/30 via-surface/85 to-surface px-4 text-center">
+                              <p className="text-sm font-bold text-ink">続きはログインして見る</p>
+                              <a
+                                href="/login"
+                                className="rounded-full bg-accent px-4 py-1.5 text-xs font-semibold text-white no-underline hover:bg-accent-hover"
+                              >
+                                ログイン（無料）
+                              </a>
+                            </div>
+                          </div>
+                        )}
+                      </>
                     ) : (
                       state.comments.map((comment, i) => {
                         const isTopOpposing = i === 0 && highlightSide === side && !comment.isAiSteelman;
@@ -933,9 +945,9 @@ export function CommentSection({
                                   <RebuttalAssistButton slug={issueSlug} commentId={comment.id} />
                                 </div>
                               )}
-                            {comment.isAiSteelman && canComment && (
+                            {comment.isAiSteelman && canComment && side === userVote && (
                               <div className="mt-3 text-center">
-                                <Button variant="secondary" size="sm" onClick={() => startStanceFromColumn(side)}>
+                                <Button variant="secondary" size="sm" onClick={startStanceFromColumn}>
                                   最初の一人になる👉
                                 </Button>
                               </div>

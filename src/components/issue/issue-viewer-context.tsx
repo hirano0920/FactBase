@@ -162,6 +162,25 @@ export function IssueBookmarkSlot({ slug }: { slug: string }) {
   );
 }
 
+/**
+ * 投票ボタンの読み込み中プレースホルダ。isLoggedIn/userVoteが未確定のまま描画すると、
+ * 「未ログイン・未投票」というゲスト既定値でボタンが一瞬出たあとログイン済み/投票済みの
+ * 本来の状態に切り替わる、という見た目のチラつきが起きる。loadedが確定するまでは
+ * 中身を出さずスケルトンだけ見せて、確定後に一度で正しい状態を描画する
+ */
+function VoteSkeleton() {
+  return (
+    <div className="animate-pulse" aria-hidden="true">
+      <div className="mx-auto h-11 max-w-[22rem] rounded-xl bg-surface-muted" />
+      <div className="mt-3 grid grid-cols-3 gap-2 sm:gap-3">
+        <div className="h-16 rounded-xl bg-surface-muted" />
+        <div className="h-16 rounded-xl bg-surface-muted" />
+        <div className="h-16 rounded-xl bg-surface-muted" />
+      </div>
+    </div>
+  );
+}
+
 interface IssueVoteSlotProps {
   issueId: string;
   initialTally: VoteTally;
@@ -169,7 +188,8 @@ interface IssueVoteSlotProps {
 }
 
 export function IssueVoteSlot({ issueId, initialTally, labels }: IssueVoteSlotProps) {
-  const { isLoggedIn, userVote, markJustVoted } = useIssueViewer();
+  const { loaded, isLoggedIn, userVote, markJustVoted } = useIssueViewer();
+  if (!loaded) return <VoteSkeleton />;
   return (
     <VotePanelLive
       issueId={issueId}
@@ -212,11 +232,29 @@ function VoteToUnlockGate({ commentCount }: { commentCount: number }) {
   );
 }
 
+/** 議論欄の読み込み中プレースホルダ。理由はVoteSkeletonと同じ（loaded確定までチラつかせない） */
+function CommentsSkeleton() {
+  return (
+    <div className="animate-pulse space-y-4" aria-hidden="true">
+      <div className="h-5 w-16 rounded bg-surface-muted" />
+      <div className="h-10 rounded-full bg-surface-muted" />
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="h-28 rounded-xl bg-surface-muted" />
+        <div className="h-28 rounded-xl bg-surface-muted" />
+      </div>
+    </div>
+  );
+}
+
 export function IssueCommentsSlot({ slug, issueId, commentCount, voteTally }: IssueCommentsSlotProps) {
-  const { isLoggedIn, plan, userVote, comments, nextCursor, justVoted } = useIssueViewer();
+  const { loaded, isLoggedIn, plan, userVote, comments, nextCursor, justVoted } = useIssueViewer();
   const canComment = canPostComment(isLoggedIn);
   const canFactCheck = canUseFactCheck(plan);
   const canRebuttalAi = canUseRebuttalAi(plan);
+
+  // isLoggedIn/userVoteが未確定のまま描画すると、ゲスト既定表示→本来の状態への
+  // チラつきが起きるため、loadedが確定するまではスケルトンだけ見せる
+  if (!loaded) return <CommentsSkeleton />;
 
   // ログイン済みだが未投票の人だけゲート対象。未ログインのゲストは従来通りGUEST_COMMENT_LIMIT件のプレビューが見える
   if (isLoggedIn && !userVote) {

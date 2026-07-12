@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
 import { SITE } from "@/lib/constants";
 import { CountUp } from "@/components/ui/count-up";
 
@@ -9,11 +8,14 @@ interface HomeIntroProps {
   participants: number;
 }
 
-/** ?issue= 指定時はヒーローを隠す（searchParams をサーバーで読まないため） */
+/**
+ * スレッド展開中は表示しない。以前はここで独自にuseSearchParams().get("issue")を読んで
+ * 判定していたが、HomeFeed側の展開state（同期的に切り替わる）とrouter.replace()後の
+ * searchParams反映（非同期）にタイムラグがあり、「展開直後の一瞬だけヒーローが見えたまま」
+ * になる不具合の原因だった。表示可否はHomeFeedの展開stateと同じタイミングで切り替わるよう、
+ * 呼び出し側（HomeFeed）が渡すbooleanで判定する
+ */
 export function HomeIntro({ participants }: HomeIntroProps) {
-  const searchParams = useSearchParams();
-  if (searchParams.get("issue")) return null;
-
   return (
     <div className="relative">
       <div

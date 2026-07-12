@@ -110,18 +110,6 @@ export function SummaryCard({
               />
             </div>
           </div>
-
-          {!compact && summary.lead && (
-            <details className="group rounded-lg border border-border/70 bg-surface-raised/50 px-3.5 py-2.5">
-              <summary className="cursor-pointer list-none text-xs font-semibold text-ink-muted marker:content-none [&::-webkit-details-marker]:hidden">
-                <span className="inline-flex items-center gap-1.5">
-                  報道の補足
-                  <span className="text-ink-faint transition group-open:rotate-90">›</span>
-                </span>
-              </summary>
-              <p className="mt-2 text-sm leading-relaxed text-ink-secondary">{summary.lead}</p>
-            </details>
-          )}
         </div>
       ) : (
         bullets.length > 0 && (
@@ -151,25 +139,6 @@ export function SummaryCard({
             })}
           </ul>
         )
-      )}
-
-      {!compact && summary.sources.length > 0 && (
-        <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1">
-          <span className="text-xs font-medium uppercase tracking-wider text-ink-faint">
-            出典
-          </span>
-          {summary.sources.map((source) => (
-            <a
-              key={source.url}
-              href={source.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-link underline-offset-2 hover:underline"
-            >
-              {source.label}
-            </a>
-          ))}
-        </div>
       )}
 
       {articleSlug && (

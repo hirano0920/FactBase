@@ -6,6 +6,7 @@ import { IssueCard } from "@/components/issue/issue-card";
 import { HotIssueDuo } from "@/components/issue/hot-issue-card";
 import { ScrollReveal } from "@/components/ui/scroll-reveal";
 import { FeedFilterBar } from "@/components/home/feed-filter-bar";
+import { HomeIntro } from "@/components/home/home-intro";
 import { HomeIssueExpand } from "@/components/home/home-issue-expand";
 import { AdSlot } from "@/components/layout/page-container";
 import { HOME_FEED_PAGE_SIZE, type CategoryId, type IssueSortId } from "@/lib/constants";
@@ -16,6 +17,7 @@ interface HomeFeedProps {
   allIssues: Issue[];
   mostRead?: Issue;
   mostActive?: Issue;
+  participants: number;
 }
 
 function chunk<T>(arr: T[], size: number): T[][] {
@@ -24,7 +26,7 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
-export function HomeFeed({ allIssues, mostRead, mostActive }: HomeFeedProps) {
+export function HomeFeed({ allIssues, mostRead, mostActive, participants }: HomeFeedProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [category, setCategory] = useState<CategoryId | undefined>();
@@ -133,6 +135,8 @@ export function HomeFeed({ allIssues, mostRead, mostActive }: HomeFeedProps) {
 
   return (
     <div className="space-y-6">
+      <HomeIntro participants={participants} />
+
       {showHotDuo && (
         <ScrollReveal>
           <HotIssueDuo
