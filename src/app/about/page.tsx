@@ -1,6 +1,5 @@
 import Image from "next/image";
 import Link from "next/link";
-import { AboutDifferentiatorCard } from "@/components/about/about-differentiator-card";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { PageContainer } from "@/components/layout/page-container";
 import { MAIN_SIDEBAR_GRID, SITE } from "@/lib/constants";
@@ -11,7 +10,7 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: `${SITE.name}を知る`,
   description:
-    `${SITE.name}の目的、他SNS・メディアとの違い、Radar、議論インテリジェンス。第3のメディアとしての中立な討論会場。`,
+    `${SITE.name}が対抗する2つの敵（偏向報道・フィルターバブル）と、その対抗策。第3のメディアとしての中立な討論会場。`,
 };
 
 /**
@@ -51,17 +50,6 @@ const TRACKS = [
         description: "あなたの好みに最適化されたタイムラインは存在しません。争点・新着・投票結果だけが並びます。",
       },
     ],
-  },
-] as const;
-
-const SECONDARY_FEATURES = [
-  {
-    title: "議論インテリジェンス（Plus）",
-    description: "読前→読後の層の動き、両陣営マップ、影響力 — Grok にない TwoSides 独自データ。",
-  },
-  {
-    title: "運営情報を公開",
-    description: "使用AI・データソース・モデレーション基準を透明性ページで公開しています。",
   },
 ] as const;
 
@@ -142,22 +130,6 @@ export default function AboutPage() {
                       ))}
                     </div>
                   </div>
-                ))}
-              </div>
-            </section>
-          </ScrollReveal>
-
-          <ScrollReveal delay={80}>
-            <section>
-              <h2 className="mb-4 text-lg font-bold text-ink">その他の機能</h2>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {SECONDARY_FEATURES.map((item, i) => (
-                  <AboutDifferentiatorCard
-                    key={item.title}
-                    index={i}
-                    title={item.title}
-                    description={item.description}
-                  />
                 ))}
               </div>
             </section>
