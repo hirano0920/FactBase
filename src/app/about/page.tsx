@@ -5,6 +5,8 @@ import { PageContainer } from "@/components/layout/page-container";
 import { MAIN_SIDEBAR_GRID, SITE } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { ScrollReveal } from "@/components/ui/scroll-reveal";
+import { BridgingDemo } from "@/components/about/bridging-demo";
+import { DistributionBars } from "@/components/about/distribution-bars";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -40,6 +42,12 @@ const TRACKS = [
       { title: "おすすめアルゴリズムなし", description: "好みに最適化されたタイムラインは存在しない。" },
     ],
   },
+] as const;
+
+const RIVALS = [
+  { name: "X / Grok", weakness: "出典なし、賛否が見えない" },
+  { name: "Yahooリアルタイム", weakness: "気分の集計止まりで受け身" },
+  { name: "まとめサイト", weakness: "噂・偏向・匿名の煽り" },
 ] as const;
 
 export default function AboutPage() {
@@ -122,7 +130,78 @@ export default function AboutPage() {
                 </section>
               </ScrollReveal>
             ))}
+
+            <ScrollReveal delay={160}>
+              <p className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1.5 text-center text-xs text-ink-faint">
+                <span className="font-bold text-ink-muted">具体的には —</span>
+                {RIVALS.map((rival, i) => (
+                  <span key={rival.name} className="inline-flex items-center gap-1.5">
+                    {i > 0 && <span aria-hidden>·</span>}
+                    <span className="font-semibold text-ink-secondary">{rival.name}</span>
+                    <span>（{rival.weakness}）</span>
+                  </span>
+                ))}
+              </p>
+            </ScrollReveal>
           </div>
+
+          <ScrollReveal>
+            <section className="rounded-[28px] border border-border px-6 py-12 text-center sm:px-10 sm:py-16">
+              <p className="text-xs font-extrabold tracking-[0.15em] text-accent">越境評価（bridging）</p>
+              <h2 className="mx-auto mt-3 max-w-md text-2xl font-extrabold leading-snug tracking-tight text-ink text-balance sm:text-3xl">
+                勝つのは、いいねの数でなく
+                <br />
+                相手陣営を動かした説得力。
+              </h2>
+              <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-ink-secondary">
+                賛否スレッドの並び順は、賛成派・反対派それぞれの支持数ではなく
+                <strong className="font-bold text-ink">「反対陣営の投票者からも参考になったと言われた数」</strong>
+                で決まります。同調圏のいいねが勝つ場では起きない仕組みです。
+              </p>
+              <div className="mx-auto mt-8 max-w-md">
+                <BridgingDemo />
+              </div>
+            </section>
+          </ScrollReveal>
+
+          <ScrollReveal>
+            <section className="rounded-[28px] border border-border px-6 py-12 sm:px-10 sm:py-16">
+              <div className="mx-auto max-w-md text-center">
+                <p className="text-xs font-extrabold tracking-[0.15em] text-accent">沈黙の多数派</p>
+                <h2 className="mx-auto mt-3 text-2xl font-extrabold leading-snug tracking-tight text-ink text-balance sm:text-3xl">
+                  騒いでいるのは両端の1%。
+                  <br />
+                  真ん中の99%は、ただ静かなだけ。
+                </h2>
+                <p className="mt-4 text-sm leading-relaxed text-ink-secondary">
+                  両論を読んだ後の立ち位置を、賛成/反対の2択でなく連続スライダーで取り、分布そのものを可視化します。
+                  「90%が怒っている」ではなく、実際の理性的な立場分布を見せます。
+                </p>
+              </div>
+              <div className="mx-auto mt-8 max-w-md">
+                <DistributionBars />
+              </div>
+            </section>
+          </ScrollReveal>
+
+          <ScrollReveal>
+            <section className="px-2 py-6 text-center sm:py-10">
+              <p className="mx-auto max-w-lg text-xl font-extrabold leading-relaxed tracking-tight text-ink sm:text-2xl">
+                AIは、賛成と反対の
+                <span className="text-ink-faint">勝敗を宣言しません。</span>
+                <br />
+                その代わり
+                <span className="bg-gradient-to-r from-accent to-hot bg-clip-text text-transparent">
+                  「あなたの意見が何人を動かしたか」
+                </span>
+                を見せます。
+              </p>
+              <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-ink-secondary">
+                価値の対立に、AIが決めていい正解はありません。決着感は陣営の勝敗でなく、
+                MVPや影響力スコアという個人の栄誉で。負けた側を作らない設計です。
+              </p>
+            </section>
+          </ScrollReveal>
 
           <ScrollReveal delay={60}>
             <section>
