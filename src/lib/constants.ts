@@ -103,8 +103,13 @@ export const MAIN_SIDEBAR_GRID = "lg:grid-cols-[1fr_300px]" as const;
  * xl+: 左(参加したスレッド) / 中央(フィード) / 右(Hotなスレッド) の3カラム
  * lg〜xl未満: 中央 + 右(Hotなスレッド)の2カラム（左は隠す）
  * lg未満: 1カラム（両方隠してモバイル表示）
+ *
+ * 中央列は`1fr`ではなく`minmax(0,720px)`で幅を打ち止めにする。`1fr`のまま中身にだけ
+ * max-widthを付けると、トラック自体は幅いっぱいに広がるため、中身の右端〜右カラムの間に
+ * 使われない帯状の空白ができてしまう（実際に起きたレイアウト崩れ）。
  */
-export const HOME_THREE_COL_GRID = "lg:grid-cols-[1fr_300px] xl:grid-cols-[260px_1fr_300px]" as const;
+export const HOME_THREE_COL_GRID =
+  "lg:grid-cols-[minmax(0,720px)_340px] xl:grid-cols-[300px_minmax(0,720px)_340px]" as const;
 
 export type IssueSortId = "created" | "comments" | "votes";
 
@@ -316,9 +321,8 @@ export const RADAR = {
   enrichRefreshHours: 12,
   /**
    * article-judge（gpt-5-mini、書き手とは別モデル）による品質ゲートの最低点（5点満点）。
-   * bothSidesQuality/neutralityがこれ未満ならverified/banned_phraseチェックを通過していてもHELDに落とす。
-   * eval-articles.tsの実例（ハラスメント案件のverified:false・日銀の辞書定義混入）は
-   * 事実接地チェックだけでは防げなかったため、両論バランス・中立性を本番公開の直前ゲートに追加する。
+   * bothSidesQuality/neutrality/depth/clarity がこれ未満なら公開せずHELD。
+   * depth/clarity は「事件内容が後段」「薄い言い換え」を落とすためにゲートに含める。
    */
   judgeQualityGateMinScore: 3,
 } as const;

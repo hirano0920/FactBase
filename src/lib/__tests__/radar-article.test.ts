@@ -444,7 +444,8 @@ describe("generateArticle（TwoSides導火線フォーマット）", () => {
     });
     const sentContent = mocks.create.mock.calls[0][0].messages[1].content as string;
     expect(sentContent).toContain("争点タイプ: declaration");
-    expect(sentContent).toContain("当事者名");
+    expect(sentContent).toContain("必須スロット");
+    expect(sentContent).toContain("報道の行為・発言の要約");
     expect(sentContent).toContain("報道の内容:");
     expect(sentContent).toContain("A側（当事者名）");
   });

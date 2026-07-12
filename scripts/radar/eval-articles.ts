@@ -72,7 +72,11 @@ export const GOLDEN_TOPICS: GoldenTopic[] = [
   { topic: "AI技術規制の法整備", category: "law", note: "新興分野・国際比較あり" },
   { topic: "少子化対策の予算配分", category: "society", note: "予算・長期論点" },
   { topic: "芸能事務所と所属タレントの契約解除を巡る声明対立", category: "entertainment", note: "声明対立型（新設カテゴリの動作確認）" },
-  { topic: "著名人のハラスメント疑惑と本人の反論", category: "entertainment", note: "声明対立型・A/B声明セクション確認" },
+  {
+    topic: "著名人のハラスメント疑惑と本人の反論",
+    category: "entertainment",
+    note: "声明対立・incidentFirst必須（否定先行の薄い記事を落とす回帰用）",
+  },
   { topic: "地方自治体の財政再建計画", category: "economy", note: "地方行政" },
   { topic: "北朝鮮のミサイル発射", category: "international", note: "速報型" },
 ];

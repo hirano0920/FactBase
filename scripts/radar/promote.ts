@@ -17,6 +17,7 @@ import { PrismaClient, Prisma } from "@prisma/client";
 import { RADAR } from "../../src/lib/constants";
 import { toIssueCategory, jstDateString, shouldUseInternationalReports } from "../../src/lib/radar";
 import { generateVerifiedArticle, violatesBan } from "../../src/lib/radar-article";
+import { assessReportExcerptThickness } from "../../src/lib/article-quality";
 import { checkArticleQualityGate } from "./lib/article-judge";
 import { buildClaimDiff, formatClaimDiffBlock } from "./lib/claim-diff";
 import { fetchArticleThumbnail } from "./lib/og-image";
@@ -220,6 +221,19 @@ async function promoteOne(c: PromotionCandidate): Promise<string | null> {
   ]);
   if (!useInternational && internationalSources.length > 0) {
     console.log(`  🌍 国内主争点のため海外報道抜粋はスキップ（${internationalSources.length}件あり）`);
+  }
+
+  // REPORTED: 抜粋が薄いとカスカス記事になるため、生成前に機械チェックでHELD
+  if (!isOfficial) {
+    const thickness = assessReportExcerptThickness(reportExcerpts);
+    if (!thickness.ok) {
+      console.warn(`  ⚠️ 薄い報道抜粋「${thickness.reason}」→ 公開せずHELD: ${c.title}`);
+      await prisma.topicCandidate.update({
+        where: { id: c.id },
+        data: { status: "HELD", decision: `thin_excerpts:${(thickness.reason ?? "").slice(0, 200)}` },
+      });
+      return null;
+    }
   }
 
   // カードのサムネイル取得（リンクプレビュー用・自前保存なし）。本文取得に既に成功したURLを

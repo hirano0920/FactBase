@@ -140,7 +140,10 @@ export function debateTypeArticleHint(debateType: DebateType, reignite = false):
     case "declaration":
       return `争点タイプ: declaration（声明対立）
 両側見出しは当事者名（例:「週刊文春・報道側」「佐藤二朗さん側」）。賛成/反対の無理当て禁止。
-「いま何が論点か」の1文目で報道の具体的内容（何をした・何と言った）を必ず書いてから否定・反応に入る。
+「いま何が論点か」必須スロット（空欄・抽象文禁止）:
+  ① [報道の行為・発言の要約] ← 何をした／何と言ったと報じたかを具体語で。否定の前に置く
+  ② [時期・場面]
+  ③ [否定・反応と対立軸]
 両側セクションは事実の再掲禁止。各側の主張・反論・論点だけ。`;
     case "policy":
       return `争点タイプ: policy（政策・法案賛否）${reigniteLine}

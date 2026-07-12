@@ -32,6 +32,7 @@ import {
   debateTypeBulletsSpec,
   type DebateType,
 } from "@/lib/debate-type";
+import { findStructureIssues } from "@/lib/article-quality";
 
 const SYSTEM = `あなたは${SITE.name}の編集デスクです。
 
@@ -489,7 +490,14 @@ export function buildSourceTextIndex(
 }
 
 export interface UngroundedClaim extends ArticleClaim {
-  reason: "source_not_found" | "unsupported" | "ungrounded_number" | "unclaimed_highlight";
+  reason:
+    | "source_not_found"
+    | "unsupported"
+    | "ungrounded_number"
+    | "unclaimed_highlight"
+    | "opening_too_thin"
+    | "incident_first_missing"
+    | "duplicate_facts";
 }
 
 /**
@@ -624,11 +632,10 @@ export interface VerifiedArticleResult {
 
 /**
  * Writer（GPT-5）→Verify（nano、独立呼び出し）→不合格ならWriterへ差し戻し、のループ。
- * 検証は3段: ①claimsのsourceUrlが実在の資料か ②その資料に本当に書かれているか（nano）
- * ③claimsに自己申告されていない数値・強調箇所が資料に見つかるか（網羅性チェック）。
- * ①③は機械的な文字列照合（0円）、②だけnanoを使う（対象を絞ってからnanoに投げるためコストも絞れる）。
- * ③はclaims自己申告への依存を補う: Writerがタグ付けし忘れた（あるいは意図的に避けた）
- * 危うい記述も、articleHtml全文を直接スキャンして捕まえる。
+ * 検証は4段: ①claimsのsourceUrlが実在の資料か ②その資料に本当に書かれているか（nano）
+ * ③claimsに自己申告されていない数値・強調箇所が資料に見つかるか（網羅性チェック）
+ * ④構造（incidentFirst・重複再掲）— 嘘でなくても読めない記事を弾く。
+ * ①③④は機械的（0円）、②だけnanoを使う。
  */
 export async function generateVerifiedArticle(
   params: GenerateArticleParams,
@@ -668,18 +675,40 @@ export async function generateVerifiedArticle(
       haystacks,
     ).map((text) => ({ text, sourceUrl: "", reason: "unclaimed_highlight" as const }));
 
-    const failed = [...missingSource, ...unsupported, ...ungroundedNumbers, ...unclaimedHighlights];
+    const structureFails: UngroundedClaim[] = findStructureIssues(article, {
+      isReported: params.isReported,
+      debateType: params.debateType,
+    }).map((issue) => ({
+      text: issue.message,
+      sourceUrl: "",
+      reason: issue.reason,
+    }));
+
+    const failed = [
+      ...missingSource,
+      ...unsupported,
+      ...ungroundedNumbers,
+      ...unclaimedHighlights,
+      ...structureFails,
+    ];
     if (failed.length === 0) {
       return { article, verified: true, unresolvedClaims: [], attempts: attempt };
     }
     if (attempt > maxRetries) {
       return { article, verified: false, unresolvedClaims: failed, attempts: attempt };
     }
-    feedback = failed.map((f) =>
-      f.sourceUrl
+    feedback = failed.map((f) => {
+      if (
+        f.reason === "opening_too_thin" ||
+        f.reason === "incident_first_missing" ||
+        f.reason === "duplicate_facts"
+      ) {
+        return f.text;
+      }
+      return f.sourceUrl
         ? `「${f.text}」（出典として提示されたURL: ${f.sourceUrl}）— 資料での裏付けが確認できません`
-        : `「${f.text}」— 与えられた資料のどこにも見つからない記述です。事実確認できる表現に修正するか削除してください。`,
-    );
+        : `「${f.text}」— 与えられた資料のどこにも見つからない記述です。事実確認できる表現に修正するか削除してください。`;
+    });
   }
   return { article, verified: false, unresolvedClaims: [], attempts: maxRetries + 1 };
 }

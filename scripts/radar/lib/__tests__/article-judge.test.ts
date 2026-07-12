@@ -83,15 +83,15 @@ describe("averageScore", () => {
 });
 
 describe("gateFromScore", () => {
-  it("bothSidesQuality/neutralityが閾値以上ならok=true", () => {
+  it("bothSidesQuality/neutrality/depth/clarityが閾値以上ならok=true", () => {
     const s = parseJudgeResponse(
       JSON.stringify({
         bothSidesQuality: score(4),
         factualGrounding: score(5),
         neutrality: score(4),
         relatability: score(2),
-        depth: score(2),
-        clarity: score(2),
+        depth: score(3),
+        clarity: score(3),
         titleHook: score(2),
       }),
     );
@@ -134,15 +134,49 @@ describe("gateFromScore", () => {
     expect(gate.reason).toContain("neutrality=1");
   });
 
-  it("ニュースサイト向け軸（depth/titleHook等）が低くてもゲートしない（議論場要件のみで判定）", () => {
+  it("depthが閾値未満ならok=false（見出し言い換えの薄い記事を落とす）", () => {
+    const s = parseJudgeResponse(
+      JSON.stringify({
+        bothSidesQuality: score(5),
+        factualGrounding: score(5),
+        neutrality: score(5),
+        relatability: score(5),
+        depth: score(2),
+        clarity: score(5),
+        titleHook: score(5),
+      }),
+    );
+    const gate = gateFromScore(s);
+    expect(gate.ok).toBe(false);
+    expect(gate.reason).toContain("depth=2");
+  });
+
+  it("clarityが閾値未満ならok=false（事件内容が後段の読みにくい記事を落とす）", () => {
+    const s = parseJudgeResponse(
+      JSON.stringify({
+        bothSidesQuality: score(5),
+        factualGrounding: score(5),
+        neutrality: score(5),
+        relatability: score(5),
+        depth: score(5),
+        clarity: score(2),
+        titleHook: score(5),
+      }),
+    );
+    const gate = gateFromScore(s);
+    expect(gate.ok).toBe(false);
+    expect(gate.reason).toContain("clarity=2");
+  });
+
+  it("ゲート外の軸（relatability/titleHook/factualGrounding）が低くてもゲートしない", () => {
     const s = parseJudgeResponse(
       JSON.stringify({
         bothSidesQuality: score(5),
         factualGrounding: score(1),
         neutrality: score(5),
         relatability: score(1),
-        depth: score(1),
-        clarity: score(1),
+        depth: score(3),
+        clarity: score(3),
         titleHook: score(1),
       }),
     );
