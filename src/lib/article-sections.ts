@@ -3,6 +3,43 @@ export interface ArticleSection {
   bodyHtml: string;
 }
 
+/** 記事冒頭の要約セクション見出し（lead の代わりに UI で使う） */
+export const OPENING_SECTION_HEADINGS = new Set([
+  "いま何が論点か",
+  "いま分かっていること",
+]);
+
+export function isOpeningSectionHeading(heading: string | null | undefined): boolean {
+  return heading != null && OPENING_SECTION_HEADINGS.has(heading);
+}
+
+/** HTML断片をプレーンテキストに（要約表示用） */
+export function htmlToPlainText(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * articleHtml の冒頭セクションを要約テキストとして返す。
+ * 短い lead よりこちらを優先し、記事ページでの二重表示を防ぐ。
+ */
+export function extractOpeningSummary(
+  articleHtml: string | null | undefined,
+  fallbackLead: string,
+): string {
+  if (!articleHtml) return fallbackLead;
+  const opening = splitArticleSections(articleHtml).find((s) =>
+    isOpeningSectionHeading(s.heading),
+  );
+  if (!opening) return fallbackLead;
+  const text = htmlToPlainText(opening.bodyHtml);
+  return text || fallbackLead;
+}
+
 /**
  * サニタイズ済みarticleHtmlをh2見出し単位で分割する。
  * 記事全体を1本の文章として流すのではなく、論点ごとにカード分けして表示するため。

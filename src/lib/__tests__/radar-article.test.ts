@@ -425,7 +425,8 @@ describe("generateArticle（TwoSides導火線フォーマット）", () => {
     expect(sentContent).toContain("<h2>どこで意見が分かれるか</h2>");
     expect(sentContent).toContain("<h2>賛成側が言うこと</h2>");
     expect(sentContent).toContain("争点タイプ: policy");
-    expect(sentContent).toContain("いま分かっていること:");
+    expect(sentContent).toContain("報道の具体的内容");
+    expect(sentContent).toContain("既出の事実を繰り返さない");
     expect(sentContent).toContain("賛成側が言うこと:");
     expect(sentContent).not.toContain("<h2>現時点で確認できること</h2>");
     expect(sentContent).not.toContain("<h2>各立場の主張</h2>");
@@ -444,6 +445,7 @@ describe("generateArticle（TwoSides導火線フォーマット）", () => {
     const sentContent = mocks.create.mock.calls[0][0].messages[1].content as string;
     expect(sentContent).toContain("争点タイプ: declaration");
     expect(sentContent).toContain("当事者名");
+    expect(sentContent).toContain("報道の内容:");
     expect(sentContent).toContain("A側（当事者名）");
   });
 

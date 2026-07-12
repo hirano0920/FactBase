@@ -29,6 +29,7 @@ import { isIssueReadyForPublicFeed, isPendingArticlePlaceholder } from "@/lib/ra
 import { sortByBridgingScore } from "@/lib/bridging";
 import { qualifiesVerifiedBadge } from "@/lib/fc-display";
 import { generateSteelman } from "@/lib/ai";
+import { extractOpeningSummary } from "@/lib/article-sections";
 import {
   filterIssues,
   paginateIssues,
@@ -129,6 +130,11 @@ function tallyFromCounters(issue: DbIssue): VoteTally {
 }
 
 function mapIssue(issue: DbIssue): Issue {
+  const rawSummary = issue.summaryJson as unknown as IssueSummary;
+  const summary: IssueSummary = {
+    ...rawSummary,
+    lead: extractOpeningSummary(issue.articleHtml, rawSummary.lead ?? ""),
+  };
   return {
     id: issue.id,
     slug: issue.slug,
@@ -136,7 +142,7 @@ function mapIssue(issue: DbIssue): Issue {
     shareTitle: issue.shareTitle,
     category: categoryToId[issue.category],
     status: statusToId[issue.status],
-    summary: issue.summaryJson as unknown as IssueSummary,
+    summary,
     articleHtml: issue.articleHtml,
     articleGeneratedAt: issue.articleGeneratedAt?.toISOString() ?? null,
     monitoringUntil: issue.monitoringUntil?.toISOString() ?? null,

@@ -1,12 +1,16 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
 import { CategoryBadge, StatusBadge } from "@/components/ui/badge";
 import { PageContainer } from "@/components/layout/page-container";
 import { AdSlotGated } from "@/components/layout/ad-slot-gated";
+import { AppSidebarStatic } from "@/components/layout/app-sidebar";
+import { SidebarSkeleton } from "@/components/layout/sidebar-skeleton";
+import { LeftRail } from "@/components/layout/left-rail";
 import { getIssueBySlug, getRelatedIssues } from "@/lib/data";
 import { sanitizeArticleHtml } from "@/lib/sanitize";
-import { extractListItems, splitArticleSections } from "@/lib/article-sections";
-import { SITE } from "@/lib/constants";
+import { extractListItems, isOpeningSectionHeading, splitArticleSections } from "@/lib/article-sections";
+import { HOME_THREE_COL_GRID, SITE } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import type { Metadata } from "next";
 
@@ -123,7 +127,7 @@ function VerificationBar({
         </span>
       )}
 
-      <span className="ml-auto text-xs text-ink-faint">GPT-5生成 + nanoによる独立照合</span>
+      <span className="ml-auto text-xs text-ink-faint">Grok 4.3生成 + ChatGPT 5 nanoによる独立照合</span>
     </div>
   );
 }
@@ -138,11 +142,55 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
 
   // AI生成HTMLは必ずサニタイズしてから描画（プロンプトインジェクション対策）
   const safeHtml = sanitizeArticleHtml(issue.articleHtml);
-  const sections = splitArticleSections(safeHtml);
   const sourceCount = issue.summary.sources?.length ?? 0;
 
+  // 冒頭セクション（いま何が論点か等）を header の要約として表示。本文では二重表示しない。
+  // 表示順: どこで意見が分かれるか → 両陣営 → 各社 → その他 → まだ分からないこと → 出典
+  const rawSections = splitArticleSections(safeHtml);
+  const rawSplitAnchorIdx = rawSections.findIndex((s) => s.heading === "どこで意見が分かれるか");
+  const rawSplitPairIdx =
+    rawSplitAnchorIdx !== -1 && rawSections[rawSplitAnchorIdx + 1] && rawSections[rawSplitAnchorIdx + 2]
+      ? [rawSplitAnchorIdx + 1, rawSplitAnchorIdx + 2]
+      : [];
+
+  function priorityOf(heading: string | null, idx: number): number {
+    if (idx === rawSplitAnchorIdx) return 0;
+    if (rawSplitPairIdx.includes(idx)) return 0.5;
+    if (heading === "各社は何を伝えているか") return 2;
+    if (heading === "まだ分からないこと") return 4;
+    if (heading === "出典") return 5;
+    return 3;
+  }
+
+  // 冒頭セクションを header の「要約」として表示し、本文では二重表示しない
+  const sections = rawSections
+    .map((s, i) => ({ s, i }))
+    .filter(({ s }) => !isOpeningSectionHeading(s.heading))
+    .sort((a, b) => {
+      const pa = priorityOf(a.s.heading, a.i);
+      const pb = priorityOf(b.s.heading, b.i);
+      return pa !== pb ? pa - pb : a.i - b.i;
+    })
+    .map(({ s }) => s);
+
+  // 「どこで意見が分かれるか」の直後2セクションは、debateTypeを問わず必ず対になる
+  // 賛否・両陣営の主張（例:「賛成側が言うこと」/「反対側が言うこと」、declarationなら当事者名見出し）。
+  // 交互の装飾色で縦積みにするより、左右2カラムのスプリット表示にした方が
+  // 「対立構造そのものを主役にする」というサイトの方針に合う。
+  const splitAnchorIdx = sections.findIndex((s) => s.heading === "どこで意見が分かれるか");
+  const splitPair =
+    splitAnchorIdx !== -1 && sections[splitAnchorIdx + 1] && sections[splitAnchorIdx + 2]
+      ? ([splitAnchorIdx + 1, splitAnchorIdx + 2] as const)
+      : null;
+
   return (
-    <PageContainer width="content">
+    <PageContainer>
+      <div className={`grid gap-6 lg:gap-8 ${HOME_THREE_COL_GRID}`}>
+        <div className="hidden xl:block">
+          <LeftRail />
+        </div>
+
+        <div className="min-w-0 max-w-[44rem]">
       <AdSlotGated slug={slug} className="mb-8" />
 
       <header className="mb-8">
@@ -170,51 +218,106 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
       </header>
 
       <div className="space-y-5">
-        {sections.map((section, i) => (
-          <section
-            key={i}
-            className={cn(
-              "animate-fade-slide-up rounded-xl border p-5 sm:p-6",
-              section.heading
-                ? SECTION_ACCENT[i % SECTION_ACCENT.length]
-                : "border-border bg-surface-raised",
-            )}
-            style={{ animationDelay: `${Math.min(i, 6) * 60}ms` }}
-          >
-            {section.heading && (
-              <h2 className="mb-3 font-serif text-xl font-semibold text-ink">{section.heading}</h2>
-            )}
-            {section.heading === "賛成の主な理由" || section.heading === "反対の主な理由" || section.heading === "論点" ? (
-              <div>
+        {sections.map((section, i) => {
+          if (splitPair && (i === splitPair[0] || i === splitPair[1])) {
+            // ペアの2つ目が来た時点で、1つ目と合わせて左右スプリットを1回だけ描画する
+            if (i === splitPair[1]) return null;
+            const other = sections[splitPair[1]];
+            return (
+              <div
+                key="split"
+                className="grid animate-fade-slide-up gap-3 sm:grid-cols-2"
+                style={{ animationDelay: `${Math.min(i, 6) * 60}ms` }}
+              >
+                {[section, other].map((side, sideIdx) => (
+                  <section
+                    key={sideIdx}
+                    className={cn(
+                      "rounded-xl border p-5 sm:p-6",
+                      sideIdx === 0 ? "border-for/25 bg-for-muted/40" : "border-against/25 bg-against-muted/40",
+                    )}
+                  >
+                    {side.heading && (
+                      <h2
+                        className={cn(
+                          "mb-3 font-serif text-lg font-semibold",
+                          sideIdx === 0 ? "text-for" : "text-against",
+                        )}
+                      >
+                        {side.heading}
+                      </h2>
+                    )}
+                    <div className="prose-article" dangerouslySetInnerHTML={{ __html: side.bodyHtml }} />
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {extractListItems(side.bodyHtml).map((point, j) => (
+                        <Link
+                          key={j}
+                          href={quoteHref(issue.slug, point)}
+                          className={cn(
+                            "rounded-full border bg-white px-3 py-1.5 text-xs font-medium transition-colors hover:text-white",
+                            sideIdx === 0
+                              ? "border-for/40 text-for hover:bg-for"
+                              : "border-against/40 text-against hover:bg-against",
+                          )}
+                        >
+                          {point.length > 40 ? `${point.slice(0, 40)}…` : point}
+                        </Link>
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            );
+          }
+
+          return (
+            <section
+              key={i}
+              className={cn(
+                "animate-fade-slide-up rounded-xl border p-5 sm:p-6",
+                section.heading
+                  ? SECTION_ACCENT[i % SECTION_ACCENT.length]
+                  : "border-border bg-surface-raised",
+              )}
+              style={{ animationDelay: `${Math.min(i, 6) * 60}ms` }}
+            >
+              {section.heading && (
+                <h2 className="mb-3 font-serif text-xl font-semibold text-ink">
+                  {section.heading}
+                </h2>
+              )}
+              {section.heading === "論点" ? (
+                <div>
+                  <div
+                    className="prose-article"
+                    dangerouslySetInnerHTML={{ __html: section.bodyHtml }}
+                  />
+                  <p className="mb-2 mt-4 text-xs font-medium text-ink-faint">
+                    この理由を引用してコメントを書く →
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {extractListItems(section.bodyHtml).map((point, j) => (
+                      <Link
+                        key={j}
+                        href={quoteHref(issue.slug, point)}
+                        className="rounded-full border border-accent/40 bg-white px-3 py-1.5 text-xs font-medium text-accent transition-colors hover:bg-accent hover:text-white"
+                      >
+                        {point.length > 40 ? `${point.slice(0, 40)}…` : point}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              ) : section.heading === "時系列" ? (
+                <TimelineSection bodyHtml={section.bodyHtml} />
+              ) : (
                 <div
                   className="prose-article"
                   dangerouslySetInnerHTML={{ __html: section.bodyHtml }}
                 />
-                <p className="mb-2 mt-4 text-xs font-medium text-ink-faint">
-                  この理由を引用してコメントを書く →
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {extractListItems(section.bodyHtml).map((point, j) => (
-                    <Link
-                      key={j}
-                      href={quoteHref(issue.slug, point)}
-                      className="rounded-full border border-accent/40 bg-white px-3 py-1.5 text-xs font-medium text-accent transition-colors hover:bg-accent hover:text-white"
-                    >
-                      💬 {point.length > 40 ? `${point.slice(0, 40)}…` : point}
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            ) : section.heading === "時系列" ? (
-              <TimelineSection bodyHtml={section.bodyHtml} />
-            ) : (
-              <div
-                className="prose-article"
-                dangerouslySetInnerHTML={{ __html: section.bodyHtml }}
-              />
-            )}
-          </section>
-        ))}
+              )}
+            </section>
+          );
+        })}
       </div>
 
       <Link
@@ -260,6 +363,14 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
       )}
 
       <AdSlotGated slug={slug} label="フッター広告" className="mt-8" />
+        </div>
+
+        <div className="hidden lg:block">
+          <Suspense fallback={<SidebarSkeleton />}>
+            <AppSidebarStatic />
+          </Suspense>
+        </div>
+      </div>
     </PageContainer>
   );
 }

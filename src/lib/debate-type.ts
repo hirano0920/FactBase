@@ -139,8 +139,9 @@ export function debateTypeArticleHint(debateType: DebateType, reignite = false):
   switch (debateType) {
     case "declaration":
       return `争点タイプ: declaration（声明対立）
-両側見出しは当事者名（例:「事務所側が言うこと」「本人側が言うこと」）。賛成/反対の無理当て禁止。
-共通事実は最短。本体は A が言ったこと / B が言ったこと。報道の一致点は薄く。`;
+両側見出しは当事者名（例:「週刊文春・報道側」「佐藤二朗さん側」）。賛成/反対の無理当て禁止。
+「いま何が論点か」の1文目で報道の具体的内容（何をした・何と言った）を必ず書いてから否定・反応に入る。
+両側セクションは事実の再掲禁止。各側の主張・反論・論点だけ。`;
     case "policy":
       return `争点タイプ: policy（政策・法案賛否）${reigniteLine}
 両側見出し:「賛成側が言うこと」「反対側が言うこと」。
@@ -217,7 +218,7 @@ export function debateTypeBulletsSpec(debateType: DebateType, isReported: boolea
   }
   switch (debateType) {
     case "declaration":
-      return `["いま分かっていること: …", "A側（当事者名）: …", "B側（当事者名）: …"]`;
+      return `["報道の内容: …（何が報じられたか）", "A側（当事者名）: …", "B側（当事者名）: …"]`;
     case "org_response":
       return `["いま分かっていること: …", "対応を支持する側: …", "問題だとする側: …"]`;
     case "norm_flare":

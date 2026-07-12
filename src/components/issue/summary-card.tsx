@@ -27,10 +27,9 @@ export function SummaryCard({ summary, articleSlug, compact = false }: SummaryCa
   // 1項目目=中立の前提（いま分かっていること）、2・3項目目=対立する両論。
   // これが揃っている時だけ「賛成/反対を左右に対置する」表示にする。揃わない場合は従来通りの単純リストにフォールバック。
   const [context, sideA, sideB] = bullets;
-  const canSplit = bullets.length === 3 && context && sideA && sideB;
+  const canSplit = bullets.length === 3 && sideA && sideB;
   const parsedSideA = canSplit ? parseBullet(sideA) : null;
   const parsedSideB = canSplit ? parseBullet(sideB) : null;
-  const parsedContext = canSplit ? parseBullet(context) : null;
 
   return (
     <div className={compact ? "space-y-2" : "space-y-5"}>
@@ -43,16 +42,8 @@ export function SummaryCard({ summary, articleSlug, compact = false }: SummaryCa
         {summary.lead}
       </p>
 
-      {canSplit && parsedContext && parsedSideA && parsedSideB ? (
+      {canSplit && parsedSideA && parsedSideB ? (
         <div className={compact ? "space-y-2" : "space-y-3"}>
-          <p
-            className={cn(
-              "border-l-2 border-border pl-3.5 leading-relaxed text-ink-muted",
-              compact ? "line-clamp-1 text-xs" : "text-sm",
-            )}
-          >
-            {parsedContext.text}
-          </p>
           <div className="grid gap-2 sm:grid-cols-2">
             <div
               className={cn(
