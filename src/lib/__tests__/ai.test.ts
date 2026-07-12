@@ -17,6 +17,7 @@ import {
   classifyHeadlines,
   filterRelevantTopics,
   composeVoteQuestion,
+  sanitizePolarVoteChoices,
 } from "@/lib/ai";
 import { AI_MODELS, RADAR } from "@/lib/constants";
 
@@ -404,5 +405,37 @@ describe("composeVoteQuestion", () => {
     mocks.create.mockRejectedValueOnce(new Error("network error"));
     const result = await composeVoteQuestion(fallback);
     expect(result).toEqual({ question: fallback.fallbackQuestion, choices: fallback.fallbackChoices });
+  });
+
+  it("policyで人物名ボタンになった場合は賛否ラベルに矯正する", async () => {
+    mockContent(
+      JSON.stringify({
+        question: "国旗損壊罪法案、賛成ですか？",
+        choices: { for: "百地章氏賛成", against: "沖縄弁護士会反対", undecided: "まだ判断できない" },
+      }),
+    );
+    const result = await composeVoteQuestion(fallback);
+    expect(result.choices).toEqual({
+      for: "賛成",
+      against: "反対",
+      undecided: "わからない",
+    });
+  });
+});
+
+describe("sanitizePolarVoteChoices", () => {
+  it("declarationはそのまま通す", () => {
+    const choices = { for: "事務所側", against: "報道側", undecided: "まだ判断できない" };
+    expect(sanitizePolarVoteChoices("declaration", choices, choices)).toEqual(choices);
+  });
+
+  it("policyの人物名ラベルはデフォルト賛否へ", () => {
+    expect(
+      sanitizePolarVoteChoices(
+        "policy",
+        { for: "百地章氏賛成", against: "沖縄弁護士会反対", undecided: "まだ判断できない" },
+        { for: "百地章氏賛成", against: "沖縄弁護士会反対", undecided: "まだ判断できない" },
+      ),
+    ).toEqual({ for: "法案に賛成", against: "法案に反対", undecided: "まだ判断できない" });
   });
 });

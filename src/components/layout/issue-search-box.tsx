@@ -85,8 +85,8 @@ export function IssueSearchBox() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => setOpen(true)}
-          placeholder="争点を検索"
-          aria-label="争点を検索"
+          placeholder="スレッドを検索"
+          aria-label="スレッドを検索"
           className="w-full rounded-full border border-border bg-surface-raised py-2.5 pl-9 pr-9 text-sm text-ink outline-none transition-shadow focus:border-accent focus:ring-4 focus:ring-accent/15"
         />
         {query.length > 0 && (
@@ -106,7 +106,7 @@ export function IssueSearchBox() {
           {loading && <p className="p-4 text-xs text-ink-faint">検索中…</p>}
 
           {!loading && results.length === 0 && (
-            <p className="p-4 text-xs text-ink-faint">一致する争点が見つかりません</p>
+            <p className="p-4 text-xs text-ink-faint">一致するスレッドが見つかりません</p>
           )}
 
           {!loading && results.length > 0 && (

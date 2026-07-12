@@ -67,7 +67,7 @@ const SYSTEM = `あなたは${SITE.name}の編集デスクです。
 6. まだ分からないこと（短く）
 
 # 両側の見せ方（視覚的にも内容的にも対になる）
-- 政策: 「賛成側が言うこと」「反対側が言うこと」
+- 政策: 「賛成側が言うこと」「反対側が言うこと」。賛成リストに反対・慎重論を混ぜない
 - 声明対立・ゴシップの当事者対立: 当事者名で揃える（「批判・告発側が言うこと」「本人・事務所側が言うこと」）
   「賛成＝被害者／反対＝本人」の無理当て禁止。片方のリストに反対側の応援を混ぜない
 - 戦争・外交・国際対立: 実在する陣営・立場名で揃える（例:「停戦を急ぐ側」「軍事圧力を優先する側」）
@@ -201,6 +201,15 @@ export interface GenerateArticleParams {
   debateType?: DebateType | null;
   /** policy のスローバーン再燃 */
   reignite?: boolean;
+  /**
+   * 長期争点用の過去報道抜粋（historical-enrich）。
+   * 「これまでの流れ」専用。直近速報の reportExcerpts とは別バンドル。
+   */
+  datedExcerpts?: (ReportExcerptInput & { publishedAt?: string })[];
+  /**
+   * geopolitics + sustained 等で、冒頭=直近24h / タイムライン=確認済み経緯 に分離する。
+   */
+  timelineFirst?: boolean;
 }
 
 /**
@@ -277,8 +286,10 @@ export function isTimelineWorthy(
   sources: { publishedAt?: string }[],
   dietSpeeches: { date?: string }[],
   hasPreviousArticle: boolean,
+  datedExcerptCount = 0,
 ): boolean {
   if (hasPreviousArticle) return true;
+  if (datedExcerptCount >= 3) return true;
 
   const timestamps = [
     ...sources.map((s) => (s.publishedAt ? new Date(s.publishedAt).getTime() : NaN)),
@@ -294,6 +305,17 @@ export function isTimelineWorthy(
 }
 
 /**
+ * 帰属付き報道表現（「〜と報じている」等）。timelineFirst 時は nano unsupported をソフトパスする。
+ * 数値捏造・source_not_found はこの対象外。
+ */
+const ATTRIBUTED_REPORT_CLAIM =
+  /と(?:報じて(?:いる|います|いた)?|伝えて(?:いる|います|いた)?|述べて(?:いる|います)?|発表して(?:いる|います)?)|と報じられて|と伝えられて|との報道|によると|とみられると|と指摘して/;
+
+export function isAttributedReportClaim(text: string): boolean {
+  return ATTRIBUTED_REPORT_CLAIM.test(text);
+}
+
+/**
  * 「背景」または「詳しく（背景と経緯）」の直後に挿入。isTimelineWorthy=trueの時だけ。
  */
 const TIMELINE_SECTION_ADDENDUM = `
@@ -302,6 +324,30 @@ const TIMELINE_SECTION_ADDENDUM = `
       （sourcesまたは国会会議録の日付だけを根拠に古い順。日付不明は含めない。
       日本の争点に他国の類似事例を混ぜない。
       「当初は〜と報じられていたが、後に〜と判明した」変遷があれば明記する）`;
+
+/**
+ * 長期争点（geopolitics / sustained）向け。速報と確認済み経緯を分離する。
+ */
+const TIMELINE_FIRST_REPORTED_FORMAT = `<h2>いま何が論点か</h2><p>直近24時間で新たに報じられたことだけを3〜4文。
+      ① 何が報じられたか — 媒体名付き帰属（「〜と報じています」）。行為・発言・決定を具体語で最初に
+      ② それが何の続きか（1文。詳細は「これまでの流れ」へ）
+      ③ いま意見が分かれる軸
+      数ヶ月前の経緯の要約をここに詰め込まない。真偽が揺れている速報は断定せず帰属のみ</p>
+    <h2>これまでの流れ</h2><ul><li><strong>M月D日:</strong> 媒体名が報じた確認済みの出来事</li></ul>
+      （過去報道抜粋の日付付き項目だけ。古い順。5〜12項目。日付不明は含めない。
+      速報の未確認情報を混ぜない。「〜と報じられた」帰属付き）
+    <h2>どこで意見が分かれるか</h2><ul><li><strong>立場A:</strong> …</li><li><strong>立場B:</strong> …</li></ul>
+      （実在する陣営・立場名。曖昧ラベル禁止）
+    <h2>賛成側が言うこと</h2><ul><li>…</li><li>…</li><li>…</li></ul>
+    <h2>反対側が言うこと</h2><ul><li>…</li><li>…</li><li>…</li></ul>
+      （陣営名の h2 に置き換えてよい。各3〜4項目。冒頭・タイムラインの事実再掲禁止。主張・理由だけ）
+    <h2>各社は何を伝えているか</h2><ul><li><strong>各社が揃って伝えていること:</strong> …</li><li><strong>媒体名:</strong> 固有の内容</li></ul>
+      （直近報道の論調差・追加情報のみ。タイムラインの再掲禁止）
+    <h2>海外ではどう報じられているか</h2><ul><li>…</li></ul>
+      （海外報道抜粋があり差がある場合のみ）
+    <h2>まだ分からないこと</h2><ul><li>…</li></ul>
+      （速報で真偽が揺れている点・公式未確認・報道間の食い違いを1〜4項目。ここが未確定の逃げ場）
+    <h2>出典</h2><ul><li><a href>…</a></li></ul>（与えられたURLのみ）`;
 
 export async function generateArticle(params: GenerateArticleParams): Promise<ArticleJson> {
   const {
@@ -321,6 +367,8 @@ export async function generateArticle(params: GenerateArticleParams): Promise<Ar
     revisionFeedback = [],
     debateType = null,
     reignite = false,
+    datedExcerpts = [],
+    timelineFirst = false,
   } = params;
   const openai = createArticleClient({ timeout: 180_000, maxRetries: 1 });
   const sourceList = sources
@@ -380,6 +428,18 @@ ${dietSpeeches.map((s, i) => `【発言${i + 1}】${s.date} ${s.house}${s.meetin
 ${background.title}\n${background.extract}\n${background.url}`
     : "";
 
+  const datedExcerptBlock =
+    datedExcerpts.length > 0
+      ? `\n\n# 過去報道抜粋（タイムライン専用・${datedExcerpts.length}件）
+「これまでの流れ」の材料。日付付きの確認済み経緯だけに使う。直近24時間の速報断定には使わない。
+${datedExcerpts
+  .map(
+    (e, i) =>
+      `【過去${i + 1}: ${e.feed}${e.publishedAt ? ` / ${e.publishedAt}` : ""}】${e.title}\n${e.url}\n${e.text}`,
+  )
+  .join("\n---\n")}`
+      : "";
+
   const estatBlock =
     estatStats.length > 0
       ? `\n\n# 関連政府統計（e-Stat。経済・労働・物価等の争点で、数値の一次情報として「ポイント」または「詳しく」で参照してよい。
@@ -406,15 +466,22 @@ ${revisionFeedback.map((f, i) => `${i + 1}. ${f}`).join("\n")}`
       該当するものを書く（例: 「A社が本人コメントを新たに報道。B社は依然未確認と伝えている」）。140字以内"`
     : "";
 
-  const includeTimeline = isTimelineWorthy(sources, dietSpeeches, !!previousArticle);
-  const format =
-    (isReported ? REPORTED_FORMAT : OFFICIAL_FORMAT) + (includeTimeline ? TIMELINE_SECTION_ADDENDUM : "");
-  const leadSpec = isReported
-    ? "「いま何が論点か」セクションと同一内容（短い別要約は作らない）。報道の具体的内容を①として含める。150〜280字。帰属付き・断定禁止"
-    : "「いま分かっていること」と同内容。短い別要約は作らない。150〜280字";
+  const includeTimeline =
+    timelineFirst || isTimelineWorthy(sources, dietSpeeches, !!previousArticle, datedExcerpts.length);
+  const format = timelineFirst
+    ? TIMELINE_FIRST_REPORTED_FORMAT
+    : (isReported ? REPORTED_FORMAT : OFFICIAL_FORMAT) + (includeTimeline ? TIMELINE_SECTION_ADDENDUM : "");
+  const leadSpec = timelineFirst
+    ? "「いま何が論点か」と同一。直近24時間の新規報道だけ。150〜280字。帰属付き・断定禁止。経緯の百科要約は禁止"
+    : isReported
+      ? "「いま何が論点か」セクションと同一内容（短い別要約は作らない）。報道の具体的内容を①として含める。150〜280字。帰属付き・断定禁止"
+      : "「いま分かっていること」と同内容。短い別要約は作らない。150〜280字";
   const effectiveType: DebateType = debateType ?? "policy";
   const bulletsSpec = debateTypeBulletsSpec(effectiveType, isReported);
   const typeHint = debateTypeArticleHint(effectiveType, reignite);
+  const timelineFirstHint = timelineFirst
+    ? "\n# timeline-firstモード: 冒頭=直近24hのみ。経緯は「これまでの流れ」。未確定は「まだ分からないこと」。過去抜粋の日付以外でタイムラインを作らない。"
+    : "";
 
   const intlHint =
     internationalReportExcerpts.length > 0
@@ -430,11 +497,11 @@ ${revisionFeedback.map((f, i) => `${i + 1}. ${f}`).join("\n")}`
         role: "user",
         content: `争点: ${issueTitle}
 種別: ${isReported ? "報道ベース（断定禁止・帰属付き）" : "公式発表ベース"}
-目的: スプリットスレッド参加者への最低限の中立土台（長文まとめ・偏向報道にしない）${intlHint}
+目的: スプリットスレッド参加者への最低限の中立土台（長文まとめ・偏向報道にしない）${intlHint}${timelineFirstHint}
 
 # この争点の書き方（厳守）
 ${typeHint}
-${excerptBlock}${reportExcerptBlock}${internationalReportExcerptBlock}${claimDiffBlock}${pollingExcerptBlock}${dietBlock}${backgroundBlock}${lawsBlock}${estatBlock}${previousBlock}${revisionBlock}
+${excerptBlock}${reportExcerptBlock}${internationalReportExcerptBlock}${claimDiffBlock}${pollingExcerptBlock}${dietBlock}${datedExcerptBlock}${backgroundBlock}${lawsBlock}${estatBlock}${previousBlock}${revisionBlock}
 
 # 確認済みの報道見出し（前回分含む最新の全件）
 ${sourceList}
@@ -472,6 +539,7 @@ export function buildSourceTextIndex(
     | "dietSpeeches"
     | "laws"
     | "background"
+    | "datedExcerpts"
   >,
 ): Map<string, string> {
   const index = new Map<string, string>();
@@ -479,6 +547,7 @@ export function buildSourceTextIndex(
   for (const e of params.reportExcerpts ?? []) index.set(e.url, e.text);
   for (const e of params.internationalReportExcerpts ?? []) index.set(e.url, e.text);
   for (const e of params.pollingExcerpts ?? []) index.set(e.url, e.text);
+  for (const e of params.datedExcerpts ?? []) index.set(e.url, e.text);
   for (const s of params.dietSpeeches ?? []) index.set(s.url, s.snippet);
   for (const l of params.laws ?? []) {
     if (l.articleSnippets && l.articleSnippets.length > 0) {
@@ -640,15 +709,19 @@ export interface VerifiedArticleResult {
  */
 export async function generateVerifiedArticle(
   params: GenerateArticleParams,
-  maxRetries = 2,
+  maxRetries?: number,
 ): Promise<VerifiedArticleResult> {
+  // timeline-first / reignite は長期争点で直しきれないケースが多いためリトライを厚くする（最大5試行）
+  const retries =
+    maxRetries ?? (params.timelineFirst || params.reignite ? 4 : 2);
   const index = buildSourceTextIndex(params);
   const sourceTitles = (params.sources ?? []).map((s) => s.title);
+  const datedUrls = new Set((params.datedExcerpts ?? []).map((e) => e.url));
   const haystacks = [...index.values(), ...sourceTitles];
   let feedback: string[] = [];
   let article: ArticleJson = { lead: "", bullets: [], articleHtml: "" };
 
-  for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+  for (let attempt = 1; attempt <= retries + 1; attempt++) {
     article = await generateArticle({ ...params, revisionFeedback: feedback });
     const claims = article.claims ?? [];
 
@@ -662,8 +735,20 @@ export async function generateVerifiedArticle(
     }));
     const results = checkItems.length > 0 ? await verifyClaimsAgainstSources(checkItems) : [];
     const supportedById = new Map(results.map((r) => [r.id, r.supported]));
+    // timeline-first: 帰属付き速報クレームの unsupported はソフトパス（真偽揺れを許容）
+    // タイムライン用（datedExcerpts URL）のクレームは従来どおり厳格照合
     const unsupported: UngroundedClaim[] = toCheck
-      .filter((_, i) => supportedById.get(String(i)) === false)
+      .filter((c, i) => {
+        if (supportedById.get(String(i)) !== false) return false;
+        if (
+          params.timelineFirst &&
+          isAttributedReportClaim(c.text) &&
+          !datedUrls.has(c.sourceUrl)
+        ) {
+          return false;
+        }
+        return true;
+      })
       .map((c) => ({ ...c, reason: "unsupported" as const }));
 
     const ungroundedNumbers: UngroundedClaim[] = findUngroundedNumbers(
@@ -695,7 +780,7 @@ export async function generateVerifiedArticle(
     if (failed.length === 0) {
       return { article, verified: true, unresolvedClaims: [], attempts: attempt };
     }
-    if (attempt > maxRetries) {
+    if (attempt > retries) {
       return { article, verified: false, unresolvedClaims: failed, attempts: attempt };
     }
     feedback = failed.map((f) => {
@@ -712,7 +797,7 @@ export async function generateVerifiedArticle(
         : `「${f.text}」— 与えられた資料のどこにも見つからない記述です。事実確認できる表現に修正するか削除してください。`;
     });
   }
-  return { article, verified: false, unresolvedClaims: [], attempts: maxRetries + 1 };
+  return { article, verified: false, unresolvedClaims: [], attempts: retries + 1 };
 }
 
 /**

@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { debateTypeHasPolarity, type DebateType } from "@/lib/debate-type";
+import { parseBullet, splitClaimAndPoints } from "@/lib/summary-display";
 import type { IssueSummary } from "@/types";
 
 interface SummaryCardProps {
@@ -10,103 +12,116 @@ interface SummaryCardProps {
    * 報道の具体内容＋両論を十分読める密度で出す。
    */
   compact?: boolean;
-}
-
-interface ParsedBullet {
-  label: string | null;
-  text: string;
-}
-
-/** bulletsは "ラベル: 本文" 形式（debateTypeBulletsSpec参照）。ラベルと本文を分離する */
-function parseBullet(bullet: string): ParsedBullet {
-  const match = bullet.match(/^([^：:]{1,20})[：:]\s*([\s\S]+)$/);
-  if (!match) return { label: null, text: bullet };
-  return { label: match[1].trim(), text: match[2].trim() };
+  /**
+   * declaration・geopoliticsは賛成/反対の極性を持たない当事者名・陣営名の並置なので、
+   * for(緑)/against(赤)で色分けすると「どちらが優勢/正しいか」を誤って示唆してしまう。
+   * その場合はaccent/warmの中立配色にする。
+   */
+  debateType?: DebateType | null;
 }
 
 /**
  * 要点カード。
- * 二項対立のラベル（「否定」「事実」）だけでは薄いので、
- * 1項目目＝何が報じられたか／何が起きているかを必ず見せ、その下に両側を置く。
+ * 事実 → 対立の芯（一文ずつ）→ 根拠、の順でスキャンできるようにする。
+ * lead と「いま分かっていること」の二重長文は避け、split 時は事実欄を優先する。
  */
-export function SummaryCard({ summary, articleSlug, compact = false }: SummaryCardProps) {
+export function SummaryCard({
+  summary,
+  articleSlug,
+  compact = false,
+  debateType = null,
+}: SummaryCardProps) {
   const bullets = summary.bullets.slice(0, 3);
   const [context, sideA, sideB] = bullets;
   const canSplit = bullets.length === 3 && Boolean(sideA && sideB);
   const parsedContext = context ? parseBullet(context) : null;
   const parsedSideA = canSplit ? parseBullet(sideA) : null;
   const parsedSideB = canSplit ? parseBullet(sideB) : null;
+  const hasPolarity = debateTypeHasPolarity(debateType);
+  const sideAParts = parsedSideA ? splitClaimAndPoints(parsedSideA.text) : null;
+  const sideBParts = parsedSideB ? splitClaimAndPoints(parsedSideB.text) : null;
 
   return (
     <div className={compact ? "space-y-2.5" : "space-y-4"}>
-      <p
-        className={cn(
-          "leading-relaxed text-ink-secondary",
-          compact ? "line-clamp-4 text-sm" : "text-base",
-        )}
-      >
-        {summary.lead}
-      </p>
+      {/* split があるときは長文 lead を先頭に置かない（事実＋両論と内容が重複して読みにくい） */}
+      {!canSplit && (
+        <p
+          className={cn(
+            "leading-relaxed text-ink-secondary",
+            compact ? "line-clamp-4 text-sm" : "text-base",
+          )}
+        >
+          {summary.lead}
+        </p>
+      )}
 
-      {canSplit && parsedContext && parsedSideA && parsedSideB ? (
-        <div className={compact ? "space-y-2.5" : "space-y-3"}>
+      {canSplit && parsedContext && parsedSideA && parsedSideB && sideAParts && sideBParts ? (
+        <div className={compact ? "space-y-3" : "space-y-4"}>
           <div
             className={cn(
-              "rounded-lg border border-border bg-surface-muted/60",
-              compact ? "px-3 py-2.5" : "px-3.5 py-3",
+              "rounded-xl border border-border bg-surface-muted/70",
+              compact ? "px-3 py-2.5" : "px-4 py-3.5",
             )}
           >
-            <p className="mb-1 text-[10px] font-bold tracking-wide text-ink-faint">
-              {parsedContext.label ?? "いま分かっていること"}
+            <p className="mb-1.5 text-[11px] font-bold tracking-wide text-ink-faint">
+              {parsedContext.label ?? "確認できること"}
             </p>
             <p
               className={cn(
-                "leading-relaxed text-ink-secondary",
-                compact ? "line-clamp-3 text-xs" : "text-sm",
+                "leading-relaxed text-ink",
+                compact ? "line-clamp-3 text-sm" : "text-[15px]",
               )}
             >
               {parsedContext.text}
             </p>
           </div>
 
-          <div className="grid gap-2 sm:grid-cols-2">
-            <div
-              className={cn(
-                "rounded-lg border-l-4 border-for bg-for-muted",
-                compact ? "p-2.5" : "p-3.5",
-              )}
-            >
-              <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-for">
-                {parsedSideA.label ?? "一方の立場"}
-              </p>
-              <p
-                className={cn(
-                  "leading-relaxed text-ink-secondary",
-                  compact ? "line-clamp-3 text-xs" : "text-sm",
-                )}
-              >
-                {parsedSideA.text}
-              </p>
+          <div>
+            <div className="mb-2 flex items-center gap-2">
+              <p className="text-[11px] font-bold tracking-wide text-ink-faint">対立の芯</p>
+              <span className="h-px flex-1 bg-border" aria-hidden />
             </div>
-            <div
-              className={cn(
-                "rounded-lg border-l-4 border-against bg-against-muted",
-                compact ? "p-2.5" : "p-3.5",
-              )}
-            >
-              <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-against">
-                {parsedSideB.label ?? "もう一方の立場"}
-              </p>
-              <p
-                className={cn(
-                  "leading-relaxed text-ink-secondary",
-                  compact ? "line-clamp-3 text-xs" : "text-sm",
-                )}
+
+            <div className="relative grid gap-3 sm:grid-cols-[1fr_auto_1fr] sm:items-stretch">
+              <StancePanel
+                label={parsedSideA.label ?? "一方の立場"}
+                claim={sideAParts.claim}
+                points={sideAParts.points}
+                tone={hasPolarity ? "for" : "accent"}
+                compact={compact}
+              />
+
+              <div
+                className="hidden items-center justify-center sm:flex"
+                aria-hidden
               >
-                {parsedSideB.text}
-              </p>
+                <span className="rounded-full border border-border bg-surface-raised px-2 py-1 text-[10px] font-extrabold tracking-wider text-ink-faint">
+                  VS
+                </span>
+              </div>
+              <p className="text-center text-[10px] font-bold text-ink-faint sm:hidden">対</p>
+
+              <StancePanel
+                label={parsedSideB.label ?? "もう一方の立場"}
+                claim={sideBParts.claim}
+                points={sideBParts.points}
+                tone={hasPolarity ? "against" : "warm"}
+                compact={compact}
+              />
             </div>
           </div>
+
+          {!compact && summary.lead && (
+            <details className="group rounded-lg border border-border/70 bg-surface-raised/50 px-3.5 py-2.5">
+              <summary className="cursor-pointer list-none text-xs font-semibold text-ink-muted marker:content-none [&::-webkit-details-marker]:hidden">
+                <span className="inline-flex items-center gap-1.5">
+                  報道の補足
+                  <span className="text-ink-faint transition group-open:rotate-90">›</span>
+                </span>
+              </summary>
+              <p className="mt-2 text-sm leading-relaxed text-ink-secondary">{summary.lead}</p>
+            </details>
+          )}
         </div>
       ) : (
         bullets.length > 0 && (
@@ -165,8 +180,80 @@ export function SummaryCard({ summary, articleSlug, compact = false }: SummaryCa
             compact ? "text-xs" : "text-sm",
           )}
         >
-          詳しい解説と出典を読む →
+          これまでの流れ・詳しい解説を読む →
         </Link>
+      )}
+    </div>
+  );
+}
+
+function StancePanel({
+  label,
+  claim,
+  points,
+  tone,
+  compact,
+}: {
+  label: string;
+  claim: string;
+  points: string[];
+  tone: "for" | "against" | "accent" | "warm";
+  compact: boolean;
+}) {
+  const shell =
+    tone === "for"
+      ? "border-for/30 bg-for-muted/50"
+      : tone === "against"
+        ? "border-against/30 bg-against-muted/50"
+        : tone === "accent"
+          ? "border-accent/30 bg-accent-soft/80"
+          : "border-warm/30 bg-warm-muted/80";
+  const labelColor =
+    tone === "for"
+      ? "text-for"
+      : tone === "against"
+        ? "text-against"
+        : tone === "accent"
+          ? "text-accent"
+          : "text-warm";
+  const bar =
+    tone === "for"
+      ? "bg-for"
+      : tone === "against"
+        ? "bg-against"
+        : tone === "accent"
+          ? "bg-accent"
+          : "bg-warm";
+
+  return (
+    <div
+      className={cn(
+        "relative overflow-hidden rounded-xl border",
+        shell,
+        compact ? "p-3" : "p-4",
+      )}
+    >
+      <span className={cn("absolute inset-y-0 left-0 w-1", bar)} aria-hidden />
+      <p className={cn("mb-2 pl-2 text-[11px] font-extrabold tracking-wide", labelColor)}>
+        {label}
+      </p>
+      <p
+        className={cn(
+          "pl-2 font-semibold leading-snug text-ink",
+          compact ? "text-sm" : "text-[15px]",
+        )}
+      >
+        {claim}
+      </p>
+      {points.length > 0 && (
+        <ul className={cn("mt-2 space-y-1.5 pl-2", compact ? "text-xs" : "text-sm")}>
+          {points.map((point) => (
+            <li key={point} className="flex gap-2 leading-relaxed text-ink-secondary">
+              <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-ink-faint" aria-hidden />
+              <span>{point}</span>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

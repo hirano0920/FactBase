@@ -109,6 +109,16 @@ export async function POST(req: NextRequest) {
     return errors.validation("この争点の議論は終了しています");
   }
 
+  // クライアント側のVoteToUnlockGateはUIの誘導に過ぎず、直接APIを叩けば回避できてしまう。
+  // 「投票した側にしかコメントできない」を実効あるものにするため、サーバー側でも投票済みを必須にする
+  const hasVoted = await prisma.vote.findUnique({
+    where: { userId_issueId: { userId: session.user.id, issueId: issue.id } },
+    select: { id: true },
+  });
+  if (!hasVoted) {
+    return errors.forbidden("コメントするには先に投票してください");
+  }
+
   try {
     const result = await createComment({
       userId: session.user.id,

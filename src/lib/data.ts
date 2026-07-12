@@ -26,6 +26,7 @@ import {
 } from "@/lib/constants";
 import { getUserPublicStatsBatch } from "@/lib/user-stats";
 import { isIssueReadyForPublicFeed, isPendingArticlePlaceholder } from "@/lib/radar";
+import { parseDebateType } from "@/lib/debate-type";
 import { sortByBridgingScore } from "@/lib/bridging";
 import { qualifiesVerifiedBadge } from "@/lib/fc-display";
 import { generateSteelman } from "@/lib/ai";
@@ -160,6 +161,7 @@ function mapIssue(issue: DbIssue): Issue {
           ? "reported"
           : null,
     voteLabels: (issue.voteLabelsJson as Issue["voteLabels"]) ?? null,
+    debateType: parseDebateType(issue.debateType),
     underReview: issue.underReview,
     thumbnailUrl: issue.thumbnailUrl,
     thumbnailSourceUrl: issue.thumbnailSourceUrl,

@@ -1,5 +1,6 @@
 import type { Plan } from "@prisma/client";
 import type { CategoryId, IssueStatus, VoteChoiceId } from "@/lib/constants";
+import type { DebateType } from "@/lib/debate-type";
 
 export interface IssueSummary {
   lead: string;
@@ -37,6 +38,8 @@ export interface Issue {
   underReview: boolean;
   /** 投票ボタンのカスタム文言（Radar争点用。nullなら賛成/反対/わからない） */
   voteLabels: VoteLabels | null;
+  /** Radar由来の争点タイプ。両側見出しの色分け（極性の有無）に使う。手動作成/未設定はnull */
+  debateType: DebateType | null;
   /**
    * カードのサムネイル。出典URLの画像をリンクプレビューとして直接参照するだけ（自前保存・再配布なし）。
    * 未取得/拒否時はnull（呼び出し側は静かにフォールバック表示）

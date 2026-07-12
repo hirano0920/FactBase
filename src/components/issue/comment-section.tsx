@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { Fragment } from "react";
 import { CommentCard } from "@/components/issue/comment-card";
 import { Button } from "@/components/ui/button";
 import { CountUp } from "@/components/ui/count-up";
+import { AdSlotGated } from "@/components/layout/ad-slot-gated";
 import { SectionTitle } from "@/components/layout/page-container";
 import {
   COMMENT_LIMITS,
@@ -36,6 +38,9 @@ interface CommentSectionProps {
   /** スプリットスレッドのVSバー・タブに使う投票tally（ページ読み込み時点のスナップショット） */
   voteTally: VoteTally;
 }
+
+/** コメントが多い争点で議論欄がだらだら長くなるのを避けつつ広告在庫を確保するため、この件数ごとに1枠挟む */
+const COMMENTS_PER_AD = 7;
 
 const VOTE_CTA_LABEL: Record<VoteChoiceId, string> = {
   for: "賛成",
@@ -879,9 +884,11 @@ export function CommentSection({
                       state.comments.map((comment, i) => {
                         const isTopOpposing = i === 0 && highlightSide === side && !comment.isAiSteelman;
                         const showCrossBadge = i === 0 && comment.crossHelpful > 0 && !comment.isAiSteelman;
+                        const showAdAfter =
+                          (i + 1) % COMMENTS_PER_AD === 0 && i !== state.comments.length - 1;
                         return (
+                          <Fragment key={comment.id}>
                           <div
-                            key={comment.id}
                             className={cn(
                               "animate-fade-slide-up",
                               isTopOpposing && "rounded-2xl ring-1 ring-accent/50",
@@ -934,6 +941,8 @@ export function CommentSection({
                               </div>
                             )}
                           </div>
+                          {showAdAfter && <AdSlotGated slug={issueSlug} className="my-4" />}
+                          </Fragment>
                         );
                       })
                     )}
@@ -1016,25 +1025,29 @@ export function CommentSection({
               </p>
             ) : (
               comments.map((comment, i) => (
-                <div
-                  key={comment.id}
-                  className="animate-fade-slide-up"
-                  style={{ animationDelay: `${Math.min(i, 8) * 60}ms` }}
-                >
-                  <CommentCard
-                    comment={comment}
-                    canInteract={isLoggedIn}
-                    canFactCheck={canFactCheck && !comment.fcResult}
-                    fcLoading={fcPendingId === comment.id}
-                    fcPendingId={fcPendingId}
-                    onLike={handleLike}
-                    onDislike={handleDislike}
-                    onHelpful={handleHelpful}
-                    onFactCheck={handleFactCheck}
-                    onReport={handleReport}
-                    onReply={canComment ? handleReply : undefined}
-                  />
-                </div>
+                <Fragment key={comment.id}>
+                  <div
+                    className="animate-fade-slide-up"
+                    style={{ animationDelay: `${Math.min(i, 8) * 60}ms` }}
+                  >
+                    <CommentCard
+                      comment={comment}
+                      canInteract={isLoggedIn}
+                      canFactCheck={canFactCheck && !comment.fcResult}
+                      fcLoading={fcPendingId === comment.id}
+                      fcPendingId={fcPendingId}
+                      onLike={handleLike}
+                      onDislike={handleDislike}
+                      onHelpful={handleHelpful}
+                      onFactCheck={handleFactCheck}
+                      onReport={handleReport}
+                      onReply={canComment ? handleReply : undefined}
+                    />
+                  </div>
+                  {(i + 1) % COMMENTS_PER_AD === 0 && i !== comments.length - 1 && (
+                    <AdSlotGated slug={issueSlug} className="my-4" />
+                  )}
+                </Fragment>
               ))
             )}
           </div>

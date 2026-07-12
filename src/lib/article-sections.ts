@@ -80,3 +80,15 @@ export function extractListItems(bodyHtml: string): string[] {
   }
   return items;
 }
+
+/** 「M月D日:」「YYYY年M月D日:」「今年7月:」などを日付と本文に分離（タイムラインUI用） */
+export function parseTimelineItem(raw: string): { date: string | null; body: string } {
+  const item = raw.trim();
+  const dateMatch = item.match(
+    /^((?:今年|昨年|本年|\d{4}年)?\d{1,2}月(?:\d{1,2}日)?)[:\s：]+([\s\S]+)$/,
+  );
+  if (dateMatch) {
+    return { date: dateMatch[1], body: dateMatch[2].trim() };
+  }
+  return { date: null, body: item };
+}

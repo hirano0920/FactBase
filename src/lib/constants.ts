@@ -215,22 +215,17 @@ export const RADAR = {
   sourceCap: 40,
   /**
    * detect.ts（RSS/LIVE経路）の起動時間帯（JST、30分おき）。
-   * discover→promoteのみのcron化でdetect.tsが完全停止していたため、
-   * ①🔴LIVE速報公開 ②RSS carry-over（媒体多数だが一次情報待ちの候補をdiscoverが引き取る救済経路）
-   * ③TrendSighting(sustained)の3つが機能しなくなっていた。フル15分間隔は戻さずコストを抑えつつ、
-   * 30分おきに間引いて上記3つを復活させる。
+   * 本番 cron からは外している（discover→promote のみ）。手動実行時の自己ゲート用。
    */
   detectWindowsJst: Array.from({ length: 48 }, (_, i) => ({
     hour: Math.floor(i / 2),
     minute: (i % 2) * 30,
   })),
-  /** detect起動時間帯とみなす許容幅（分）。日中cron15分間隔・深夜cron30分間隔どちらの実行でも
-   * :00/:30に最も近い1回だけが窓に入るように、日中の隣接15分枠(誤差15分)を弾ける8分に設定 */
+  /** detect起動時間帯とみなす許容幅（分） */
   detectWindowToleranceMin: 8,
   /**
    * followup.ts（続報反映）の起動時間帯（JST、1時間おき）。
-   * 記事再生成はWriterモデル呼び出しを伴いdetectより高コストなため、detectの30分より間隔を空ける。
-   * 個々のIssue単位の頻度はshouldRegenerateFollowUp・1日上限は既存のfollowUpDailyLimitで別途throttleされる。
+   * 本番 cron からは外している。手動実行時の自己ゲート用。
    */
   followupWindowsJst: Array.from({ length: 24 }, (_, hour) => ({ hour, minute: 0 })),
   /** followup起動時間帯とみなす許容幅（分） */

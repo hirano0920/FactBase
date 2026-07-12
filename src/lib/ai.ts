@@ -782,9 +782,15 @@ discoverの段階（記事本文がまだ無い時点）で仮に作った設問
 - 断定・煽り・一方の立場に不利な言葉選びは禁止
 
 # choices（for/against/undecided、各12字以内）
-- 争点タイプのヒントに従い、記事本文の両側見出しと同じ主体を指すラベルにする
-- 短い立場ラベルにする。説明文・長文にしない
+- 争点タイプのヒントに従う
+- policy / indicator / org_response / norm_flare:
+  賛否・評価の短い立場語のみ（例:「法案に賛成」「法案に反対」「対応を支持」「問題視」）
+  人物名・団体名・「○○氏賛成」「○○会反対」は禁止。読者が法案・対応そのものに投票できるようにする
+  bulletsに「支持・慎重派」など賛否混在ラベルがあっても無視し、極性だけのラベルにする
+- declaration / geopolitics:
+  記事本文の両側見出しと同じ主体を指す短いラベル。個別人物名への言い換えは避け、陣営名・当事者呼称で揃える
 - undecidedは「どちらとも言えない」「まだ判断できない」等
+- 短い立場ラベルにする。説明文・長文にしない
 
 JSONのみ: {"question": "...", "choices": {"for": "...", "against": "...", "undecided": "..."}}`;
 
@@ -854,10 +860,48 @@ ${input.bullets.map((b) => `- ${b}`).join("\n")}`,
       ),
     };
     if (!question || !choices.for || !choices.against) return fallback;
-    return { question, choices };
+    return {
+      question,
+      choices: sanitizePolarVoteChoices(input.debateType, choices, input.fallbackChoices),
+    };
   } catch {
     return fallback;
   }
+}
+
+/** policy系で人物名・団体名ボタンになった場合は賛否ラベルへ戻す */
+const ACTORISH_VOTE_LABEL = /氏|さん|弁護士会|事務所|有志|議員/;
+
+function defaultPolarChoices(debateType: DebateType): { for: string; against: string; undecided: string } {
+  switch (debateType) {
+    case "org_response":
+      return { for: "対応を支持", against: "問題視", undecided: "まだ判断できない" };
+    case "norm_flare":
+      return { for: "擁護する", against: "批判する", undecided: "まだ判断できない" };
+    case "indicator":
+      return { for: "妥当だ", against: "不適切だ", undecided: "まだ判断できない" };
+    case "policy":
+    default:
+      return { for: "法案に賛成", against: "法案に反対", undecided: "まだ判断できない" };
+  }
+}
+
+export function sanitizePolarVoteChoices(
+  debateType: DebateType,
+  choices: { for: string; against: string; undecided: string },
+  fallback: { for: string; against: string; undecided: string },
+): { for: string; against: string; undecided: string } {
+  if (debateType === "declaration" || debateType === "geopolitics") return choices;
+  if (!ACTORISH_VOTE_LABEL.test(choices.for) && !ACTORISH_VOTE_LABEL.test(choices.against)) {
+    return choices;
+  }
+  const defaults = defaultPolarChoices(debateType);
+  const pick = (key: "for" | "against" | "undecided") => {
+    const fb = fallback[key]?.trim();
+    if (fb && !ACTORISH_VOTE_LABEL.test(fb)) return fb.slice(0, VOTE_CHOICE_MAX_CHARS);
+    return defaults[key];
+  };
+  return { for: pick("for"), against: pick("against"), undecided: pick("undecided") };
 }
 
 const CLAIM_VERIFY_PROMPT = `あなたは記事の事実確認の照合係です。記事が主張ごとに「根拠にした資料抜粋」とペアで渡されます。

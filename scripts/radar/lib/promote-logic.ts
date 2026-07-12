@@ -38,6 +38,8 @@ export type SavedEvidence = EvidenceBundle & {
   debateType?: DebateType | null;
   /** policy のスローバーン再燃（きっかけ先頭＋定番両論） */
   reignite?: boolean;
+  /** Google Trends / Yahoo で長時間トレンド継続（discover の sustained） */
+  sustained?: boolean;
   /** Yahoo!記事個別ページの総コメント数（賛否分裂の実測・炎上強度の絶対値） */
   commentCount?: number;
   /** 前回調査からcommentCountSurgeThreshold以上増えた＝炎上が加速中 */

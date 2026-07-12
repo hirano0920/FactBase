@@ -1,27 +1,40 @@
-# TwoSides Radar — detect（RSS/🔴LIVE速報・30分おき）→ discover（バズ能動調査）→ promote（ピーク公開）
-#   → followup（続報反映・1時間おき）。summarize はコスト削減のため引き続き cron から外している。
-# スクリプト自体は残してあり、必要なら手動実行可能。
-# 日中(JST 06:00-24:00)は15分間隔、深夜(JST 00:00-06:00)は30分間隔
-# （cronはUTC基準: JST 00:00-06:00 = UTC 15:00-20:59）。
-# detect は JST 30分おきの窓（🔴LIVE速報公開・RSS carry-over候補生成・sustained更新）、
-# discover は JST 1日7回の窓、promote はピーク3回（7:30/12:00/19:30）、
-# followup は JST 1時間おきの窓（Writer呼び出しを伴い高コストなためdetectより間隔を空ける）。
+# TwoSides Radar
+#
+# 意図どおりの実行頻度（スクリプト側の窓チェックと一致）:
+#   - discover: JST 1日7回（PENDING 作成・深掘り）
+#   - promote:  JST ピーク3回（7:30 / 12:00 / 19:30）に記事公開
+#
+# 以前は */15 で Workflow 自体を回し、スクリプトが no-op する方式だったため
+# GitHub Actions 上では日中だけで約70回/日走って見えていた。
+# 実作業が無い run（npm ci だけ）を減らすため、起動時刻を窓に合わせる。
+#
+# detect（RSS/LIVE・30分おき）と followup（続報・毎時）は radar-live.yml に分離。
 name: TwoSides Radar
 
 on:
   schedule:
-    - cron: "*/15 21-23,0-14 * * *" # JST 06:00-24:00（日中・活発時間帯）
-    - cron: "*/30 15-20 * * *" # JST 00:00-06:00（深夜・間引き）
+    # —— discover 7/day（JST → UTC = JST−9）——
+    - cron: "0 21 * * *" # 06:00 JST
+    - cron: "0 1 * * *" # 10:00 JST
+    - cron: "30 4 * * *" # 13:30 JST
+    - cron: "0 7 * * *" # 16:00 JST
+    - cron: "0 9 * * *" # 18:00 JST
+    - cron: "0 12 * * *" # 21:00 JST
+    - cron: "0 15 * * *" # 00:00 JST
+    # —— promote 3/day ——
+    - cron: "30 22 * * *" # 07:30 JST
+    - cron: "0 3 * * *" # 12:00 JST
+    - cron: "30 10 * * *" # 19:30 JST
   workflow_dispatch: {}
 
 concurrency:
   group: radar
-  cancel-in-progress: false # 実行中はスキップでなく待機（二重公開防止）
+  cancel-in-progress: false
 
 jobs:
   radar:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -32,22 +45,6 @@ jobs:
 
       - run: npm ci
       - run: npx prisma generate
-
-      - name: "Detect: RSS/breaking-news scan + carry-over candidates (every 30min JST)"
-        env:
-          DATABASE_URL: ${{ secrets.DIRECT_URL }}
-          DIRECT_URL: ${{ secrets.DIRECT_URL }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
-          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
-          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
-          ARTICLE_API_KEY: ${{ secrets.ARTICLE_API_KEY }}
-          ARTICLE_BASE_URL: ${{ secrets.ARTICLE_BASE_URL }}
-          ARTICLE_MODEL: ${{ secrets.ARTICLE_MODEL }}
-          RADAR_ALERT_WEBHOOK_URL: ${{ secrets.RADAR_ALERT_WEBHOOK_URL }}
-          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
-          YOUTUBE_DATA_API_KEY: ${{ secrets.YOUTUBE_DATA_API_KEY }}
-        run: npx tsx scripts/radar/detect.ts
 
       - name: "Discover: buzz research (7 windows/day JST)"
         env:
@@ -80,19 +77,3 @@ jobs:
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           YOUTUBE_DATA_API_KEY: ${{ secrets.YOUTUBE_DATA_API_KEY }}
         run: npx tsx scripts/radar/promote.ts
-
-      - name: "Followup: regenerate articles with new evidence (hourly JST)"
-        env:
-          DATABASE_URL: ${{ secrets.DIRECT_URL }}
-          DIRECT_URL: ${{ secrets.DIRECT_URL }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
-          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
-          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
-          ARTICLE_API_KEY: ${{ secrets.ARTICLE_API_KEY }}
-          ARTICLE_BASE_URL: ${{ secrets.ARTICLE_BASE_URL }}
-          ARTICLE_MODEL: ${{ secrets.ARTICLE_MODEL }}
-          RADAR_ALERT_WEBHOOK_URL: ${{ secrets.RADAR_ALERT_WEBHOOK_URL }}
-          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
-          YOUTUBE_DATA_API_KEY: ${{ secrets.YOUTUBE_DATA_API_KEY }}
-        run: npx tsx scripts/radar/followup.ts

@@ -13,6 +13,7 @@
     "article": "tsx scripts/generate-article.ts",
     "check-env": "tsx scripts/check-env.ts",
     "seed:demo": "tsx scripts/seed-demo-data.ts",
+    "seed:buzz": "tsx scripts/seed-production-buzz.ts",
     "radar:inspect": "tsx scripts/radar/inspect-pipeline.ts",
     "radar:diagnose-buzz": "tsx scripts/radar/diagnose-buzz.ts",
     "db:generate": "prisma generate",

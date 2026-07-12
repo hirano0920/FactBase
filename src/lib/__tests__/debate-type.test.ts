@@ -35,6 +35,16 @@ describe("inferDebateType", () => {
     expect(inferDebateType({ topic: "選択的夫婦別姓", category: "politics" })).toBe("policy");
   });
 
+  it("法案＋反対声明でも declaration にせず policy", () => {
+    expect(
+      inferDebateType({
+        topic: "国旗損壊罪法案",
+        category: "politics",
+        newsTitles: ["沖縄弁護士会が反対声明"],
+      }),
+    ).toBe("policy");
+  });
+
   it("謝罪・処分 → org_response", () => {
     expect(inferDebateType({ topic: "企業の謝罪と処分", category: "economy" })).toBe("org_response");
   });
@@ -72,6 +82,16 @@ describe("resolveDebateType", () => {
     });
     expect(r?.debateType).toBe("declaration");
   });
+
+  it("法案＋反対声明を declaration と誤分類しても policy に矯正する", () => {
+    const r = resolveDebateType({
+      topic: "国旗損壊罪法案に反対声明",
+      category: "politics",
+      debateType: "declaration",
+      newsTitles: ["沖縄弁護士会が廃案を求める声明"],
+    });
+    expect(r?.debateType).toBe("policy");
+  });
 });
 
 describe("isPromotableDebateType / bonus", () => {
@@ -107,5 +127,10 @@ describe("debateTypeChoiceHint", () => {
     for (const t of DEBATE_TYPES) {
       expect(debateTypeChoiceHint(t).length).toBeGreaterThan(0);
     }
+  });
+
+  it("policyは人物名禁止・賛否ラベルを案内する", () => {
+    expect(debateTypeChoiceHint("policy")).toContain("人物名");
+    expect(debateTypeChoiceHint("policy")).toMatch(/賛成|反対/);
   });
 });

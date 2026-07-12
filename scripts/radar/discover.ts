@@ -453,6 +453,7 @@ async function upsertCandidate(
     debatable: t.debatable,
     debateType: t.debateType ?? undefined,
     reignite: t.reignite || undefined,
+    sustained: t.sustained || undefined,
     commentCount: typeof commentCount === "number" ? commentCount : prevCommentCount,
     commentCountSurge: commentCountSurge || undefined,
   };

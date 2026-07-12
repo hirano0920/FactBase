@@ -135,7 +135,8 @@ export function RadarPipelinePanel() {
             <strong className="text-ink">本番 cron: discover → promote のみ</strong> — Google Trends /
             Yahoo!リアルタイム / Yahoo!ニュースランキング / YouTube → 関連性判定 → 能動調査 → PENDING →
             promote（buzzScore≥{report?.thresholds.minBuzzScoreForPromotion ?? 2} & 証拠十分）。
-            discover 1日7回 / promote ピーク3回。detect・summarize・followup は cron 外（手動可）。
+            discover 1日7回 / promote ピーク3回（Actions もその時刻だけ起動）。
+            detect・followup・summarize は cron 外（手動可）。
           </p>
         </div>
       </Section>

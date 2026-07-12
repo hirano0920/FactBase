@@ -44,6 +44,20 @@ const ORG_RESPONSE_HINT =
 const GEOPOLITICS_HINT =
   /停戦|制裁|関税|侵攻|ミサイル|台湾|安保|NATO|国連安保理|外交|米中|ロシア|ウクライナ|イスラエル|ガザ/i;
 
+/** 法案・制度の賛否争点。反対「声明」が付いても declaration に落とさない */
+const POLICY_BILL_HINT =
+  /法案|改正案|新設罪|条例案|条約批准|予算案|減税|増税|規制強化|規制緩和|制度改正|損壊罪|毀損罪/i;
+
+function debateTypeBlob(input: InferDebateTypeInput): string {
+  return [input.topic, input.title, input.voteQuestion, ...(input.newsTitles ?? [])]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function looksLikePolicyBill(input: InferDebateTypeInput): boolean {
+  return POLICY_BILL_HINT.test(debateTypeBlob(input));
+}
+
 export interface InferDebateTypeInput {
   topic: string;
   category?: string | null;
@@ -69,9 +83,12 @@ export function resolveDebateType(
 ): ResolvedDebateType | null {
   const parsed = parseDebateType(input.debateType);
   if (parsed) {
+    // 法案賛否を「反対声明」キーワードで declaration に誤分類しやすい → policy に矯正
+    const debateType =
+      parsed === "declaration" && looksLikePolicyBill(input) ? "policy" : parsed;
     return {
-      debateType: parsed,
-      reignite: parsed === "policy" && (input.reignite === true || input.sustained === true),
+      debateType,
+      reignite: debateType === "policy" && (input.reignite === true || input.sustained === true),
     };
   }
   const inferred = inferDebateType(input);
@@ -87,15 +104,17 @@ export function resolveDebateType(
  * 迷う速報・薄い話題は null（出さない）。
  */
 export function inferDebateType(input: InferDebateTypeInput): DebateType | null {
-  const blob = [input.topic, input.title, input.voteQuestion, ...(input.newsTitles ?? [])]
-    .filter(Boolean)
-    .join("\n");
+  const blob = debateTypeBlob(input);
   const category = (input.category ?? "").toLowerCase();
 
   if (category === "international" || GEOPOLITICS_HINT.test(blob)) return "geopolitics";
   if (category === "finance" || INDICATOR_HINT.test(blob)) return "indicator";
   // org_response を declaration より先に（謝罪・処分は両方にヒットしうる）
   if (ORG_RESPONSE_HINT.test(blob)) return "org_response";
+  // 法案賛否を「反対声明」で declaration に落とさない（policy を声明対立より先に）
+  if (POLICY_BILL_HINT.test(blob) || /改正|予算|規制|制度|国会|選挙/i.test(blob)) {
+    return "policy";
+  }
   if (looksLikeDeclarationConflict(blob) || category === "entertainment") return "declaration";
   if (category === "society") return "norm_flare";
   if (
@@ -107,8 +126,6 @@ export function inferDebateType(input: InferDebateTypeInput): DebateType | null 
   ) {
     return "policy";
   }
-  // カテゴリ不明でも政策っぽい語があれば policy
-  if (/法案|改正|予算|減税|増税|規制|制度|国会|選挙/i.test(blob)) return "policy";
   if (/炎上|ハラスメント|差別|キャンセル|マナー|切り抜き/i.test(blob)) return "norm_flare";
   return null;
 }
@@ -130,6 +147,19 @@ export function debateTypePromoteBonus(debateType: DebateType | null | undefined
   }
 }
 
+/**
+ * この争点タイプの両側見出しに、賛成/反対のような実質的な極性（賛否の強さ）があるか。
+ * declaration（声明対立）・geopolitics（陣営）は「賛成/反対の無理当て禁止」と明記した通り
+ * 当事者名・陣営名の並置に過ぎず極性を持たない。それ以外は「賛成/支持/擁護」対「反対/批判/問題視」の
+ * 実質的な二極対立として書かせているため極性ありとする。
+ * UIで両側を色分けする際、極性が無いのに賛成=緑/反対=赤の色を使うと「どちらが優勢/正しいか」を
+ * 誤って示唆してしまうため、この判定で色を出し分ける。
+ */
+export function debateTypeHasPolarity(debateType: DebateType | null | undefined): boolean {
+  if (!debateType) return true;
+  return debateType !== "declaration" && debateType !== "geopolitics";
+}
+
 /** 記事 HTML の両側見出し・書き方ヒント（Writer プロンプト注入用） */
 export function debateTypeArticleHint(debateType: DebateType, reignite = false): string {
   const reigniteLine = reignite
@@ -149,7 +179,8 @@ export function debateTypeArticleHint(debateType: DebateType, reignite = false):
     case "policy":
       return `争点タイプ: policy（政策・法案賛否）${reigniteLine}
 両側見出し:「賛成側が言うこと」「反対側が言うこと」。
-何が決まろうとしているかを1画面で。本体は賛否の最強論各3〜4（資料の発言・報道点から。一般論埋め禁止）。`;
+何が決まろうとしているかを1画面で。本体は賛否の最強論各3〜4（資料の発言・報道点から。一般論埋め禁止）。
+賛成側には賛同論だけ、反対側には反対・批判・慎重論だけ。同一見出しに賛否を混ぜない（「支持・慎重派」禁止）。`;
     case "org_response":
       return `争点タイプ: org_response（企業・組織の対応是非）
 両側見出し:「対応を支持する側」「問題だとする側」（または会社名/批判側の当事者名）。
@@ -165,9 +196,11 @@ export function debateTypeArticleHint(debateType: DebateType, reignite = false):
 本体は解釈の対立（この判断・水準を支持 / 不適切・別対応を求める）。
 両側見出し:「支持する側が言うこと」「問題視する側が言うこと」。`;
     case "geopolitics":
-      return `争点タイプ: geopolitics（国際・陣営）
+      return `争点タイプ: geopolitics（国際・陣営）${reigniteLine}
 実在する陣営・立場名で対になる2側に圧縮（例:「停戦を急ぐ側」「軍事圧力を優先する側」）。
-何が起きた→陣営A/B。国内主なら日本にとっての論点は薄く。`;
+冒頭は直近で新たに報じられたことだけ。数ヶ月の経緯は「これまでの流れ」に分離。
+真偽が揺れる速報は断定せず帰属表現にし、「まだ分からないこと」へ逃がす。
+国内主なら日本にとっての論点は薄く。`;
   }
 }
 
@@ -203,7 +236,7 @@ export function debateTypeChoiceHint(debateType: DebateType): string {
     case "declaration":
       return "for/againstは当事者の名前・呼称（例:「事務所側」「本人側」）。賛成/反対の無理当て禁止。";
     case "policy":
-      return "for/againstは「賛成」「反対」を軸にした短い立場ラベル。";
+      return "for/againstは「法案に賛成」「法案に反対」など賛否だけの短いラベル。人物名・団体名（「○○氏賛成」「○○会反対」）は禁止。";
     case "org_response":
       return "for/againstは「対応を支持」「問題視」を軸にした短い立場ラベル。";
     case "norm_flare":
@@ -218,26 +251,27 @@ export function debateTypeChoiceHint(debateType: DebateType): string {
 /** bullets 指示を型に合わせる。メタ立場（「虚偽」「事実」だけ）は禁止し、具体内容を必須にする */
 export function debateTypeBulletsSpec(debateType: DebateType, isReported: boolean): string {
   const density =
-    "各項目80〜140字。1項目目に何が起きたか／何が報じられたかの具体（行為・発言・数字・決定）を必ず入れる。" +
-    "2・3項目目は「虚偽だ／事実だ」「支持／反対」だけのメタ表現禁止。何についてそう主張するかを1つ以上具体的に書く。" +
-    "両側がきれいに対称でなくてもよい（現実の争点は非対称が多い）。無理に二項のラベルを美しく揃えない。";
+    "各項目はスキャンしやすく。1項目目（事実）は80〜120字。" +
+    "2・3項目目は『芯の一文（40〜60字）。根拠の一文（40〜70字）。』の2文構成を基本にする。" +
+    "「虚偽だ／事実だ」「支持／反対」だけのメタ表現禁止。何についてそう主張するかを具体的に。" +
+    "両側がきれいに対称でなくてもよい。";
 
   if (!isReported) {
     return `articleHtmlの「いま分かっていること」と同じ3観点語で、各項目に具体内容。${density}`;
   }
   switch (debateType) {
     case "declaration":
-      return `["報道の内容: …（何をした／何と言ったと報じたか。否定は書かない）", "A側（当事者名）: …（その内容について何と反論・主張するか）", "B側（当事者名）: …（報道・相手側が何を根拠にそう言うか）"]。${density}`;
+      return `["報道の内容: …（何をした／何と言ったと報じたか。否定は書かない）", "A側（当事者名）: 芯の一文。根拠の一文。", "B側（当事者名）: 芯の一文。根拠の一文。"]。${density}`;
     case "org_response":
-      return `["いま分かっていること: …（何が起き、組織が何をしたか）", "対応を支持する側: …", "問題だとする側: …"]。${density}`;
+      return `["いま分かっていること: …（何が起き、組織が何をしたか）", "対応を支持する側: 芯。根拠。", "問題だとする側: 芯。根拠。"]。${density}`;
     case "norm_flare":
-      return `["争点の軸: …（何の規範・行為が問題になっているか具体的に）", "擁護側: …", "批判側: …"]。${density} 当事者名が無い炎上でも軸は具体行為で書く。`;
+      return `["争点の軸: …（何の規範・行為が問題になっているか具体的に）", "擁護側: 芯。根拠。", "批判側: 芯。根拠。"]。${density}`;
     case "indicator":
-      return `["公式の数字・判断: …（数値をそのまま）", "支持する側: …", "問題視する側: …"]。${density}`;
+      return `["公式の数字・判断: …（数値をそのまま）", "支持する側: 芯。根拠。", "問題視する側: 芯。根拠。"]。${density}`;
     case "geopolitics":
-      return `["いま分かっていること: …", "陣営A: …", "陣営B: …"]。${density} 実在陣営名。きれいに対称でなくてよい。`;
+      return `["いま分かっていること: …（直近で何が起きたか1〜2文）", "陣営A（実名）: 芯の一文（何をしたいか）。根拠の一文。", "陣営B（実名）: 芯の一文。根拠の一文。"]。${density} 読者がVSで一瞬で対立が分かる短さに。`;
     case "policy":
     default:
-      return `["いま分かっていること: …（何が決まろうとしているか）", "賛成側が言うこと: …", "反対側が言うこと: …"]。${density}`;
+      return `["いま分かっていること: …（何が決まろうとしているか）", "賛成側が言うこと: 芯。根拠。", "反対側が言うこと: 芯。根拠。"]。${density} 各側は賛否を混ぜない。「支持・慎重派」等の混在ラベル禁止。慎重・批判は反対側へ。`;
   }
 }

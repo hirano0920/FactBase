@@ -28,19 +28,19 @@ export function FeedFilterBar({
 }: FeedFilterBarProps) {
   return (
     <div className="space-y-3">
-      <div className="relative -mx-page sm:mx-0">
+      <div className="relative -mx-page border-b border-border sm:mx-0">
         <nav
           aria-label="カテゴリで絞り込み"
-          className="flex gap-2 overflow-x-auto px-page pb-1 sm:flex-wrap sm:px-0"
+          className="flex gap-1 overflow-x-auto px-page sm:px-0"
         >
         <button
           type="button"
           onClick={() => onCategoryChange(undefined)}
           className={cn(
-            "shrink-0 rounded-full border px-3.5 py-2.5 text-sm font-medium transition",
+            "shrink-0 border-b-2 px-4 py-3.5 text-sm font-medium transition-colors",
             !activeCategory
-              ? "border-ink bg-ink text-surface"
-              : "border-border text-ink-secondary hover:border-border-strong hover:bg-surface-muted",
+              ? "border-ink text-ink"
+              : "border-transparent text-ink-faint hover:bg-surface-muted hover:text-ink-secondary",
           )}
         >
           すべて <span className="tabular-nums opacity-70">{totalCount}</span>
@@ -51,10 +51,10 @@ export function FeedFilterBar({
             type="button"
             onClick={() => onCategoryChange(c.id)}
             className={cn(
-              "shrink-0 rounded-full border px-3.5 py-2.5 text-sm font-medium transition",
+              "shrink-0 border-b-2 px-4 py-3.5 text-sm font-medium transition-colors",
               activeCategory === c.id
-                ? "border-ink bg-ink text-surface"
-                : "border-border text-ink-secondary hover:border-border-strong hover:bg-surface-muted",
+                ? "border-ink text-ink"
+                : "border-transparent text-ink-faint hover:bg-surface-muted hover:text-ink-secondary",
             )}
           >
             {c.label} <span className="tabular-nums opacity-70">{counts[c.id] ?? 0}</span>

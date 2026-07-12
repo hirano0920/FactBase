@@ -60,6 +60,7 @@ export function HomeIssueExpand({ issue, guestComments, onBack, scrollToVote = f
           <SummaryCard
             summary={issue.summary}
             articleSlug={issue.articleHtml ? issue.slug : undefined}
+            debateType={issue.debateType}
           />
         </Section>
 

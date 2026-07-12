@@ -66,7 +66,9 @@
      以前--width-*だったため max-w-content/max-w-wide が実際には存在せず、
      広い画面でPageContainerの幅制限が効いていなかった。 */
   --container-content: 42rem;
-  --container-wide: 96rem;
+  /* 3カラム(300px + 中央max720px + 340px + gap64px + 左右padding48px)がぴったり収まる幅。
+     これより広い画面では左右の余白として吸収させ、グリッド内部に空白を作らない。 */
+  --container-wide: 92rem;
 }
 
 /*
@@ -290,6 +292,81 @@
     animation: grow-width 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
+  /* 決着バー: 賛成が左から/反対が右からそれぞれ伸びて中央でぶつかる演出用 */
+  @keyframes grow-from-left {
+    from {
+      width: 0%;
+    }
+  }
+  @keyframes grow-from-right {
+    from {
+      width: 0%;
+    }
+  }
+  .animate-grow-from-left {
+    animation: grow-from-left 0.78s cubic-bezier(0.16, 0.85, 0.2, 1) both;
+  }
+  .animate-grow-from-right {
+    animation: grow-from-right 0.78s cubic-bezier(0.16, 0.85, 0.2, 1) both;
+  }
+
+  /* 衝突の中心で光が弾ける */
+  @keyframes clash-core-flash {
+    0% {
+      transform: translate(-50%, -50%) scale(0);
+      opacity: 1;
+    }
+    50% {
+      transform: translate(-50%, -50%) scale(2.1);
+      opacity: 1;
+    }
+    100% {
+      transform: translate(-50%, -50%) scale(0.6);
+      opacity: 0;
+    }
+  }
+  .animate-clash-core {
+    animation: clash-core-flash 0.42s ease 0.7s both;
+  }
+
+  /* 衝突で飛び散る破片。--angで方向を個別指定する */
+  @keyframes clash-shard-burst {
+    0% {
+      opacity: 0;
+      transform: rotate(var(--ang)) translateY(0) scaleY(0.3);
+    }
+    18% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      transform: rotate(var(--ang)) translateY(-15px) scaleY(1);
+    }
+  }
+  .animate-clash-shard {
+    animation: clash-shard-burst 0.55s cubic-bezier(0.15, 0.7, 0.3, 1) 0.72s both;
+  }
+
+  /* 衝突の瞬間、バー全体が軽く震える */
+  @keyframes clash-shake {
+    0%,
+    100% {
+      transform: translateX(0);
+    }
+    20% {
+      transform: translateX(-2.5px) rotate(-0.15deg);
+    }
+    50% {
+      transform: translateX(2px) rotate(0.15deg);
+    }
+    80% {
+      transform: translateX(-1px);
+    }
+  }
+  .animate-clash-shake {
+    animation: clash-shake 0.32s ease 0.7s both;
+  }
+
   /* いいね/dislikeを押した瞬間、絵文字がふわっと浮いて消える */
   @keyframes emoji-float {
     0% {
@@ -437,5 +514,80 @@
   .prose-article th,
   .prose-article td {
     @apply border border-border px-3 py-2 text-left;
+  }
+
+  /* 「これまでの流れ」縦タイムライン */
+  .article-timeline {
+    @apply relative ml-1 list-none space-y-0 py-1 pl-0;
+  }
+  .article-timeline__rail {
+    @apply absolute bottom-2 left-[11px] top-2 w-px origin-top bg-gradient-to-b from-accent/50 via-accent/25 to-accent/10;
+    transform: scaleY(0);
+    transition: transform 0.9s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .article-timeline--visible .article-timeline__rail {
+    transform: scaleY(1);
+  }
+  .article-timeline__item {
+    @apply relative flex gap-4 pb-6 last:pb-1;
+    opacity: 0;
+    transform: translateY(14px);
+    transition:
+      opacity 0.45s cubic-bezier(0.16, 1, 0.3, 1),
+      transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+    transition-delay: calc(var(--tl-i, 0) * 90ms + 120ms);
+  }
+  .article-timeline--visible .article-timeline__item {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .article-timeline__dot {
+    @apply relative z-[1] mt-1.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center;
+  }
+  .article-timeline__dot-core {
+    @apply h-3 w-3 rounded-full border-2 border-accent bg-surface-raised;
+    box-shadow: 0 0 0 3px rgb(59 130 246 / 0.12);
+    transform: scale(0.4);
+    transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition-delay: calc(var(--tl-i, 0) * 90ms + 80ms);
+  }
+  .article-timeline--visible .article-timeline__dot-core {
+    transform: scale(1);
+    animation: timeline-dot-pulse 2.4s ease-in-out infinite;
+    animation-delay: calc(var(--tl-i, 0) * 90ms + 700ms);
+  }
+  .article-timeline__item:last-child .article-timeline__dot-core {
+    @apply border-hot bg-hot/15;
+  }
+  .article-timeline__card {
+    @apply min-w-0 flex-1 rounded-lg border border-border/80 bg-surface-raised/80 px-3.5 py-2.5;
+    box-shadow: 0 1px 0 rgb(0 0 0 / 0.02);
+  }
+  .article-timeline__date {
+    @apply mb-1 inline-block rounded-md bg-accent/10 px-2 py-0.5 text-[11px] font-bold tracking-wide text-accent;
+  }
+  .article-timeline__body {
+    @apply m-0 text-sm leading-relaxed text-ink-secondary;
+  }
+
+  @keyframes timeline-dot-pulse {
+    0%,
+    100% {
+      box-shadow: 0 0 0 3px rgb(59 130 246 / 0.12);
+    }
+    50% {
+      box-shadow: 0 0 0 6px rgb(59 130 246 / 0);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .article-timeline__rail,
+    .article-timeline__item,
+    .article-timeline__dot-core {
+      transition: none !important;
+      animation: none !important;
+      opacity: 1 !important;
+      transform: none !important;
+    }
   }
 }

@@ -7,9 +7,11 @@ import { AdSlotGated } from "@/components/layout/ad-slot-gated";
 import { AppSidebarStatic } from "@/components/layout/app-sidebar";
 import { SidebarSkeleton } from "@/components/layout/sidebar-skeleton";
 import { LeftRail } from "@/components/layout/left-rail";
+import { ArticleTimeline } from "@/components/issue/article-timeline";
 import { getIssueBySlug, getRelatedIssues } from "@/lib/data";
 import { sanitizeArticleHtml } from "@/lib/sanitize";
 import { extractListItems, isOpeningSectionHeading, splitArticleSections } from "@/lib/article-sections";
+import { debateTypeHasPolarity } from "@/lib/debate-type";
 import { HOME_THREE_COL_GRID, SITE } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import type { Metadata } from "next";
@@ -29,6 +31,8 @@ const SECTION_ACCENT = [
   "border-warm/25 bg-warm-muted/40",
   "border-border-strong bg-surface-muted",
 ] as const;
+
+const TIMELINE_HEADINGS = new Set(["これまでの流れ", "時系列"]);
 
 // Next.jsのセグメント設定はリテラルのみ許可のため、lib/constants.tsのISSUE_PAGE_REVALIDATE_SEC(3600)と値を同期
 export const revalidate = 3600;
@@ -51,39 +55,6 @@ export async function generateMetadata({ params }: ArticlePageProps): Promise<Me
       images: [`/issues/${issue.slug}/opengraph-image`],
     },
   };
-}
-
-/** 時系列セクションのli要素から「日付」と「本文」を分離してタイムライン形式で描画する */
-function TimelineSection({ bodyHtml }: { bodyHtml: string }) {
-  const items = extractListItems(bodyHtml);
-  if (items.length === 0) {
-    return <div className="prose-article" dangerouslySetInnerHTML={{ __html: bodyHtml }} />;
-  }
-
-  return (
-    <ol className="relative ml-3 space-y-0 border-l-2 border-accent/30">
-      {items.map((item, i) => {
-        // 「M月D日:」または「YYYY年M月D日:」形式の日付プレフィックスを検出
-        const dateMatch = item.match(/^(\d{4}年)?(\d{1,2}月\d{1,2}日)[:\s：]+(.+)/);
-        const date = dateMatch ? (dateMatch[1] ?? "") + dateMatch[2] : null;
-        const body = dateMatch ? dateMatch[3].trim() : item;
-        return (
-          <li key={i} className="relative pl-6 pb-5 last:pb-0">
-            {/* タイムラインのドット */}
-            <span className="absolute -left-[9px] top-1 h-4 w-4 rounded-full border-2 border-accent/60 bg-surface-raised" />
-            {date ? (
-              <>
-                <p className="mb-0.5 text-xs font-bold text-accent">{date}</p>
-                <p className="text-sm leading-relaxed text-ink-secondary">{body}</p>
-              </>
-            ) : (
-              <p className="text-sm leading-relaxed text-ink-secondary">{body}</p>
-            )}
-          </li>
-        );
-      })}
-    </ol>
-  );
 }
 
 /** 検証バッジ: 裏取り実施済み・ソース件数・確認ステータスを一目で示す */
@@ -154,6 +125,8 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
       : [];
 
   function priorityOf(heading: string | null, idx: number): number {
+    // timeline-first: 経緯を対立軸より先に（速報要約→流れ→賛否）
+    if (heading && TIMELINE_HEADINGS.has(heading)) return -1;
     if (idx === rawSplitAnchorIdx) return 0;
     if (rawSplitPairIdx.includes(idx)) return 0.5;
     if (heading === "各社は何を伝えているか") return 2;
@@ -182,6 +155,10 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
     splitAnchorIdx !== -1 && sections[splitAnchorIdx + 1] && sections[splitAnchorIdx + 2]
       ? ([splitAnchorIdx + 1, splitAnchorIdx + 2] as const)
       : null;
+  // declaration・geopoliticsは賛成/反対の極性を持たない当事者名・陣営名の並置。
+  // それを緑=賛成/赤=反対の色で塗ると「どちらが優勢/正しいか」を誤って示唆するため、
+  // 極性が無い場合はaccent/warmの中立配色にする。
+  const splitHasPolarity = debateTypeHasPolarity(issue.debateType);
 
   return (
     <PageContainer>
@@ -229,43 +206,32 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
                 className="grid animate-fade-slide-up gap-3 sm:grid-cols-2"
                 style={{ animationDelay: `${Math.min(i, 6) * 60}ms` }}
               >
-                {[section, other].map((side, sideIdx) => (
-                  <section
-                    key={sideIdx}
-                    className={cn(
-                      "rounded-xl border p-5 sm:p-6",
-                      sideIdx === 0 ? "border-for/25 bg-for-muted/40" : "border-against/25 bg-against-muted/40",
-                    )}
-                  >
-                    {side.heading && (
-                      <h2
-                        className={cn(
-                          "mb-3 font-serif text-lg font-semibold",
-                          sideIdx === 0 ? "text-for" : "text-against",
-                        )}
-                      >
-                        {side.heading}
-                      </h2>
-                    )}
-                    <div className="prose-article" dangerouslySetInnerHTML={{ __html: side.bodyHtml }} />
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {extractListItems(side.bodyHtml).map((point, j) => (
-                        <Link
-                          key={j}
-                          href={quoteHref(issue.slug, point)}
-                          className={cn(
-                            "rounded-full border bg-white px-3 py-1.5 text-xs font-medium transition-colors hover:text-white",
-                            sideIdx === 0
-                              ? "border-for/40 text-for hover:bg-for"
-                              : "border-against/40 text-against hover:bg-against",
-                          )}
-                        >
-                          {point.length > 40 ? `${point.slice(0, 40)}…` : point}
-                        </Link>
-                      ))}
-                    </div>
-                  </section>
-                ))}
+                {[section, other].map((side, sideIdx) => {
+                  const borderBg = splitHasPolarity
+                    ? sideIdx === 0
+                      ? "border-for/25 bg-for-muted/40"
+                      : "border-against/25 bg-against-muted/40"
+                    : sideIdx === 0
+                      ? "border-accent/25 bg-accent-soft/60"
+                      : "border-warm/25 bg-warm-muted/40";
+                  const text = splitHasPolarity
+                    ? sideIdx === 0
+                      ? "text-for"
+                      : "text-against"
+                    : sideIdx === 0
+                      ? "text-accent"
+                      : "text-warm";
+                  return (
+                    <section key={sideIdx} className={cn("rounded-xl border p-5 sm:p-6", borderBg)}>
+                      {side.heading && (
+                        <h2 className={cn("mb-3 font-serif text-lg font-semibold", text)}>
+                          {side.heading}
+                        </h2>
+                      )}
+                      <div className="prose-article" dangerouslySetInnerHTML={{ __html: side.bodyHtml }} />
+                    </section>
+                  );
+                })}
               </div>
             );
           }
@@ -307,8 +273,8 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
                     ))}
                   </div>
                 </div>
-              ) : section.heading === "時系列" ? (
-                <TimelineSection bodyHtml={section.bodyHtml} />
+              ) : section.heading && TIMELINE_HEADINGS.has(section.heading) ? (
+                <ArticleTimeline bodyHtml={section.bodyHtml} />
               ) : (
                 <div
                   className="prose-article"

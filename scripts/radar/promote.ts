@@ -13,7 +13,8 @@
  *     記事に実質のある内容を書ける材料が揃っているか）
  */
 import { randomUUID } from "node:crypto";
-import { PrismaClient, Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import { prisma } from "../../src/lib/prisma";
 import { RADAR } from "../../src/lib/constants";
 import { toIssueCategory, jstDateString, shouldUseInternationalReports } from "../../src/lib/radar";
 import { generateVerifiedArticle, violatesBan } from "../../src/lib/radar-article";
@@ -39,10 +40,19 @@ import { isWithinPeakWindow } from "./lib/schedule";
 import { notifyRadarFailure } from "./notify";
 import { notifyRevalidate } from "./lib/notify-revalidate";
 import { linkBuzzSourcesToIssue } from "./lib/link-buzz-sources";
+import {
+  fetchHistoricalDatedExcerpts,
+  needsHistoricalEnrich,
+  resolveReigniteFromSustained,
+  shouldUseTimelineFirstMode,
+} from "./lib/historical-enrich";
 
-const prisma = new PrismaClient();
 const DRY_RUN = process.argv.includes("--dry-run");
 const FORCE = process.argv.includes("--force"); // ピーク時間帯チェックを無視（動作確認用）
+const LIMIT_ARG = process.argv.find((a) => a.startsWith("--limit="));
+const PROMOTE_LIMIT = LIMIT_ARG
+  ? Math.max(1, parseInt(LIMIT_ARG.split("=")[1] ?? "", 10) || RADAR.buzzArticlesPerWindow)
+  : RADAR.buzzArticlesPerWindow;
 
 /**
  * これより古いPENDING候補は選定対象にしない。
@@ -92,7 +102,7 @@ async function main() {
   const selected = selectTopicsForPromotion(
     candidates,
     RADAR.minBuzzScoreForPromotion,
-    RADAR.buzzArticlesPerWindow,
+    PROMOTE_LIMIT,
     RADAR.maxSameCategoryPerPromoteWindow,
   );
   console.log(
@@ -159,10 +169,15 @@ async function absorbIntoIssue(absorbed: PromotionCandidate[], issueId: string, 
     return;
   }
   for (const a of absorbed) {
+    // TopicCandidate.issueId は @unique のため、吸収候補には issueId を付けない
+    // （主候補だけが Issue に紐づく。decision で統合先を残す）
     await prisma.$transaction([
       prisma.topicCandidate.update({
         where: { id: a.id },
-        data: { status: "PUBLISHED", issueId, decision: `merged_into_selected_candidate:${issueId}` },
+        data: {
+          status: "PUBLISHED",
+          decision: `merged_into:${issueId}:${primaryTitle.slice(0, 80)}`,
+        },
       }),
       prisma.issueTimeline.create({
         data: { issueId, label: `バズ検知: 関連トピックとして検知（${a.title.slice(0, 60)}）` },
@@ -214,18 +229,37 @@ async function promoteOne(c: PromotionCandidate): Promise<string | null> {
   }
 
   const useInternational = shouldUseInternationalReports(c.category, c.topicTerm || c.title);
-  const [reportExcerpts, internationalReportExcerpts, pollingExcerpts] = await Promise.all([
-    isOfficial ? Promise.resolve([]) : fetchReportExcerpts(c.sourceUrls),
-    useInternational ? fetchReportExcerpts(internationalSources) : Promise.resolve([]),
-    fetchReportExcerpts(pollingNewsSources(c.evidence)),
-  ]);
+  const debateTypePreview =
+    c.evidence.debateType ?? resolveCandidateDebateType(c);
+  const topicForHistory = c.topicTerm || c.evidence.topic || c.title;
+  const doHistorical = needsHistoricalEnrich({
+    debateType: debateTypePreview,
+    sustained: c.evidence.sustained === true,
+    topic: topicForHistory,
+  });
+
+  const [reportExcerpts, internationalReportExcerpts, pollingExcerpts, datedExcerpts] =
+    await Promise.all([
+      isOfficial ? Promise.resolve([]) : fetchReportExcerpts(c.sourceUrls),
+      useInternational ? fetchReportExcerpts(internationalSources) : Promise.resolve([]),
+      fetchReportExcerpts(pollingNewsSources(c.evidence)),
+      doHistorical ? fetchHistoricalDatedExcerpts(topicForHistory) : Promise.resolve([]),
+    ]);
   if (!useInternational && internationalSources.length > 0) {
     console.log(`  🌍 国内主争点のため海外報道抜粋はスキップ（${internationalSources.length}件あり）`);
   }
+  if (doHistorical) {
+    console.log(`  📚 historical-enrich 対象（${datedExcerpts.length}件の過去抜粋）: ${c.title}`);
+  }
 
   // REPORTED: 抜粋が薄いとカスカス記事になるため、生成前に機械チェックでHELD
+  // 長期争点は国際＋過去抜粋も厚さに含める（速報だけ薄いが経緯で書けるケース）
   if (!isOfficial) {
-    const thickness = assessReportExcerptThickness(reportExcerpts);
+    const thickness = assessReportExcerptThickness([
+      ...reportExcerpts,
+      ...internationalReportExcerpts,
+      ...datedExcerpts,
+    ]);
     if (!thickness.ok) {
       console.warn(`  ⚠️ 薄い報道抜粋「${thickness.reason}」→ 公開せずHELD: ${c.title}`);
       await prisma.topicCandidate.update({
@@ -239,7 +273,10 @@ async function promoteOne(c: PromotionCandidate): Promise<string | null> {
   // カードのサムネイル取得（リンクプレビュー用・自前保存なし）。本文取得に既に成功したURLを
   // 候補にすることで無駄打ちを減らす。記事生成と並行して走らせ、公開直前にまとめて待つ。
   const thumbnailPromise = fetchArticleThumbnail(
-    [...reportExcerpts, ...internationalReportExcerpts].map((e) => ({ url: e.url, feed: e.feed })),
+    [...reportExcerpts, ...internationalReportExcerpts, ...datedExcerpts].map((e) => ({
+      url: e.url,
+      feed: e.feed,
+    })),
   ).catch(() => null);
 
   const debateResolved = resolveDebateType({
@@ -248,8 +285,19 @@ async function promoteOne(c: PromotionCandidate): Promise<string | null> {
     title: c.title,
     voteQuestion: c.evidence.voteQuestion,
     newsTitles: (c.evidence.news ?? []).map((n) => n.title),
-    debateType: c.evidence.debateType ?? resolveCandidateDebateType(c),
+    debateType: debateTypePreview,
     reignite: c.evidence.reignite,
+  });
+  const reignite = resolveReigniteFromSustained({
+    debateType: debateResolved?.debateType ?? debateTypePreview,
+    sustained: c.evidence.sustained === true,
+    reignite: debateResolved?.reignite ?? c.evidence.reignite === true,
+  });
+  const timelineFirst = shouldUseTimelineFirstMode({
+    debateType: debateResolved?.debateType ?? debateTypePreview,
+    sustained: c.evidence.sustained === true,
+    reignite,
+    datedExcerptCount: datedExcerpts.length,
   });
 
   // ④ 媒体別主張のdiff（一致点/食い違い/単独媒体限定）を先に機械抽出し、Writerには生抜粋と併せて渡す。
@@ -268,6 +316,10 @@ async function promoteOne(c: PromotionCandidate): Promise<string | null> {
     console.warn(`  ⚠️ 媒体diffのnano失敗（fail-open・生抜粋のみで続行）: ${c.title} (${e})`);
   }
 
+  if (timelineFirst) {
+    console.log(`  🧭 timeline-first モード（reignite=${reignite}）: ${c.title}`);
+  }
+
   const { article, verified, unresolvedClaims } = await generateVerifiedArticle({
     issueTitle: c.title,
     isReported: !isOfficial,
@@ -282,7 +334,9 @@ async function promoteOne(c: PromotionCandidate): Promise<string | null> {
     laws: c.evidence.laws,
     estatStats: c.evidence.estatStats,
     debateType: debateResolved?.debateType ?? null,
-    reignite: debateResolved?.reignite ?? false,
+    reignite,
+    datedExcerpts,
+    timelineFirst,
   });
 
   if (!verified) {

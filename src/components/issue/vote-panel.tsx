@@ -126,20 +126,33 @@ export function VotePanel({
             {callout.text}
           </p>
 
-          <div className="flex h-3 overflow-hidden rounded-sm bg-surface-muted">
-            {VOTE_CHOICES.map((choice) => (
-              <div
-                key={choice.id}
-                className={cn(
-                  "animate-grow-width transition-all duration-500",
-                  choice.color === "for" && "bg-for",
-                  choice.color === "against" && "bg-against",
-                  choice.color === "neutral" && "bg-neutral/60",
-                )}
-                style={{ width: `${tally.percents[countKey(choice.id)]}%` }}
-                title={`${choice.label} ${formatPercent(tally.percents[countKey(choice.id)])}`}
-              />
-            ))}
+          {/* 決着バー: 賛成が左から・反対が右から伸びて中央でぶつかる。「今どちらが優勢か」を一目で伝える演出 */}
+          <div className="relative h-3.5 animate-clash-shake overflow-hidden rounded-full border border-border bg-surface-muted">
+            <div
+              className="absolute inset-y-0 left-0 animate-grow-from-left rounded-full bg-for"
+              style={{ width: `${tally.percents.for}%` }}
+              title={`${labelFor("for")} ${formatPercent(tally.percents.for)}`}
+            />
+            <div
+              className="absolute inset-y-0 right-0 animate-grow-from-right rounded-full bg-against"
+              style={{ width: `${tally.percents.against}%` }}
+              title={`${labelFor("against")} ${formatPercent(tally.percents.against)}`}
+            />
+            {/* 衝突の中心: コアの発光＋8方向に散る破片 */}
+            <div
+              className="pointer-events-none absolute top-1/2 h-0 w-0"
+              style={{ left: `${tally.percents.for}%` }}
+              aria-hidden="true"
+            >
+              <div className="animate-clash-core absolute left-0 top-0 h-5 w-5 rounded-full bg-[radial-gradient(circle,#fff7e0_0%,#f5c451_45%,rgba(245,196,81,0)_75%)]" />
+              {[-70, -35, 0, 35, 70, 110, 145, 180].map((ang) => (
+                <div
+                  key={ang}
+                  className="animate-clash-shard absolute left-0 top-0 h-[11px] w-[3px] rounded-sm bg-[#f5c451]"
+                  style={{ "--ang": `${ang}deg`, transformOrigin: "center bottom" } as React.CSSProperties}
+                />
+              ))}
+            </div>
           </div>
 
           <p className="mt-3 text-center text-sm text-ink-muted">

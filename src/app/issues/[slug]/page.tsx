@@ -114,6 +114,7 @@ export default async function IssuePage({ params }: IssuePageProps) {
                   <SummaryCard
                     summary={issue.summary}
                     articleSlug={issue.articleHtml ? issue.slug : undefined}
+                    debateType={issue.debateType}
                   />
                   {timeline.length > 0 && (
                     <div className="mt-4 border-t border-border pt-4">
@@ -127,29 +128,34 @@ export default async function IssuePage({ params }: IssuePageProps) {
                 </Section>
               </ScrollReveal>
 
+              {/* 投票と議論は「別々の箱」だと二陣営の対立が分断されて見えるため、1枚のカードに統合する。
+                  上段=投票（賛否バー）と下段=議論（賛否カラム）で色（for/against）を連続させ、
+                  スプリット構造そのものを画面の主役にする */}
               <ScrollReveal delay={80}>
-                <Section id="vote-panel" variant="arena">
-                  <SectionTitle>あなたの一票</SectionTitle>
-                  <div className="mx-auto max-w-md">
-                    <IssueVoteSlot
-                      issueId={issue.id}
-                      initialTally={tally}
-                      labels={issue.voteLabels}
-                    />
+                <Section id="vote-panel" variant="arena" className="!p-0 overflow-hidden">
+                  <div className="p-4 pb-2 sm:p-8 sm:pb-3">
+                    <SectionTitle className="mb-1">投票 &amp; 議論</SectionTitle>
+                    <p className="mb-4 text-xs text-ink-faint sm:mb-5">
+                      投票すると議論に参加でき、相手陣営にも響く意見が上位に並びます
+                    </p>
+                    <div className="mx-auto max-w-md">
+                      <IssueVoteSlot
+                        issueId={issue.id}
+                        initialTally={tally}
+                        labels={issue.voteLabels}
+                      />
+                    </div>
                   </div>
-                </Section>
-              </ScrollReveal>
-
-              <ScrollReveal delay={120}>
-                <Section variant="arena">
-                  <Suspense fallback={null}>
-                    <IssueCommentsSlot
-                      slug={issue.slug}
-                      issueId={issue.id}
-                      commentCount={issue.commentCount}
-                      voteTally={tally}
-                    />
-                  </Suspense>
+                  <div className="border-t border-border p-4 pt-4 sm:p-8 sm:pt-6">
+                    <Suspense fallback={null}>
+                      <IssueCommentsSlot
+                        slug={issue.slug}
+                        issueId={issue.id}
+                        commentCount={issue.commentCount}
+                        voteTally={tally}
+                      />
+                    </Suspense>
+                  </div>
                 </Section>
               </ScrollReveal>
 

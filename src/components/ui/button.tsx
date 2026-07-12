@@ -14,17 +14,19 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantStyles: Record<ButtonVariant, string> = {
   primary:
-    "bg-accent text-white hover:bg-accent-hover border-transparent",
+    "bg-accent text-white hover:bg-accent-hover border-transparent disabled:opacity-50",
   secondary:
-    "bg-surface-raised text-ink border-border hover:bg-surface-muted hover:border-border-strong",
+    "bg-surface-raised text-ink border-border hover:bg-surface-muted hover:border-border-strong disabled:opacity-50",
   ghost:
-    "bg-transparent text-ink-secondary border-transparent hover:bg-surface-muted hover:text-ink",
+    "bg-transparent text-ink-secondary border-transparent hover:bg-surface-muted hover:text-ink disabled:opacity-50",
+  // vote-*は未ログイン時もdisabledで常時表示される主要CTA。disabled:opacity-50で薄めると
+  // for/against/neutralの色差がほぼ消えてスプリットの主役性が死ぬため、無効時も彩度は落とさない
   "vote-for":
-    "bg-for-muted text-for border-for/20 hover:border-for/40 hover:bg-for/10",
+    "border-2 border-for/30 bg-for-muted text-for hover:border-for/60 hover:bg-for/15 disabled:border-for/20",
   "vote-against":
-    "bg-against-muted text-against border-against/20 hover:border-against/40 hover:bg-against/10",
+    "border-2 border-against/30 bg-against-muted text-against hover:border-against/60 hover:bg-against/15 disabled:border-against/20",
   "vote-neutral":
-    "bg-neutral-muted text-neutral border-neutral/20 hover:border-neutral/40",
+    "border-2 border-neutral/25 bg-neutral-muted text-neutral hover:border-neutral/50 disabled:border-neutral/15",
 };
 
 const sizeStyles: Record<ButtonSize, string> = {
@@ -48,7 +50,7 @@ export function Button({
         "transition-all duration-150 active:scale-[0.98]",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30",
         "focus-visible:ring-offset-2 focus-visible:ring-offset-surface",
-        "disabled:pointer-events-none disabled:opacity-50 disabled:active:scale-100",
+        "disabled:pointer-events-none disabled:active:scale-100",
         variantStyles[variant],
         sizeStyles[size],
         fullWidth && "w-full",
