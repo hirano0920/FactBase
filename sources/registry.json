@@ -613,6 +613,78 @@
       "issue_slug": "boj-normalization-yen-depreciation",
       "last_fetched": null,
       "active": true
+    },
+    {
+      "keyword": "国会前デモ（高市政権への抗議・2万7千人）",
+      "category": [
+        "POLITICS"
+      ],
+      "keywords": [
+        "国会前デモ（高市政権への抗議・2万7千人）"
+      ],
+      "issue_slug": "radar-buzz-2026-07-12-c1a5a625",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "ロシアの燃料供給への軍事攻撃（タンカー・製油所）",
+      "category": [
+        "POLITICS"
+      ],
+      "keywords": [
+        "ロシアの燃料供給への軍事攻撃（タンカー・製油所）"
+      ],
+      "issue_slug": "radar-buzz-2026-07-12-b136dfd7",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "厚生年金の受給額と老後保障（平均月15万円）",
+      "category": [
+        "ECONOMY"
+      ],
+      "keywords": [
+        "厚生年金の受給額と老後保障（平均月15万円）"
+      ],
+      "issue_slug": "radar-buzz-2026-07-12-9831c0c8",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "選挙SNS対策法案（SNS規制と選挙運動）",
+      "category": [
+        "POLITICS"
+      ],
+      "keywords": [
+        "選挙SNS対策法案（SNS規制と選挙運動）"
+      ],
+      "issue_slug": "radar-buzz-2026-07-12-52357a34",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "国旗損壊罪法案の表現の自由への影響",
+      "category": [
+        "POLITICS"
+      ],
+      "keywords": [
+        "国旗損壊罪法案の表現の自由への影響"
+      ],
+      "issue_slug": "radar-buzz-2026-07-12-99d43937",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "イランのホルムズ海峡封鎖宣言",
+      "category": [
+        "POLITICS"
+      ],
+      "keywords": [
+        "イランのホルムズ海峡封鎖宣言"
+      ],
+      "issue_slug": "radar-buzz-2026-07-12-ad6e5518",
+      "last_fetched": null,
+      "active": true
     }
   ]
 }
