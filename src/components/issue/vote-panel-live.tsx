@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { VotePanel } from "@/components/issue/vote-panel";
+import { cn } from "@/lib/utils";
 import type { VoteChoiceId } from "@/lib/constants";
 import type { VoteTally } from "@/types";
 
@@ -34,6 +35,12 @@ export function VotePanelLive({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [celebrate, setCelebrate] = useState(false);
+  // celebrateより長く保持する。初投票直後は結果バーの演出をしばらく見せてから
+  // 「✅ 投票しました」の1行に折りたたみ、スレッドへ視線が流れるようにする。
+  const [justVoted, setJustVoted] = useState(false);
+  // 投票した瞬間だけ周囲を薄暗くして、決着バーの演出にスポットライトを当てる。
+  // バーが伸びて衝突するまでの区間だけ有効にし、結果を読ませる段階では通常表示に戻す。
+  const [dimActive, setDimActive] = useState(false);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -83,6 +90,13 @@ export function VotePanelLive({
         if (isFirstVote) {
           setCelebrate(true);
           setTimeout(() => mounted.current && setCelebrate(false), 1000);
+          // 決着バーの演出（伸びる→ぶつかる→破片が散る）が最後まで見えるだけの時間を確保してから
+          // 「✅ 投票しました」に折りたたむ。それまではスレッドの上で結果演出を見せ続ける。
+          setJustVoted(true);
+          setTimeout(() => mounted.current && setJustVoted(false), 2200);
+          // バーが伸びて中央でぶつかるまで（CSS側は0.7〜1.25秒）だけ周囲を薄暗くする
+          setDimActive(true);
+          setTimeout(() => mounted.current && setDimActive(false), 1300);
           onFirstVote?.(choice);
         }
       } catch {
@@ -96,14 +110,28 @@ export function VotePanelLive({
 
   return (
     <div aria-busy={pending}>
-      <VotePanel
-        tally={tally}
-        userVote={userVote}
-        canVote={isLoggedIn && !pending}
-        labels={labels}
-        onVote={handleVote}
-        celebrate={celebrate}
+      {/* 決着バー演出のスポットライト。position:fixedで画面全体を覆う。
+          下のカードラッパーがz-50で「兄弟」として同じ階層にいるからこそこの上に乗れる
+          （カードの内側にダイマーを入れ子にすると、カード自身に重ならず沈んでしまう） */}
+      <div
+        aria-hidden="true"
+        className={cn(
+          "pointer-events-none fixed inset-0 z-40 bg-ink/35 transition-opacity duration-200",
+          dimActive ? "opacity-100" : "opacity-0",
+        )}
       />
+      <div className="relative z-50">
+        <VotePanel
+          tally={tally}
+          userVote={userVote}
+          canVote={isLoggedIn && !pending}
+          isLoggedIn={isLoggedIn}
+          labels={labels}
+          onVote={handleVote}
+          celebrate={celebrate}
+          justVoted={justVoted}
+        />
+      </div>
       {error && (
         <p role="alert" className="mt-3 text-center text-sm text-against">
           {error}

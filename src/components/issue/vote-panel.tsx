@@ -12,11 +12,18 @@ interface VotePanelProps {
   tally: VoteTally;
   userVote?: VoteChoiceId | null;
   canVote?: boolean;
+  /** ログイン済みは「結果を見る」で投票をスキップできないようにする（未ログインのみ許可） */
+  isLoggedIn?: boolean;
   /** Radar争点用のカスタム選択肢文言（例: 説明すべき/問題ない/判断できない） */
   labels?: VoteLabels | null;
   onVote?: (choice: VoteChoiceId) => void;
   /** 投票確定直後だけtrueにして渡す。紙吹雪を出す合図。 */
   celebrate?: boolean;
+  /**
+   * 初投票直後の数秒間だけtrue。この間は投票済みでも結果バーの演出を表示し続け、
+   * 「✅ 投票しました」の1行に折りたたまない（演出を見せてからスレッドへ流す）。
+   */
+  justVoted?: boolean;
 }
 
 const countKey = (id: VoteChoiceId) => (id === "for" ? "for" : id === "against" ? "against" : "undecided");
@@ -47,11 +54,15 @@ export function VotePanel({
   tally,
   userVote,
   canVote = false,
+  isLoggedIn = false,
   labels,
   onVote,
   celebrate = false,
+  justVoted = false,
 }: VotePanelProps) {
-  const [revealed, setRevealed] = useState(Boolean(userVote));
+  // 未ログインだけ「結果を見る」で投票せずに結果を覗ける。ログイン済みは必ず3択のどれかに
+  // 投票させ、結果は投票後の演出でしか見せない（覗き見で投票をスキップできないようにする）
+  const [revealed, setRevealed] = useState(!isLoggedIn && Boolean(userVote));
   // 投票を変更したい時だけ、一時的にフル表示（ボタン付き）に戻す
   const [changingVote, setChangingVote] = useState(false);
   // 投票が確定した瞬間（nullから何か選んだ瞬間）は自動で結果を開き、変更モードは閉じる
@@ -64,10 +75,12 @@ export function VotePanel({
     labels?.[id] ?? VOTE_CHOICES.find((c) => c.id === id)?.label ?? id;
 
   const callout = leadingCallout(tally, labels);
+  const showResults = revealed || justVoted;
 
   // 投票済みなら、この下の議論セクションに賛否の結果バーがそのまま出るため、ここでは
-  // 二重に結果を出さない。「✅ 自分の投票」+「投票し直す」の1行だけにする
-  if (userVote && !changingVote) {
+  // 二重に結果を出さない。「✅ 自分の投票」+「投票し直す」の1行だけにする。
+  // ただしjustVoted中（初投票直後の演出中）はまだ折りたたまず、下の決着バー演出を見せきる。
+  if (userVote && !changingVote && !justVoted) {
     return (
       <div className="flex items-center justify-center gap-3 text-sm">
         <span className="font-bold text-ink-secondary">✅ {labelFor(userVote)}に投票しました</span>
@@ -84,7 +97,7 @@ export function VotePanel({
 
   return (
     <div className="space-y-3 sm:space-y-5">
-      {!revealed ? (
+      {!showResults && !isLoggedIn ? (
         <div className="rounded-[20px] border border-dashed border-border-strong bg-surface-muted p-3.5 text-center sm:p-5">
           <p className="mb-2.5 text-sm text-ink-muted sm:mb-3">
             投票するか、結果を見てから考えるか選べます
@@ -93,7 +106,7 @@ export function VotePanel({
             👀 投票結果を見る
           </Button>
         </div>
-      ) : (
+      ) : showResults ? (
         <div className="relative animate-pop-in">
           <p className={cn("mb-3 text-center text-base font-extrabold", callout.color ?? "text-ink")}>
             <span className="relative mr-1.5 inline-block">
@@ -144,7 +157,7 @@ export function VotePanel({
             {" 人が投票"}
           </p>
         </div>
-      )}
+      ) : null}
 
       <div className="grid grid-cols-3 gap-2 sm:gap-3">
         {VOTE_CHOICES.map((choice) => {
@@ -176,7 +189,7 @@ export function VotePanel({
                 {isSelected && "✅ "}
                 {labelFor(choice.id)}
               </span>
-              {revealed && (
+              {showResults && (
                 <span className="text-xs tabular-nums opacity-80 sm:text-sm">
                   {formatPercent(tally.percents[countKey(choice.id)])}
                 </span>
