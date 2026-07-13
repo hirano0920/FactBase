@@ -182,14 +182,14 @@ export function CommentSection({
   // 投票直後、ロック画面からこのコンポーネントに切り替わった瞬間に議論欄までスクロールする。
   // promptStanceは「今まさに投票した」時だけ立つ合図なので、既に投票済みで再訪した場合は動かさない。
   // ただしこのコンポーネント自体はuserVoteが立った瞬間（＝投票直後）に即マウントされるため、
-  // 即スクロールすると上の決着バー演出（周囲が薄暗くなる→バー衝突→優勢表示、約2.2秒）が
-  // 画面外に押し出されて見えなくなってしまう。演出とパネルの折りたたみ（0.5秒）が終わるのを
-  // 待ってからスクロールする（VotePanelLiveのjustVotedタイマーと同じ長さに合わせる）。
+  // 即スクロールすると投票のポップアップ演出（周囲が薄暗くなる→バー衝突→優勢表示→フェードアウト、
+  // VotePanelLiveのCELEBRATION_ACTIVE_MS+CELEBRATION_CLOSE_MS=2500ms）が画面外に押し出されて
+  // 見えなくなってしまう。演出が完全に消えるのを待ってからスクロールする。
   useEffect(() => {
     if (!promptStance) return;
     const timer = setTimeout(() => {
       document.getElementById("discussion")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 2700);
+    }, 2500);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -17,13 +17,6 @@ interface VotePanelProps {
   /** Radar争点用のカスタム選択肢文言（例: 説明すべき/問題ない/判断できない） */
   labels?: VoteLabels | null;
   onVote?: (choice: VoteChoiceId) => void;
-  /** 投票確定直後だけtrueにして渡す。紙吹雪を出す合図。 */
-  celebrate?: boolean;
-  /**
-   * 初投票直後の数秒間だけtrue。この間は投票済みでも結果バーの演出を表示し続け、
-   * 「✅ 投票しました」の1行に折りたたまない（演出を見せてからスレッドへ流す）。
-   */
-  justVoted?: boolean;
 }
 
 const countKey = (id: VoteChoiceId) => (id === "for" ? "for" : id === "against" ? "against" : "undecided");
@@ -50,6 +43,78 @@ function leadingCallout(tally: VoteTally, labels?: VoteLabels | null) {
   };
 }
 
+/**
+ * 決着バー演出そのもの（コールアウト＋衝突バー＋票数）。
+ * 覗き見表示（未ログインの「結果を見る」）にも、初投票直後のポップアップ演出
+ * （vote-panel-live.tsxのVoteCelebrationModal）にも同じ見た目を使い回す。
+ */
+export function VoteResultEffect({
+  tally,
+  labels,
+  celebrate = false,
+}: {
+  tally: VoteTally;
+  labels?: VoteLabels | null;
+  celebrate?: boolean;
+}) {
+  const labelFor = (id: VoteChoiceId) =>
+    labels?.[id] ?? VOTE_CHOICES.find((c) => c.id === id)?.label ?? id;
+  const callout = leadingCallout(tally, labels);
+
+  return (
+    <div className="relative">
+      <p className={cn("mb-3 text-center text-base font-extrabold", callout.color ?? "text-ink")}>
+        <span className="relative mr-1.5 inline-block">
+          {celebrate && (
+            <span
+              aria-hidden="true"
+              className="absolute -inset-1 animate-ring-pulse-once rounded-full border-2 border-current"
+            />
+          )}
+          <span className="animate-flicker inline-block">{callout.emoji}</span>
+        </span>
+        {callout.text}
+      </p>
+
+      {/* 決着バー: 賛成が左から・反対が右から伸びて中央でぶつかる。「今どちらが優勢か」を一目で伝える演出 */}
+      <div className="relative h-3.5 animate-clash-shake overflow-hidden rounded-full border border-border bg-surface-muted">
+        <div
+          className="absolute inset-y-0 left-0 animate-grow-from-left rounded-full bg-for"
+          style={{ width: `${tally.percents.for}%` }}
+          title={`${labelFor("for")} ${formatPercent(tally.percents.for)}`}
+        />
+        <div
+          className="absolute inset-y-0 right-0 animate-grow-from-right rounded-full bg-against"
+          style={{ width: `${tally.percents.against}%` }}
+          title={`${labelFor("against")} ${formatPercent(tally.percents.against)}`}
+        />
+        {/* 衝突の中心: コアの発光＋8方向に散る破片 */}
+        <div
+          className="pointer-events-none absolute top-1/2 h-0 w-0"
+          style={{ left: `${tally.percents.for}%` }}
+          aria-hidden="true"
+        >
+          <div className="animate-clash-core absolute left-0 top-0 h-5 w-5 rounded-full bg-[radial-gradient(circle,#fff7e0_0%,#f5c451_45%,rgba(245,196,81,0)_75%)]" />
+          {[-70, -35, 0, 35, 70, 110, 145, 180].map((ang) => (
+            <div
+              key={ang}
+              className="animate-clash-shard absolute left-0 top-0 h-[11px] w-[3px] rounded-sm bg-[#f5c451]"
+              style={{ "--ang": `${ang}deg`, transformOrigin: "center bottom" } as React.CSSProperties}
+            />
+          ))}
+        </div>
+      </div>
+
+      <p className="mt-3 text-center text-sm text-ink-muted">
+        <CountUp value={tally.totalVotes} className="tabular-nums font-bold text-ink-secondary" />
+        {" 票 · "}
+        <CountUp value={tally.totalVoters} className="tabular-nums font-bold text-ink-secondary" />
+        {" 人が投票"}
+      </p>
+    </div>
+  );
+}
+
 export function VotePanel({
   tally,
   userVote,
@@ -57,11 +122,10 @@ export function VotePanel({
   isLoggedIn = false,
   labels,
   onVote,
-  celebrate = false,
-  justVoted = false,
 }: VotePanelProps) {
   // 未ログインだけ「結果を見る」で投票せずに結果を覗ける。ログイン済みは必ず3択のどれかに
-  // 投票させ、結果は投票後の演出でしか見せない（覗き見で投票をスキップできないようにする）
+  // 投票させ、結果は投票後のポップアップ演出（VoteCelebrationModal、vote-panel-live.tsx側）
+  // でしか見せない（覗き見で投票をスキップできないようにする）
   const [revealed, setRevealed] = useState(!isLoggedIn && Boolean(userVote));
   // 投票を変更したい時だけ、一時的にフル表示（ボタン付き）に戻す
   const [changingVote, setChangingVote] = useState(false);
@@ -74,13 +138,12 @@ export function VotePanel({
   const labelFor = (id: VoteChoiceId) =>
     labels?.[id] ?? VOTE_CHOICES.find((c) => c.id === id)?.label ?? id;
 
-  const callout = leadingCallout(tally, labels);
-  const showResults = revealed || justVoted;
+  const showResults = revealed;
 
-  // 投票済みなら、この下の議論セクションに賛否の結果バーがそのまま出るため、ここでは
-  // 二重に結果を出さない。「✅ 自分の投票」+「投票し直す」の1行だけにする。
-  // ただしjustVoted中（初投票直後の演出中）はまだ折りたたまず、下の決着バー演出を見せきる。
-  if (userVote && !changingVote && !justVoted) {
+  // 投票済みなら、この下の議論セクションに賛否の結果バーがそのまま出る（初投票直後は
+  // さらにポップアップ演出も出る）ため、ここでは二重に結果を出さない。
+  // 「✅ 自分の投票」+「投票し直す」の1行だけにする。
+  if (userVote && !changingVote) {
     return (
       <div className="flex items-center justify-center gap-3 text-sm">
         <span className="font-bold text-ink-secondary">✅ {labelFor(userVote)}に投票しました</span>
@@ -107,55 +170,8 @@ export function VotePanel({
           </Button>
         </div>
       ) : showResults ? (
-        <div className="relative animate-pop-in">
-          <p className={cn("mb-3 text-center text-base font-extrabold", callout.color ?? "text-ink")}>
-            <span className="relative mr-1.5 inline-block">
-              {celebrate && (
-                <span
-                  aria-hidden="true"
-                  className="absolute -inset-1 animate-ring-pulse-once rounded-full border-2 border-current"
-                />
-              )}
-              <span className="animate-flicker inline-block">{callout.emoji}</span>
-            </span>
-            {callout.text}
-          </p>
-
-          {/* 決着バー: 賛成が左から・反対が右から伸びて中央でぶつかる。「今どちらが優勢か」を一目で伝える演出 */}
-          <div className="relative h-3.5 animate-clash-shake overflow-hidden rounded-full border border-border bg-surface-muted">
-            <div
-              className="absolute inset-y-0 left-0 animate-grow-from-left rounded-full bg-for"
-              style={{ width: `${tally.percents.for}%` }}
-              title={`${labelFor("for")} ${formatPercent(tally.percents.for)}`}
-            />
-            <div
-              className="absolute inset-y-0 right-0 animate-grow-from-right rounded-full bg-against"
-              style={{ width: `${tally.percents.against}%` }}
-              title={`${labelFor("against")} ${formatPercent(tally.percents.against)}`}
-            />
-            {/* 衝突の中心: コアの発光＋8方向に散る破片 */}
-            <div
-              className="pointer-events-none absolute top-1/2 h-0 w-0"
-              style={{ left: `${tally.percents.for}%` }}
-              aria-hidden="true"
-            >
-              <div className="animate-clash-core absolute left-0 top-0 h-5 w-5 rounded-full bg-[radial-gradient(circle,#fff7e0_0%,#f5c451_45%,rgba(245,196,81,0)_75%)]" />
-              {[-70, -35, 0, 35, 70, 110, 145, 180].map((ang) => (
-                <div
-                  key={ang}
-                  className="animate-clash-shard absolute left-0 top-0 h-[11px] w-[3px] rounded-sm bg-[#f5c451]"
-                  style={{ "--ang": `${ang}deg`, transformOrigin: "center bottom" } as React.CSSProperties}
-                />
-              ))}
-            </div>
-          </div>
-
-          <p className="mt-3 text-center text-sm text-ink-muted">
-            <CountUp value={tally.totalVotes} className="tabular-nums font-bold text-ink-secondary" />
-            {" 票 · "}
-            <CountUp value={tally.totalVoters} className="tabular-nums font-bold text-ink-secondary" />
-            {" 人が投票"}
-          </p>
+        <div className="animate-pop-in">
+          <VoteResultEffect tally={tally} labels={labels} />
         </div>
       ) : null}
 
