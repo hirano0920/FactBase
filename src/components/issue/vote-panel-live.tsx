@@ -110,28 +110,26 @@ export function VotePanelLive({
 
   return (
     <div aria-busy={pending}>
-      {/* 決着バー演出のスポットライト。position:fixedで画面全体を覆う。
-          下のカードラッパーがz-50で「兄弟」として同じ階層にいるからこそこの上に乗れる
-          （カードの内側にダイマーを入れ子にすると、カード自身に重ならず沈んでしまう） */}
+      {/* 投票の瞬間、ページ全体（このカードも含めて）を一律に薄暗くする。
+          決着バー自体は彩度の高い色と動きで暗さの上でも目立つため、あえてカードだけ
+          明るく残す特別扱いはしない（シンプルに全体を暗く落とすだけで十分目立つ）。 */}
       <div
         aria-hidden="true"
         className={cn(
-          "pointer-events-none fixed inset-0 z-40 bg-ink/35 transition-opacity duration-200",
+          "pointer-events-none fixed inset-0 z-40 bg-ink/45 transition-opacity duration-200",
           dimActive ? "opacity-100" : "opacity-0",
         )}
       />
-      <div className="relative z-50">
-        <VotePanel
-          tally={tally}
-          userVote={userVote}
-          canVote={isLoggedIn && !pending}
-          isLoggedIn={isLoggedIn}
-          labels={labels}
-          onVote={handleVote}
-          celebrate={celebrate}
-          justVoted={justVoted}
-        />
-      </div>
+      <VotePanel
+        tally={tally}
+        userVote={userVote}
+        canVote={isLoggedIn && !pending}
+        isLoggedIn={isLoggedIn}
+        labels={labels}
+        onVote={handleVote}
+        celebrate={celebrate}
+        justVoted={justVoted}
+      />
       {error && (
         <p role="alert" className="mt-3 text-center text-sm text-against">
           {error}
