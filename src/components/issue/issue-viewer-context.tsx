@@ -288,10 +288,10 @@ export function IssueQualityReportSlot({ slug }: { slug: string }) {
 }
 
 /** 投票済みログインユーザーにのみ「読了後スライダー」を出す(未投票者はそもそも議論が見えていないため) */
-export function IssueSpectrumSlot({ slug }: { slug: string }) {
+export function IssueSpectrumSlot({ slug, labels }: { slug: string; labels?: VoteLabels | null }) {
   const { isLoggedIn, plan, userVote } = useIssueViewer();
   if (!isLoggedIn || !userVote) return null;
-  return <SpectrumVote slug={slug} canViewDetail={canViewAnalytics(plan)} />;
+  return <SpectrumVote slug={slug} canViewDetail={canViewAnalytics(plan)} labels={labels} />;
 }
 
 /** 層の動き・両陣営マップ・MVP（Freeは概要、Plus/Proは詳細） */

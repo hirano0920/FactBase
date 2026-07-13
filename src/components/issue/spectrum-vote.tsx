@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { HistogramBin, ShiftResult } from "@/lib/spectrum";
+import type { VoteLabels } from "@/types";
 
 interface AnalyticsResponse {
   shift: ShiftResult;
@@ -15,6 +16,8 @@ interface AnalyticsResponse {
 interface SpectrumVoteProps {
   slug: string;
   canViewDetail: boolean;
+  /** Radar争点用のカスタム選択肢文言（例: 声明対立型の当事者名ラベル）。無指定時は賛成/反対 */
+  labels?: VoteLabels | null;
 }
 
 type Step = "prompt" | "sliding" | "done";
@@ -24,12 +27,14 @@ type Step = "prompt" | "sliding" | "done";
  * 自動のスクロール深度計測ではなく、本人の「読んだ」という自己申告ボタンをトリガーにする
  * （読んでいないのに勝手に読了扱いにしない、という設計判断）。
  */
-export function SpectrumVote({ slug, canViewDetail }: SpectrumVoteProps) {
+export function SpectrumVote({ slug, canViewDetail, labels }: SpectrumVoteProps) {
   const [step, setStep] = useState<Step>("prompt");
   const [intensity, setIntensity] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
+  const forLabel = labels?.for ?? "賛成";
+  const againstLabel = labels?.against ?? "反対";
 
   const submit = async () => {
     setSubmitting(true);
@@ -74,9 +79,9 @@ export function SpectrumVote({ slug, canViewDetail }: SpectrumVoteProps) {
       <div className="rounded-md border border-border bg-surface-muted px-5 py-5">
         <p className="mb-4 text-sm font-medium text-ink">今の率直な気持ちに近い位置へ</p>
         <div className="mb-2 flex justify-between text-xs font-medium text-ink-secondary">
-          <span className="text-against">反対</span>
+          <span className="text-against">{againstLabel}</span>
           <span>まだ決められない</span>
-          <span className="text-for">賛成</span>
+          <span className="text-for">{forLabel}</span>
         </div>
         <input
           type="range"
@@ -85,7 +90,7 @@ export function SpectrumVote({ slug, canViewDetail }: SpectrumVoteProps) {
           value={intensity}
           onChange={(e) => setIntensity(Number(e.target.value))}
           className="w-full accent-accent"
-          aria-label="賛成〜反対の度合い"
+          aria-label={`${forLabel}〜${againstLabel}の度合い`}
         />
         {error && <p className="mt-2 text-xs text-against">{error}</p>}
         <div className="mt-4 flex justify-center">
@@ -109,7 +114,12 @@ export function SpectrumVote({ slug, canViewDetail }: SpectrumVoteProps) {
             <span>(n={analytics.shift.n})</span>
           </p>
           {analytics.detailed && analytics.histogram ? (
-            <SpectrumHistogram bins={analytics.histogram} n={analytics.afterReadN} />
+            <SpectrumHistogram
+              bins={analytics.histogram}
+              n={analytics.afterReadN}
+              forLabel={forLabel}
+              againstLabel={againstLabel}
+            />
           ) : canViewDetail ? null : (
             <p className="text-center text-xs text-ink-secondary">
               分布の詳細はPlus/Proで見られます
@@ -121,7 +131,17 @@ export function SpectrumVote({ slug, canViewDetail }: SpectrumVoteProps) {
   );
 }
 
-function SpectrumHistogram({ bins, n }: { bins: HistogramBin[]; n: number }) {
+function SpectrumHistogram({
+  bins,
+  n,
+  forLabel,
+  againstLabel,
+}: {
+  bins: HistogramBin[];
+  n: number;
+  forLabel: string;
+  againstLabel: string;
+}) {
   const max = Math.max(1, ...bins.map((b) => b.count));
   return (
     <div>
@@ -139,8 +159,8 @@ function SpectrumHistogram({ bins, n }: { bins: HistogramBin[]; n: number }) {
         ))}
       </div>
       <div className="mt-1 flex justify-between text-[10px] text-ink-secondary">
-        <span>反対</span>
-        <span>賛成</span>
+        <span>{againstLabel}</span>
+        <span>{forLabel}</span>
       </div>
       <p className="mt-1 text-center text-[10px] text-ink-secondary">母数 n={n}</p>
     </div>

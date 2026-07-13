@@ -122,7 +122,11 @@ export default async function IssuePage({ params }: IssuePageProps) {
                   />
 
                   <div className="mt-6 border-t border-border pt-6 text-center">
-                    <p className="mb-4 text-base font-bold text-ink">あなたはどう思いますか？</p>
+                    {/* ページ上部のH1と同じissue.titleをここでも再掲する。以前は
+                        「あなたはどう思いますか？」という固定の汎用文言だったため、
+                        争点ごとに具体的に作った設問（例:「国会前デモの抗議、妥当だと思いますか？」）が
+                        投票の意思決定点では見えなくなっていた */}
+                    <p className="mb-4 text-base font-bold text-ink">{issue.title}</p>
                     <div className="mx-auto max-w-md">
                       <IssueVoteSlot
                         issueId={issue.id}
@@ -153,7 +157,7 @@ export default async function IssuePage({ params }: IssuePageProps) {
                 </ScrollReveal>
               )}
 
-              <IssueSpectrumSlot slug={issue.slug} />
+              <IssueSpectrumSlot slug={issue.slug} labels={issue.voteLabels} />
 
               <ScrollReveal>
                 <Section variant="arena">

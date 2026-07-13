@@ -66,7 +66,8 @@ export function HomeIssueExpand({ issue, guestComments, onBack, scrollToVote = f
           />
 
           <div className="mt-6 border-t border-border pt-6 text-center">
-            <p className="mb-4 text-base font-bold text-ink">あなたはどう思いますか？</p>
+            {/* issues/[slug]/page.tsxと同じ理由で、固定の汎用文言ではなく実際の設問(issue.title)を再掲する */}
+            <p className="mb-4 text-base font-bold text-ink">{issue.title}</p>
             <div className="mx-auto max-w-md">
               <IssueVoteSlot
                 issueId={issue.id}
