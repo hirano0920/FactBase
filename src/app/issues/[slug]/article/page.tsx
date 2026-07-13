@@ -8,8 +8,11 @@ import { AppSidebarStatic } from "@/components/layout/app-sidebar";
 import { SidebarSkeleton } from "@/components/layout/sidebar-skeleton";
 import { LeftRail } from "@/components/layout/left-rail";
 import { ArticleTimeline } from "@/components/issue/article-timeline";
+import { GlossaryHtmlProvider } from "@/components/issue/glossary-html-provider";
 import { getIssueBySlug, getRelatedIssues } from "@/lib/data";
 import { sanitizeArticleHtml } from "@/lib/sanitize";
+import { injectGlossarySpans } from "@/lib/glossary-html";
+import { renderTextWithGlossary } from "@/lib/glossary-render";
 import { extractListItems, isOpeningSectionHeading, splitArticleSections } from "@/lib/article-sections";
 import { debateTypeHasPolarity, detectForSideIndex } from "@/lib/debate-type";
 import { HOME_THREE_COL_GRID, SITE } from "@/lib/constants";
@@ -126,7 +129,7 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
   if (!issue || !issue.articleHtml) notFound();
 
   const safeHtml = sanitizeArticleHtml(issue.articleHtml);
-  const sourceCount = issue.summary.sources?.length ?? 0;
+  const sourceCount = issue.summary.sourceCount ?? issue.summary.sources?.length ?? 0;
 
   const rawSections = splitArticleSections(safeHtml);
   const rawSplitAnchorIdx = rawSections.findIndex((s) => s.heading === "どこで意見が分かれるか");
@@ -184,7 +187,9 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
 
             <div className="mt-5 rounded-xl border border-accent/20 bg-accent/5 px-5 py-4">
               <p className="mb-1.5 text-xs font-extrabold tracking-wide text-accent">要約</p>
-              <p className="text-base leading-relaxed text-ink-secondary">{issue.summary.lead}</p>
+              <p className="text-base leading-relaxed text-ink-secondary">
+                {renderTextWithGlossary(issue.summary.lead, issue.glossary)}
+              </p>
             </div>
 
             <VerificationBar confirmation={issue.confirmation} sourceCount={sourceCount} />
@@ -196,6 +201,7 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
             )}
           </header>
 
+          <GlossaryHtmlProvider glossary={issue.glossary}>
           <div className="space-y-5">
             {sections.map((section, i) => {
               if (splitPair && (i === splitPair[0] || i === splitPair[1])) {
@@ -227,7 +233,10 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
                               {side.heading}
                             </h2>
                           )}
-                          <div className="prose-article" dangerouslySetInnerHTML={{ __html: side.bodyHtml }} />
+                          <div
+                            className="prose-article"
+                            dangerouslySetInnerHTML={{ __html: injectGlossarySpans(side.bodyHtml, issue.glossary) }}
+                          />
                         </section>
                       );
                     })}
@@ -254,7 +263,7 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
                     <div>
                       <div
                         className="prose-article"
-                        dangerouslySetInnerHTML={{ __html: section.bodyHtml }}
+                        dangerouslySetInnerHTML={{ __html: injectGlossarySpans(section.bodyHtml, issue.glossary) }}
                       />
                       <p className="mb-2 mt-4 text-xs font-medium text-ink-faint">
                         この理由を引用してコメントを書く →
@@ -276,13 +285,14 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
                   ) : (
                     <div
                       className="prose-article"
-                      dangerouslySetInnerHTML={{ __html: section.bodyHtml }}
+                      dangerouslySetInnerHTML={{ __html: injectGlossarySpans(section.bodyHtml, issue.glossary) }}
                     />
                   )}
                 </section>
               );
             })}
           </div>
+          </GlossaryHtmlProvider>
 
           <Link
             href={`/issues/${issue.slug}`}

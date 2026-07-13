@@ -528,6 +528,19 @@
     @apply border border-border px-3 py-2 text-left;
   }
 
+  /* 難語ポップオーバー（詳細記事側）。glossary-html.tsがdangerouslySetInnerHTML用の
+     生HTML文字列に埋め込むクラスなので、Tailwindのクラス検出が効かずプレーンCSSで定義する。 */
+  .js-glossary-term {
+    cursor: help;
+    border-bottom: 1.5px dotted var(--color-glossary-underline);
+  }
+  .js-glossary-term:hover,
+  .js-glossary-term:focus-visible {
+    background: var(--color-glossary-muted);
+    border-radius: 3px;
+    outline: none;
+  }
+
   /* 「これまでの流れ」縦タイムライン */
   .article-timeline {
     @apply relative ml-1 list-none space-y-0 py-1 pl-0;

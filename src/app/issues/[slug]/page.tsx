@@ -96,6 +96,13 @@ export default async function IssuePage({ params }: IssuePageProps) {
                     公式発表あり
                   </span>
                 )}
+                {/* 5媒体前後を毎回自分で見比べなくて済む、というタイパの訴求。記事を開く前の
+                    最初のスクリーンで見せることで「このサイトだけ見ればいい」を伝える */}
+                {(issue.summary.sourceCount ?? issue.summary.sources?.length ?? 0) > 0 && (
+                  <span className="flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-blue-700 ring-1 ring-blue-200">
+                    🔎 {issue.summary.sourceCount ?? issue.summary.sources.length}件のソースを横断比較済み
+                  </span>
+                )}
               </div>
               <div className="flex items-start justify-between gap-3">
                 <h1 className="text-3xl font-extrabold leading-tight tracking-tight text-ink sm:text-4xl text-balance">

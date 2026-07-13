@@ -464,6 +464,17 @@ async function promoteOne(c: PromotionCandidate): Promise<string | null> {
     composeGlossary({ lead: article.lead, bullets: article.bullets }),
   ]);
 
+  // 実際に本文を取得して読み比べた媒体数（表示用sourcesは5件に間引くため、
+  // 「何件のソースを横断比較したか」はここで別途数える。reportExcerpts〜pollingExcerptsは
+  // すべてWriterに実際に渡された抜粋なので、この集合が「本当に比較した数」の実態に近い。
+  // primaryExcerptsは一次情報（官報・議事録等）でfeed名を持たないため、あれば+1件として数える）
+  const distinctSourceCount =
+    new Set(
+      [...reportExcerpts, ...internationalReportExcerpts, ...datedExcerpts, ...pollingExcerpts]
+        .map((e) => e.feed)
+        .filter(Boolean),
+    ).size + (primaryExcerpts.length > 0 ? 1 : 0);
+
   const issue = await prisma.issue.create({
     data: {
       slug,
@@ -476,6 +487,7 @@ async function promoteOne(c: PromotionCandidate): Promise<string | null> {
         lead: article.lead,
         bullets: article.bullets,
         sources: c.sourceUrls.slice(0, 5).map((s) => ({ label: `${s.title.slice(0, 40)}（${s.feed}）`, url: s.url })),
+        sourceCount: Math.max(distinctSourceCount, Math.min(c.sourceUrls.length, 5)),
       } as unknown as Prisma.InputJsonValue,
       articleHtml: article.articleHtml,
       articleGeneratedAt: new Date(),

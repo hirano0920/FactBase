@@ -129,6 +129,9 @@ export async function publishHeldRadarCandidate(candidate: TopicCandidateRow): P
   }
 
   const glossary = await composeGlossary({ lead: article.lead, bullets: article.bullets });
+  const distinctSourceCount =
+    new Set([...reportExcerpts, ...internationalReportExcerpts].map((e) => e.feed).filter(Boolean)).size +
+    (primaryExcerpts.length > 0 ? 1 : 0);
 
   const slug = `radar-${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID().slice(0, 8)}`;
   const issue = await prisma.issue.create({
@@ -145,6 +148,7 @@ export async function publishHeldRadarCandidate(candidate: TopicCandidateRow): P
           label: `${s.title.slice(0, 40)}（${s.feed}）`,
           url: s.url,
         })),
+        sourceCount: Math.max(distinctSourceCount, Math.min(sources.length, 5)),
       } as unknown as Prisma.InputJsonValue,
       articleHtml: article.articleHtml,
       articleGeneratedAt: new Date(),

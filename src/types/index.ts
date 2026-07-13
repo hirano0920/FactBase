@@ -6,6 +6,12 @@ export interface IssueSummary {
   lead: string;
   bullets: string[];
   sources: { label: string; url: string }[];
+  /**
+   * 実際に本文を取得して読み比べた媒体の実数。sourcesはリンクプレビュー用に5件へ間引くため、
+   * 「何件のソースを横断比較したか」を正しく伝えるには別数値で持つ必要がある。
+   * 旧記事はundefined（表示側はsources.lengthにフォールバック）。
+   */
+  sourceCount?: number;
 }
 
 export interface GlossaryTerm {

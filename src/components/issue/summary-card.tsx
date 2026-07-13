@@ -93,6 +93,7 @@ export function SummaryCard({
               <StancePanel
                 label={parsedSideA.label ?? "一方の立場"}
                 claim={sideAParts.claim}
+                points={sideAParts.points}
                 tone={hasPolarity ? (aIsFor ? "for" : "against") : "accent"}
                 compact={compact}
                 glossary={glossary}
@@ -111,6 +112,7 @@ export function SummaryCard({
               <StancePanel
                 label={parsedSideB.label ?? "もう一方の立場"}
                 claim={sideBParts.claim}
+                points={sideBParts.points}
                 tone={hasPolarity ? (aIsFor ? "against" : "for") : "warm"}
                 compact={compact}
                 glossary={glossary}
@@ -166,12 +168,15 @@ export function SummaryCard({
 function StancePanel({
   label,
   claim,
+  points,
   tone,
   compact,
   glossary,
 }: {
   label: string;
   claim: string;
+  /** 芯の主張だけでは「何が問題か」が伝わらないため、根拠の一文も添える（splitClaimAndPointsの残り） */
+  points?: string[];
   tone: "for" | "against" | "accent" | "warm";
   compact: boolean;
   glossary?: GlossaryTerm[] | null;
@@ -221,6 +226,16 @@ function StancePanel({
       >
         {renderTextWithGlossary(claim, glossary)}
       </p>
+      {points && points.length > 0 && (
+        <p
+          className={cn(
+            "pl-2 mt-1.5 leading-snug text-ink-secondary",
+            compact ? "text-xs line-clamp-2" : "text-[13px] line-clamp-3",
+          )}
+        >
+          {renderTextWithGlossary(points.join(" "), glossary)}
+        </p>
+      )}
     </div>
   );
 }

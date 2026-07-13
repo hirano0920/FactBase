@@ -46,6 +46,11 @@ export function HomeIssueExpand({ issue, guestComments, onBack, scrollToVote = f
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <CategoryBadge category={issue.category} />
             <StatusBadge status={issue.status} />
+            {(issue.summary.sourceCount ?? issue.summary.sources?.length ?? 0) > 0 && (
+              <span className="flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-blue-700 ring-1 ring-blue-200">
+                🔎 {issue.summary.sourceCount ?? issue.summary.sources.length}件のソースを横断比較済み
+              </span>
+            )}
           </div>
           <div className="flex items-start justify-between gap-3">
             <h2 className="text-2xl font-extrabold leading-tight tracking-tight text-ink sm:text-3xl">
