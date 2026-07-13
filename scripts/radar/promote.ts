@@ -204,10 +204,14 @@ async function mergeIntoExistingIssue(c: PromotionCandidate, duplicate: ActiveIs
   console.log(`  🔗 [重複回避] ${c.title} は既存Issue「${duplicate.title}」と同一出来事と判定 — 続報として統合`);
   if (DRY_RUN) return;
 
+  // TopicCandidate.issueId は @unique。duplicate.id は既に別の候補（Issue作成の主候補、
+  // または過去の別の続報統合）が保持している可能性が高く、ここでも同じ値をセットすると
+  // 一意制約違反でトランザクション全体が失敗する（実際に本番で発生した障害）。
+  // absorbIntoIssue と同じ方針で、続報側にはissueIdを付けずdecisionにだけ統合先を残す。
   await prisma.$transaction([
     prisma.topicCandidate.update({
       where: { id: c.id },
-      data: { status: "PUBLISHED", issueId: duplicate.id, decision: `merged_into_existing_issue:${duplicate.id}` },
+      data: { status: "PUBLISHED", decision: `merged_into_existing_issue:${duplicate.id}` },
     }),
     prisma.issueTimeline.create({
       data: {
