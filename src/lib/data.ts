@@ -782,6 +782,13 @@ export interface IssueTimelineEntry {
   at: string;
 }
 
+/**
+ * パイプラインの内部監査ログ（「なぜ/どう公開されたか」）であって、読者が知りたい
+ * 「その後どうなったか」の更新ではないラベルのパターン。getIssueTimelineで除外する。
+ */
+const INTERNAL_TIMELINE_LABEL =
+  /^(バズ検知|一次情報に基づく記事を公開|現時点まとめを公開|管理者承認により記事付きで公開)/;
+
 export async function getIssueTimeline(issueId: string, limit = 10): Promise<IssueTimelineEntry[]> {
   if (!isDbEnabled()) return [];
 
@@ -800,12 +807,16 @@ export async function getIssueTimeline(issueId: string, limit = 10): Promise<Iss
     orderBy: { at: "desc" },
     take: limit,
   });
-  const mapped = rows.map((t) => ({
-    id: t.id,
-    label: t.label,
-    sourceUrl: t.sourceUrl,
-    at: t.at.toISOString(),
-  }));
+  // 「バズ検知→…公開」等はパイプラインの内部監査ログであって、読者向けの「その後どうなったか」
+  // という更新ではない（続報・訂正・管理者判断とは別種）。読者には表示しない。
+  const mapped = rows
+    .filter((t) => !INTERNAL_TIMELINE_LABEL.test(t.label))
+    .map((t) => ({
+      id: t.id,
+      label: t.label,
+      sourceUrl: t.sourceUrl,
+      at: t.at.toISOString(),
+    }));
 
   try {
     await kv.set(cacheKey, JSON.stringify(mapped), { ex: BURST.timelineCacheSec });
