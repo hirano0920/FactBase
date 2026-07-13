@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseJudgeResponse, averageScore, gateFromScore, JUDGE_AXES } from "../article-judge";
+import { parseJudgeResponse, averageScore, gateFromScore, JUDGE_AXES, parseGateJudgeResponse } from "../article-judge";
 
 function score(n: number) {
   return { score: n, reason: "test" };
@@ -100,6 +100,23 @@ describe("gateFromScore", () => {
     expect(gate.reason).toBeNull();
   });
 
+  it("bothSidesQualityが3点（一般ゲート閾値ちょうど）でも両論は不合格", () => {
+    const s = parseJudgeResponse(
+      JSON.stringify({
+        bothSidesQuality: score(3),
+        factualGrounding: score(5),
+        neutrality: score(5),
+        relatability: score(5),
+        depth: score(5),
+        clarity: score(5),
+        titleHook: score(5),
+      }),
+    );
+    const gate = gateFromScore(s);
+    expect(gate.ok).toBe(false);
+    expect(gate.reason).toContain("bothSidesQuality=3");
+  });
+
   it("bothSidesQualityが閾値未満ならok=falseで理由を返す（片側だけ書かれた記事を落とす）", () => {
     const s = parseJudgeResponse(
       JSON.stringify({
@@ -181,5 +198,21 @@ describe("gateFromScore", () => {
       }),
     );
     expect(gateFromScore(s).ok).toBe(true);
+  });
+});
+
+describe("parseGateJudgeResponse", () => {
+  it("4軸だけでもゲート判定できる形に正規化する", () => {
+    const s = parseGateJudgeResponse(
+      JSON.stringify({
+        bothSidesQuality: score(4),
+        neutrality: score(4),
+        depth: score(3),
+        clarity: score(3),
+      }),
+    );
+    expect(gateFromScore(s).ok).toBe(true);
+    expect(s.factualGrounding.score).toBe(3);
+    expect(s.relatability.reason).toContain("ゲート対象外");
   });
 });

@@ -1,15 +1,21 @@
 import { describe, expect, it } from "vitest";
 import {
   assessReportExcerptThickness,
+  autoRepairArticle,
   checkBulletsThickness,
   checkDuplicateFacts,
   checkIncidentFirst,
+  checkLeadOpeningMatch,
+  checkRelatabilityBridge,
+  checkSidesGrounding,
   enrichSummaryForDisplay,
   findStructureIssues,
+  normalizeArticleSurfaces,
   CLEAR_DECLARATION_BAD_HTML,
   CLEAR_DECLARATION_GOOD_HTML,
   MESSY_NORM_FLARE_GOOD_HTML,
   MESSY_POLICY_GOOD_HTML,
+  SIDES_UNGROUNDED_BAD_HTML,
 } from "@/lib/article-quality";
 
 describe("checkIncidentFirst", () => {
@@ -56,6 +62,140 @@ describe("checkBulletsThickness", () => {
       ),
     ).toBeNull();
   });
+
+  it("1項目目が対立の構図の説明だけで実際の発言・行為の中身が無い場合は不合格", () => {
+    // 実例: 「発言」「解雇」等のトークンはINCIDENT_SUBSTANCEに一致するため、
+    // 対立の構図を説明しているだけの文でも従来は合格していた（読者が争点の中身を
+    // 把握できず投票できないという実際の報告を受けて追加）
+    const issue = checkBulletsThickness(
+      [
+        "争点の軸: 車掌の車内アナウンスでの外国人向け発言と、それに対する即時解雇処分の是非を巡る規範的な対立",
+        "擁護側: 車掌とオープンな対話を重ね将来的な再雇用の機会を判断する。根拠として責任者の意向が報じられている",
+        "批判側: 乗客を侮辱したり排除したりする言動を一切容認せず即時解雇した。根拠として謝罪声明がある",
+      ],
+      { isReported: true },
+    );
+    expect(issue?.reason).toBe("bullets_too_thin");
+  });
+});
+
+describe("checkSidesGrounding", () => {
+  it("片側が教科書一般論だけの記事は不合格", () => {
+    const issue = checkSidesGrounding(SIDES_UNGROUNDED_BAD_HTML);
+    expect(issue?.reason).toMatch(/sides_ungrounded|sides_asymmetric/);
+  });
+
+  it("両側に帰属があるCLEAR例は合格", () => {
+    expect(checkSidesGrounding(CLEAR_DECLARATION_GOOD_HTML)).toBeNull();
+  });
+
+  it("両側に帰属がある政策例は合格", () => {
+    expect(checkSidesGrounding(MESSY_POLICY_GOOD_HTML)).toBeNull();
+  });
+});
+
+describe("checkLeadOpeningMatch", () => {
+  it("leadと冒頭が別内容なら不合格", () => {
+    const issue = checkLeadOpeningMatch({
+      lead: "本日のニュースでは経済指標の発表があり市場が反応しましたが詳細はまだ不明で議論が続いています。専門家は追加の説明を求めており、今後の政策判断にも影響が出るとみられています。別件の要約です。",
+      articleHtml: CLEAR_DECLARATION_GOOD_HTML,
+    });
+    expect(issue?.reason).toBe("lead_opening_mismatch");
+  });
+
+  it("短いスタブリードはスキップ", () => {
+    expect(
+      checkLeadOpeningMatch({ lead: "短いlead", articleHtml: CLEAR_DECLARATION_GOOD_HTML }),
+    ).toBeNull();
+  });
+});
+
+describe("checkRelatabilityBridge", () => {
+  it("タイトルに貿易フックがあるのに本文に波及が無いと不合格", () => {
+    const html = `<h2>いま何が論点か</h2><p>政府は防衛費の引き上げ方針を閣議決定したと発表しています。与野党で賛否が分かれています。装備更新の是非が焦点です。</p>
+<h2>どこで意見が分かれるか</h2><ul><li><strong>推進:</strong> 抑止が必要</li><li><strong>慎重:</strong> 財源が不安</li></ul>`;
+    const issue = checkRelatabilityBridge(html, "防衛費増—貿易・円相場への波及は？");
+    expect(issue?.reason).toBe("relatability_missing");
+  });
+
+  it("フックが本文にあれば合格", () => {
+    expect(
+      checkRelatabilityBridge(SIDES_UNGROUNDED_BAD_HTML, "ロシア諜報—貿易・安全保障に波及は？"),
+    ).toBeNull();
+  });
+});
+
+describe("autoRepairArticle", () => {
+  it("混在する側から教科書一般論の<li>だけ落とす", () => {
+    const html = `<h2>いま何が論点か</h2><p>政府は防衛費の引き上げ方針を閣議決定したと発表しています。与野党で財源と抑止の是非が論点です。</p>
+<h2>賛成側が言うこと</h2><ul><li>与党議員は抑止に必要な装備更新が遅れていると指摘する</li><li>防衛省関係者は同盟国との負担是正が必要だと述べている</li><li>過度な規制が国際競争力を損なう恐れがある</li></ul>
+<h2>反対側が言うこと</h2><ul><li>野党は国債増発で将来世代の負担が増えると主張する</li><li>野党議員は医療・教育予算とのトレードオフが説明不足だと国会で指摘した</li></ul>
+<h2>出典</h2><ul><li><a href="https://example.com">例</a></li></ul>`;
+    const repaired = autoRepairArticle(
+      {
+        lead: "短い",
+        bullets: [
+          "いま分かっていること: 防衛費の引き上げ方針を閣議で決定したと政府が発表し財源が争点になっている",
+          "賛成側: 装備更新の遅れを指摘する",
+          "反対側: 国債増発の負担を主張する",
+        ],
+        articleHtml: html,
+      },
+      { issueTitle: "防衛費—家計・税金への影響は？" },
+    );
+    expect(repaired.articleHtml).toContain("家計");
+    expect(repaired.articleHtml).not.toContain("国際競争力を損なう恐れがある");
+    expect(repaired.articleHtml).toContain("装備更新が遅れている");
+    expect(checkSidesGrounding(repaired.articleHtml)).toBeNull();
+  });
+
+  it("全員が教科書一般論の側は0円では触らず残す（mini修理前提）", () => {
+    const repaired = autoRepairArticle(
+      {
+        lead: "短い",
+        bullets: ["a", "b", "c"],
+        articleHtml: SIDES_UNGROUNDED_BAD_HTML,
+      },
+      { issueTitle: "ロシア諜報" },
+    );
+    expect(repaired.articleHtml).toContain("国際競争力を損なう恐れがある");
+    expect(checkSidesGrounding(repaired.articleHtml)?.reason).toMatch(
+      /sides_ungrounded|sides_asymmetric/,
+    );
+  });
+
+  it("lead不一致は正規化で解消される", () => {
+    const repaired = autoRepairArticle(
+      {
+        lead: "本日のニュースでは経済指標の発表があり市場が反応しましたが詳細はまだ不明で議論が続いています。専門家は追加の説明を求めており、今後の政策判断にも影響が出るとみられています。別件の要約です。",
+        bullets: [
+          "報道の内容: 週刊文春はドラマ撮影中の身体的接触と楽屋でのキャリアに関する否定的な発言があったと報じた",
+          "佐藤二朗さん側: 報道は創作であり専門家確認でもハラスメント定義に当たらないと主張している",
+          "週刊文春・報道側: 複数の関係者取材に基づき撮影中の接触と楽屋での発言があったとする",
+        ],
+        articleHtml: CLEAR_DECLARATION_GOOD_HTML,
+      },
+      { issueTitle: "声明対立のテスト" },
+    );
+    expect(checkLeadOpeningMatch(repaired)).toBeNull();
+  });
+});
+
+describe("normalizeArticleSurfaces", () => {
+  it("leadを冒頭セクションに揃え、薄いbulletsを両側から補う", () => {
+    const synced = normalizeArticleSurfaces({
+      lead: "短い別要約",
+      bullets: [
+        "いま分かっていること: トラブル",
+        "慎重派: 現行法で対応可能だ",
+        "警戒派: 反対",
+      ],
+      articleHtml: CLEAR_DECLARATION_GOOD_HTML,
+    });
+    expect(synced.lead).toContain("週刊文春");
+    expect(synced.bullets[0]).toContain("接触");
+    expect(synced.bullets[1].length).toBeGreaterThan(40);
+  });
 });
 
 describe("enrichSummaryForDisplay", () => {
@@ -73,6 +213,7 @@ describe("enrichSummaryForDisplay", () => {
       CLEAR_DECLARATION_GOOD_HTML,
     );
     expect(enriched.bullets[0]).toContain("接触");
+    expect(enriched.lead).toContain("週刊文春");
   });
 });
 
@@ -99,6 +240,7 @@ describe("findStructureIssues", () => {
       findStructureIssues(
         {
           articleHtml: MESSY_POLICY_GOOD_HTML,
+          lead: "政府は来年度予算案で防衛費をGDP比2%超まで引き上げる方針を閣議決定したと発表しています。与党内にも財源の国債依存を不安視する声があり、野党は社会保障との両立を問題視しています。数字の是非だけでなく、何を削って何を積むかが争点です。",
           bullets: [
             "いま分かっていること: 防衛費の引き上げ方針を閣議で決定したと政府が発表し、財源の国債依存が争点になっている",
             "賛成側が言うこと: 抑止に必要な装備更新が遅れており同盟国との負担是正が必要だと主張する",
@@ -108,6 +250,27 @@ describe("findStructureIssues", () => {
         { isReported: false },
       ),
     ).toEqual([]);
+  });
+
+  it("教科書一般論の片側記事はsides系で不合格", () => {
+    const issues = findStructureIssues(
+      {
+        articleHtml: SIDES_UNGROUNDED_BAD_HTML,
+        lead: "ニューヨーク・タイムズは、ロシアが日本をスパイ活動の拠点とし、制裁回避で工作機械や電子部品を入手している可能性を報じています。テンプル大学の教授は防諜体制の脆弱さに警鐘を鳴らしました。貿易や安全保障への波及が論点です。",
+        bullets: [
+          "いま分かっていること: ロシアのスパイ活動と部品調達の可能性が報じられ防諜体制が論点になっている",
+          "警戒強化派: ニューヨーク・タイムズは工作員が先端技術を狙っていると報じている",
+          "慎重派: 現行法で対応可能で過度な規制が国際競争力を損なう恐れがある",
+        ],
+      },
+      {
+        isReported: true,
+        issueTitle: "ロシア諜報機関員—貿易・円相場・安全保障に波及は現実的か？",
+      },
+    );
+    expect(issues.some((i) => i.reason === "sides_ungrounded" || i.reason === "sides_asymmetric")).toBe(
+      true,
+    );
   });
 });
 

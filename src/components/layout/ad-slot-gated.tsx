@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { AdSlot } from "@/components/layout/page-container";
 import { planShowsAds } from "@/lib/plan-features";
-import type { Plan } from "@prisma/client";
+import { fetchIssueViewer, hasLikelySessionCookie } from "@/lib/issue-viewer-client";
 
 interface AdSlotGatedProps {
   slug?: string;
@@ -12,22 +12,23 @@ interface AdSlotGatedProps {
 }
 
 /**
- * Pro ユーザーには広告を出さない。slug があれば争点 viewer API でプランを取得。
+ * Pro ユーザーには広告を出さない。
+ * slug があれば viewer API（IssueViewerProvider と共有キャッシュ）でプランを取得。
+ * セッションcookieが無ければゲスト確定で fetch しない。
  */
 export function AdSlotGated({ slug, label, className }: AdSlotGatedProps) {
   const [showAds, setShowAds] = useState(true);
 
   useEffect(() => {
     if (!slug) return;
+    if (!hasLikelySessionCookie()) return;
     let cancelled = false;
 
     (async () => {
       try {
-        const res = await fetch(`/api/issues/${encodeURIComponent(slug)}/viewer`);
-        if (!res.ok || cancelled) return;
-        const data = (await res.json()) as { isLoggedIn: boolean; plan?: Plan };
-        if (!data.isLoggedIn) return;
-        if (!cancelled) setShowAds(planShowsAds(data.plan ?? "FREE"));
+        const data = await fetchIssueViewer(slug);
+        if (cancelled || !data.isLoggedIn) return;
+        if (!cancelled) setShowAds(planShowsAds(data.plan));
       } catch {
         /* 広告表示のまま */
       }

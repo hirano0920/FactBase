@@ -32,7 +32,11 @@ import {
   debateTypeBulletsSpec,
   type DebateType,
 } from "@/lib/debate-type";
-import { findStructureIssues } from "@/lib/article-quality";
+import { findStructureIssues, autoRepairArticle, normalizeArticleSurfaces } from "@/lib/article-quality";
+import {
+  repairSideSectionsWithMini,
+  collectSourceHintsForRepair,
+} from "@/lib/article-repair";
 
 const SYSTEM = `あなたは${SITE.name}の編集デスクです。
 
@@ -57,21 +61,28 @@ const SYSTEM = `あなたは${SITE.name}の編集デスクです。
 - 数値は抜粋の表記をそのまま使う。leadで「A円からB円台」のように矛盾して読める並べ方をしない
 - leadは「いま何が論点か」（またはOFFICIALの「いま分かっていること」）と同一内容にする。短い別要約を作らない
 - leadに「報道ベースで真偽未確認」等の定型ラベルを付けない
+- bulletsの1項目目は冒頭と同じ具体事実。2・3項目目は両側セクションと同じ芯。フィード・スレッド・記事で別要約を書かない
 
 # 何を書くか（最低限）
-1. いま何が論点か — 冒頭3〜4文。①報道・公式が「何を」言ったか（具体的内容を先に）②経緯③反応と対立軸
-2. どこで意見が分かれるか — 両側の立場を1行ずつ
-3. 両側の主張（最重要・同じ分量）。①で書いた事実の再掲禁止。理由・反論・論点だけ
+1. いま何が論点か — 冒頭3〜4文。①報道・公式が「何を」言ったか（具体的内容を先に）②経緯③反応と対立軸。可能なら一般読者への影響（生活・お金・安全・仕事・表現等）を1文含める
+2. どこで意見が分かれるか — 両側の立場を1行ずつ。タイトルの自分ごとフック（例:貿易・円・燃料・SNS）があれば対立軸にも落とす
+3. 両側の主張（最重要・同じ分量・同じ根拠密度）。①で書いた事実の再掲禁止。理由・反論・論点だけ
 4. 各社の差 — 冒頭と重複する事実の再掲禁止。論調の違い・追加情報のみ
 5. 背景・法令は点火に必要なら短く
 6. まだ分からないこと（短く）
 
-# 両側の見せ方（視覚的にも内容的にも対になる）
+# 両側の見せ方（視覚的にも内容的にも対になる）★品質の最重要
 - 政策: 「賛成側が言うこと」「反対側が言うこと」。賛成リストに反対・慎重論を混ぜない
 - 声明対立・ゴシップの当事者対立: 当事者名で揃える（「批判・告発側が言うこと」「本人・事務所側が言うこと」）
   「賛成＝被害者／反対＝本人」の無理当て禁止。片方のリストに反対側の応援を混ぜない
 - 戦争・外交・国際対立: 実在する陣営・立場名で揃える（例:「停戦を急ぐ側」「軍事圧力を優先する側」）
-- 両側とも各3〜4項目。一方だけ厚くしない。教科書的一般論で埋めない
+- 両側とも各2〜4項目。一方だけ厚くしない（資料が薄い側は2項目で可）
+- ★両側とも資料に根拠がある主張だけ書く。各項目に媒体名・発言者名・国会発言者など帰属を付ける
+  （良い例:「○○議員は〜と指摘しています」「朝日は〜と伝えています」）
+  （悪い例:「過度な規制が国際競争力を損なう恐れがある」「現行法で対応可能だ」— 資料に無い教科書一般論）
+- 片側だけ具体手口・数字があり、もう片側が抽象スローガンだけの非対称は禁止
+- ★資料に反対・慎重側の根拠が薄いときは捏造しない。その側は帰属付き2項目までに留め、足りない点は「まだ分からないこと」へ回す
+  （空の側を一般論で埋める方が不合格になる）
 
 # 国内主／海外主の使い分け
 - 国内が主戦場の争点（国内政治・社会炎上・国内経済など）:
@@ -233,7 +244,8 @@ const OFFICIAL_FORMAT = `<h2>いま分かっていること</h2>
       立場が分かれない争点はこのセクションを省略）
     <h2>賛成側が言うこと</h2><ul><li>…</li><li>…</li><li>…</li></ul>
     <h2>反対側が言うこと</h2><ul><li>…</li><li>…</li><li>…</li></ul>
-      （声明対立なら h2 を当事者名に置き換える。各3〜4項目・同じ分量。具体点から。一般論禁止。
+      （声明対立なら h2 を当事者名に置き換える。各3〜4項目・同じ分量・同じ根拠密度。
+      各<li>に媒体名・発言者・議員名など帰属を付ける。資料に無い教科書一般論で埋めない。
       天災の公式発表など一方の立場が無い場合のみ両セクション省略可）
     <h2>数字で見る世論</h2><ul><li>…</li></ul>（世論調査の数値がある場合のみ。無ければ省略）
     <h2>まだ分からないこと</h2><ul><li>…</li></ul>（未確定点を1〜3項目）
@@ -246,17 +258,20 @@ const OFFICIAL_FORMAT = `<h2>いま分かっていること</h2>
 const REPORTED_FORMAT = `<h2>いま何が論点か</h2><p>3〜4文。必ずこの順序で書く:
       ① 何が報じられたか — 媒体名付き（「週刊文春は〜と報じています」）。報道の具体的内容（行為・発言・出来事）を最初に書く。否定や反応の前に、読者が「何の話か」を100%把握できること
       ② 最小限の経緯（時期・場面・共演等）
-      ③ 当事者・関係者の反応と、意見が分かれる軸
-      断定禁止・帰属付き。2文だけの薄い要約禁止</p>
+      ③ 当事者・関係者の反応と、意見が分かれる軸。可能なら一般読者への影響（生活・お金・安全・仕事・表現・SNS等）を1文
+      断定禁止・帰属付き。2文だけの薄い要約禁止。lead・bullets1項目目と同一内容</p>
     <h2>どこで意見が分かれるか</h2><ul><li><strong>立場A:</strong> …</li><li><strong>立場B:</strong> …</li></ul>
       （資料の言い分だけ。両側が視覚的に対になるラベル。声明対立は当事者名。戦争・外交は実陣営名。
-      曖昧ラベル禁止。立場が分かれない争点は省略）
+      曖昧ラベル禁止。立場が分かれない争点は省略。
+      争点タイトルに自分ごとフック（貿易・円・燃料・年金・SNS等）があれば、その波及を対立軸の文言に含める）
     <h2>賛成側が言うこと</h2><ul><li>…</li><li>…</li><li>…</li></ul>
     <h2>反対側が言うこと</h2><ul><li>…</li><li>…</li><li>…</li></ul>
       （最重要。声明対立なら h2 を当事者名に置き換え、bullets とも揃える。
-      各3〜4項目・同じ分量。「いま何が論点か」「各社は何を伝えているか」で既出の事実を繰り返さない。
-      各側の主張・理由・反論だけ。一般論禁止。他国の数字を混ぜない。
-      片方のリストに反対側の応援や両論を混ぜない。
+      各3〜4項目・同じ分量・同じ根拠密度。「いま何が論点か」「各社は何を伝えているか」で既出の事実を繰り返さない。
+      各側の主張・理由・反論だけ。各<li>に媒体名・発言者・議員・有識者など帰属を付ける。
+      「国際競争力を損なう」「現行法で十分」「慎重にすべき」等の資料に無い教科書一般論で埋めない。
+      片側だけ具体・もう片側だけ抽象スローガンは禁止。薄い側の根拠が資料に無ければ捏造せず「まだ分からないこと」へ。
+      片方のリストに反対側の応援や両論を混ぜない。他国の数字を混ぜない。
       本当に一方の立場が無い争点に限り両セクション省略可）
     <h2>各社は何を伝えているか</h2><ul><li><strong>各社が揃って伝えていること:</strong> …</li><li><strong>媒体名:</strong> 固有の内容（差がある場合のみ）</li></ul>
       （報道抜粋が複数媒体分ある場合のみ。冒頭で述べた共通の事実を繰り返さない — 論調の差・追加情報・食い違いだけ。
@@ -340,7 +355,8 @@ const TIMELINE_FIRST_REPORTED_FORMAT = `<h2>いま何が論点か</h2><p>直近2
       （実在する陣営・立場名。曖昧ラベル禁止）
     <h2>賛成側が言うこと</h2><ul><li>…</li><li>…</li><li>…</li></ul>
     <h2>反対側が言うこと</h2><ul><li>…</li><li>…</li><li>…</li></ul>
-      （陣営名の h2 に置き換えてよい。各3〜4項目。冒頭・タイムラインの事実再掲禁止。主張・理由だけ）
+      （陣営名の h2 に置き換えてよい。各3〜4項目・同じ根拠密度。冒頭・タイムラインの事実再掲禁止。
+      主張・理由だけ。各項目に媒体・発言者帰属。資料に無い一般論埋め禁止）
     <h2>各社は何を伝えているか</h2><ul><li><strong>各社が揃って伝えていること:</strong> …</li><li><strong>媒体名:</strong> 固有の内容</li></ul>
       （直近報道の論調差・追加情報のみ。タイムラインの再掲禁止）
     <h2>海外ではどう報じられているか</h2><ul><li>…</li></ul>
@@ -488,6 +504,23 @@ ${revisionFeedback.map((f, i) => `${i + 1}. ${f}`).join("\n")}`
       ? "\n# 海外報道抜粋あり: 海外が主戦場の争点、または国内との意味ある差があるときだけ「海外ではどう報じられているか」を書く。国内主なら使わずセクション省略。"
       : "\n# 海外報道抜粋なし: 「海外ではどう報じられているか」は出さない。他国の類似事例も書かない。";
 
+  const attributionLabels = [
+    ...new Set(
+      [
+        ...reportExcerpts.map((e) => e.feed),
+        ...internationalReportExcerpts.map((e) => e.feed),
+        ...dietSpeeches.map((s) => s.speaker).filter(Boolean),
+        ...primaryExcerpts.map((e) => e.title).filter(Boolean),
+      ]
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0 && s.length <= 40),
+    ),
+  ].slice(0, 16);
+  const attributionHint =
+    attributionLabels.length > 0
+      ? `\n# 使える帰属ラベル（両側の各項目で積極的に使う。これに無い一般論で埋めない）: ${attributionLabels.join("、")}`
+      : "\n# 帰属: 資料にある媒体名・発言者名だけを使い、教科書一般論で両側を埋めない。";
+
   const res = await openai.chat.completions.create({
     model: resolveArticleModel(AI_MODELS.article),
     response_format: { type: "json_object" },
@@ -497,7 +530,7 @@ ${revisionFeedback.map((f, i) => `${i + 1}. ${f}`).join("\n")}`
         role: "user",
         content: `争点: ${issueTitle}
 種別: ${isReported ? "報道ベース（断定禁止・帰属付き）" : "公式発表ベース"}
-目的: スプリットスレッド参加者への最低限の中立土台（長文まとめ・偏向報道にしない）${intlHint}${timelineFirstHint}
+目的: スプリットスレッド参加者への最低限の中立土台（長文まとめ・偏向報道にしない）${intlHint}${timelineFirstHint}${attributionHint}
 
 # この争点の書き方（厳守）
 ${typeHint}
@@ -567,7 +600,11 @@ export interface UngroundedClaim extends ArticleClaim {
     | "opening_too_thin"
     | "incident_first_missing"
     | "duplicate_facts"
-    | "bullets_too_thin";
+    | "bullets_too_thin"
+    | "sides_ungrounded"
+    | "sides_asymmetric"
+    | "lead_opening_mismatch"
+    | "relatability_missing";
 }
 
 /**
@@ -698,14 +735,17 @@ export interface VerifiedArticleResult {
   unresolvedClaims: UngroundedClaim[];
   /** 実際に行った生成試行回数（初回=1） */
   attempts: number;
+  /** 検証ループ内で両側mini修理を既に使ったか（品質ゲート側の二重修理を防ぐ） */
+  sideRepairUsed: boolean;
 }
 
 /**
  * Writer（GPT-5）→Verify（nano、独立呼び出し）→不合格ならWriterへ差し戻し、のループ。
  * 検証は4段: ①claimsのsourceUrlが実在の資料か ②その資料に本当に書かれているか（nano）
  * ③claimsに自己申告されていない数値・強調箇所が資料に見つかるか（網羅性チェック）
- * ④構造（incidentFirst・重複再掲）— 嘘でなくても読めない記事を弾く。
+ * ④構造（incidentFirst・重複再掲・両側根拠・lead一致・自分ごとブリッジ）— 嘘でなくても読めない／偏った記事を弾く。
  * ①③④は機械的（0円）、②だけnanoを使う。
+ * 検証通過後は normalizeArticleSurfaces で lead/bullets を冒頭・両側HTMLに揃える。
  */
 export async function generateVerifiedArticle(
   params: GenerateArticleParams,
@@ -720,13 +760,23 @@ export async function generateVerifiedArticle(
   const haystacks = [...index.values(), ...sourceTitles];
   let feedback: string[] = [];
   let article: ArticleJson = { lead: "", bullets: [], articleHtml: "" };
+  let sideRepairUsed = false;
 
   for (let attempt = 1; attempt <= retries + 1; attempt++) {
     article = await generateArticle({ ...params, revisionFeedback: feedback });
     const claims = article.claims ?? [];
 
     const missingSource = findUngroundedByMissingSource(claims, index);
-    const toCheck = claims.filter((c) => index.has(c.sourceUrl));
+    const withSource = claims.filter((c) => index.has(c.sourceUrl));
+    // timeline-first: 帰属付き速報クレームはソフトパス対象なので nano を呼ばない（コスト削減）
+    // タイムライン用（datedExcerpts URL）のクレームは従来どおり厳格照合
+    const softPass = (c: (typeof claims)[number]) =>
+      Boolean(
+        params.timelineFirst &&
+          isAttributedReportClaim(c.text) &&
+          !datedUrls.has(c.sourceUrl),
+      );
+    const toCheck = withSource.filter((c) => !softPass(c));
 
     const checkItems: ClaimToVerify[] = toCheck.map((c, i) => ({
       id: String(i),
@@ -735,36 +785,90 @@ export async function generateVerifiedArticle(
     }));
     const results = checkItems.length > 0 ? await verifyClaimsAgainstSources(checkItems) : [];
     const supportedById = new Map(results.map((r) => [r.id, r.supported]));
-    // timeline-first: 帰属付き速報クレームの unsupported はソフトパス（真偽揺れを許容）
-    // タイムライン用（datedExcerpts URL）のクレームは従来どおり厳格照合
     const unsupported: UngroundedClaim[] = toCheck
-      .filter((c, i) => {
-        if (supportedById.get(String(i)) !== false) return false;
-        if (
-          params.timelineFirst &&
-          isAttributedReportClaim(c.text) &&
-          !datedUrls.has(c.sourceUrl)
-        ) {
-          return false;
-        }
-        return true;
-      })
+      .filter((_c, i) => supportedById.get(String(i)) === false)
       .map((c) => ({ ...c, reason: "unsupported" as const }));
 
     const ungroundedNumbers: UngroundedClaim[] = findUngroundedNumbers(
       extractGroundableNumbers(article.articleHtml),
       haystacks,
     ).map((text) => ({ text, sourceUrl: "", reason: "ungrounded_number" as const }));
-    const unclaimedHighlights: UngroundedClaim[] = findUnclaimedHighlights(
-      extractHighlightedFacts(article.articleHtml),
+
+    // <strong>自己申告漏れは強調解除で0円解消（全文再生成しない）
+    let workingHtml = article.articleHtml;
+    let unclaimedHighlights: UngroundedClaim[] = findUnclaimedHighlights(
+      extractHighlightedFacts(workingHtml),
       claims.map((c) => c.text),
       haystacks,
     ).map((text) => ({ text, sourceUrl: "", reason: "unclaimed_highlight" as const }));
+    if (unclaimedHighlights.length > 0) {
+      workingHtml = stripStrongMarks(
+        workingHtml,
+        unclaimedHighlights.map((u) => u.text),
+      );
+      unclaimedHighlights = findUnclaimedHighlights(
+        extractHighlightedFacts(workingHtml),
+        claims.map((c) => c.text),
+        haystacks,
+      ).map((text) => ({ text, sourceUrl: "", reason: "unclaimed_highlight" as const }));
+    }
 
-    const structureFails: UngroundedClaim[] = findStructureIssues(article, {
+    // 0円修復 →（両側だけダメなら）mini局所リライト最大1回
+    let working = autoRepairArticle(
+      { ...article, articleHtml: workingHtml },
+      { issueTitle: params.issueTitle },
+    );
+    let structureIssues = findStructureIssues(working, {
       isReported: params.isReported,
       debateType: params.debateType,
-    }).map((issue) => ({
+      issueTitle: params.issueTitle,
+    });
+    const sidesOnly =
+      structureIssues.length > 0 &&
+      structureIssues.every(
+        (i) => i.reason === "sides_ungrounded" || i.reason === "sides_asymmetric",
+      );
+    if (sidesOnly && !sideRepairUsed) {
+      const hints = collectSourceHintsForRepair({
+        reportExcerpts: params.reportExcerpts,
+        primaryExcerpts: params.primaryExcerpts,
+        internationalReportExcerpts: params.internationalReportExcerpts,
+        dietSpeeches: params.dietSpeeches,
+        claimDiffBlock: params.claimDiffBlock,
+      });
+      if (hints.length > 0) {
+        sideRepairUsed = true;
+        try {
+          const repairedHtml = await repairSideSectionsWithMini({
+            issueTitle: params.issueTitle,
+            articleHtml: working.articleHtml,
+            sourceHints: hints,
+            failureReason: structureIssues.map((i) => i.message).join(" / "),
+          });
+          if (repairedHtml) {
+            working = autoRepairArticle(
+              { ...working, articleHtml: repairedHtml },
+              { issueTitle: params.issueTitle },
+            );
+            structureIssues = findStructureIssues(working, {
+              isReported: params.isReported,
+              debateType: params.debateType,
+              issueTitle: params.issueTitle,
+            });
+          }
+        } catch {
+          // mini修理失敗は握りつぶし、従来の差し戻しへ
+        }
+      }
+    }
+    article = {
+      ...article,
+      lead: working.lead,
+      bullets: working.bullets,
+      articleHtml: working.articleHtml,
+    };
+
+    const structureFails: UngroundedClaim[] = structureIssues.map((issue) => ({
       text: issue.message,
       sourceUrl: "",
       reason: issue.reason,
@@ -778,18 +882,37 @@ export async function generateVerifiedArticle(
       ...structureFails,
     ];
     if (failed.length === 0) {
-      return { article, verified: true, unresolvedClaims: [], attempts: attempt };
+      const synced = normalizeArticleSurfaces(article);
+      return {
+        article: { ...article, lead: synced.lead, bullets: synced.bullets },
+        verified: true,
+        unresolvedClaims: [],
+        attempts: attempt,
+        sideRepairUsed,
+      };
     }
     if (attempt > retries) {
-      return { article, verified: false, unresolvedClaims: failed, attempts: attempt };
+      const synced = normalizeArticleSurfaces(article);
+      return {
+        article: { ...article, lead: synced.lead, bullets: synced.bullets },
+        verified: false,
+        unresolvedClaims: failed,
+        attempts: attempt,
+        sideRepairUsed,
+      };
     }
+    const STRUCTURE_REASONS = new Set([
+      "opening_too_thin",
+      "incident_first_missing",
+      "duplicate_facts",
+      "bullets_too_thin",
+      "sides_ungrounded",
+      "sides_asymmetric",
+      "lead_opening_mismatch",
+      "relatability_missing",
+    ]);
     feedback = failed.map((f) => {
-      if (
-        f.reason === "opening_too_thin" ||
-        f.reason === "incident_first_missing" ||
-        f.reason === "duplicate_facts" ||
-        f.reason === "bullets_too_thin"
-      ) {
+      if (STRUCTURE_REASONS.has(f.reason)) {
         return f.text;
       }
       return f.sourceUrl
@@ -797,7 +920,25 @@ export async function generateVerifiedArticle(
         : `「${f.text}」— 与えられた資料のどこにも見つからない記述です。事実確認できる表現に修正するか削除してください。`;
     });
   }
-  return { article, verified: false, unresolvedClaims: [], attempts: retries + 1 };
+  return {
+    article,
+    verified: false,
+    unresolvedClaims: [],
+    attempts: retries + 1,
+    sideRepairUsed,
+  };
+}
+
+/** unclaimed_highlight 用: 該当テキストの <strong> だけ外す（本文は残す） */
+export function stripStrongMarks(html: string, texts: string[]): string {
+  let out = html;
+  for (const raw of texts) {
+    const t = raw.trim();
+    if (t.length < 2) continue;
+    const escaped = t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    out = out.replace(new RegExp(`<strong>${escaped}<\\/strong>`, "gi"), t);
+  }
+  return out;
 }
 
 /**

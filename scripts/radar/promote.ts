@@ -19,7 +19,8 @@ import { RADAR } from "../../src/lib/constants";
 import { toIssueCategory, jstDateString, shouldUseInternationalReports } from "../../src/lib/radar";
 import { generateVerifiedArticle, violatesBan } from "../../src/lib/radar-article";
 import { assessReportExcerptThickness } from "../../src/lib/article-quality";
-import { checkArticleQualityGate } from "./lib/article-judge";
+import { checkArticleQualityGateWithRepair } from "./lib/article-judge";
+import { collectSourceHintsForRepair } from "../../src/lib/article-repair";
 import { buildClaimDiff, formatClaimDiffBlock } from "./lib/claim-diff";
 import { fetchArticleThumbnail } from "./lib/og-image";
 import { composeIssueTitle, composeVoteQuestion } from "../../src/lib/ai";
@@ -334,7 +335,12 @@ async function promoteOne(c: PromotionCandidate): Promise<string | null> {
     console.log(`  🧭 timeline-first モード（reignite=${reignite}）: ${c.title}`);
   }
 
-  const { article, verified, unresolvedClaims } = await generateVerifiedArticle({
+  const {
+    article: generatedArticle,
+    verified,
+    unresolvedClaims,
+    sideRepairUsed,
+  } = await generateVerifiedArticle({
     issueTitle: c.title,
     isReported: !isOfficial,
     sources: c.sourceUrls,
@@ -352,6 +358,7 @@ async function promoteOne(c: PromotionCandidate): Promise<string | null> {
     datedExcerpts,
     timelineFirst,
   });
+  let article = generatedArticle;
 
   if (!verified) {
     const reasons = unresolvedClaims.map((c2) => `${c2.text}(${c2.reason})`).join(" / ");
@@ -374,11 +381,26 @@ async function promoteOne(c: PromotionCandidate): Promise<string | null> {
   }
 
   try {
-    const gate = await checkArticleQualityGate({
-      title: c.title,
-      lead: article.lead,
-      articleHtml: article.articleHtml,
+    const hints = collectSourceHintsForRepair({
+      reportExcerpts,
+      primaryExcerpts,
+      internationalReportExcerpts,
+      dietSpeeches: c.evidence.dietSpeeches,
+      claimDiffBlock,
     });
+    const { gate, articleHtml: gatedHtml, repaired } = await checkArticleQualityGateWithRepair(
+      {
+        title: c.title,
+        lead: article.lead,
+        articleHtml: article.articleHtml,
+      },
+      hints,
+      { sideRepairAlreadyUsed: sideRepairUsed },
+    );
+    if (repaired) {
+      article = { ...article, articleHtml: gatedHtml };
+      console.log(`  🔧 両側mini修理で品質ゲート通過: ${c.title}`);
+    }
     if (!gate.ok) {
       console.warn(`  ⚠️ 品質ゲート不合格「${gate.reason}」→ 公開せずHELD: ${c.title}`);
       await prisma.topicCandidate.update({

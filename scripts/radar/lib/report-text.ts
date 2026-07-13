@@ -261,9 +261,31 @@ export async function fetchNewsExcerptText(
   return null;
 }
 
+/** 媒体ごとの本文取得を並列化する上限（Tavily/Jina のレート制限を避ける） */
+const REPORT_FETCH_CONCURRENCY = 3;
+
+async function mapPool<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  const n = Math.min(concurrency, Math.max(1, items.length));
+  await Promise.all(Array.from({ length: n }, () => worker()));
+  return results;
+}
+
 /**
  * ソース一覧から媒体（feed）ごとに最新1件ずつ、最大MAX_OUTLETS媒体分の本文抜粋を取得する。
  * 同一媒体を何件も取っても「食い違いの整理」には寄与しないため、媒体の多様性を優先する。
+ * 媒体間は並列（上限 REPORT_FETCH_CONCURRENCY）で取る。
  */
 export async function fetchReportExcerpts(
   sources: { title: string; url: string; feed: string }[],
@@ -273,12 +295,11 @@ export async function fetchReportExcerpts(
   const all = Array.from(byFeedLatest.values());
   const targets = all.slice(0, MAX_OUTLETS);
 
-  const excerpts: ReportExcerpt[] = [];
   let resolved = 0;
   let fetched = 0;
   let fallbackHits = 0;
 
-  for (const s of targets) {
+  const settled = await mapPool(targets, REPORT_FETCH_CONCURRENCY, async (s) => {
     let publisherUrl = s.url;
     if (isGoogleNewsArticleUrl(s.url)) {
       const resolvedUrl = await resolvePublisherUrl(s.url);
@@ -287,9 +308,9 @@ export async function fetchReportExcerpts(
         const fb = await fetchViaTavilySearch(s.title, s.url, MAX_CHARS_PER_OUTLET);
         if (fb) {
           fallbackHits++;
-          excerpts.push({ feed: s.feed, title: s.title, url: fb.url, text: fb.text });
+          return { feed: s.feed, title: s.title, url: fb.url, text: fb.text } satisfies ReportExcerpt;
         }
-        continue;
+        return null;
       }
       publisherUrl = resolvedUrl;
       resolved++;
@@ -298,7 +319,7 @@ export async function fetchReportExcerpts(
     const result = await fetchNewsExcerptText(publisherUrl, s.title, MAX_CHARS_PER_OUTLET);
     if (!result) {
       console.warn(`  ⚠️ report-text: 本文取得失敗 — ${s.feed} / ${publisherUrl.slice(0, 80)}`);
-      continue;
+      return null;
     }
 
     if (result.via === "direct") fetched++;
@@ -306,8 +327,10 @@ export async function fetchReportExcerpts(
       fallbackHits++;
       console.log(`  📰 report-text: ${result.via} で取得 — ${s.feed} ← ${result.url.slice(0, 70)}`);
     }
-    excerpts.push({ feed: s.feed, title: s.title, url: result.url, text: result.text });
-  }
+    return { feed: s.feed, title: s.title, url: result.url, text: result.text } satisfies ReportExcerpt;
+  });
+
+  const excerpts = settled.filter((e): e is ReportExcerpt => e != null);
 
   console.log(
     `  📰 report-text: 対象${targets.length}媒体 → 抜粋${excerpts.length}件` +

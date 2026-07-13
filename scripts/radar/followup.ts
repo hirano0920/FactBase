@@ -12,7 +12,8 @@ import { PrismaClient, type Prisma, type ConfirmationStatus } from "@prisma/clie
 import { RADAR } from "../../src/lib/constants";
 import { shouldRegenerateFollowUp, jstDayStart } from "../../src/lib/radar";
 import { generateVerifiedArticle, violatesBan } from "../../src/lib/radar-article";
-import { checkArticleQualityGate } from "./lib/article-judge";
+import { checkArticleQualityGateWithRepair } from "./lib/article-judge";
+import { collectSourceHintsForRepair } from "../../src/lib/article-repair";
 import { buildClaimDiff, formatClaimDiffBlock } from "./lib/claim-diff";
 import { isWithinPeakWindow } from "./lib/schedule";
 import { fetchPrimaryExcerpts } from "./lib/primary-text";
@@ -168,7 +169,12 @@ async function main() {
         console.warn(`  ⚠️ 媒体diffのnano失敗（fail-open・生抜粋のみで続行）: ${issue.title} (${e})`);
       }
 
-      const { article, verified, unresolvedClaims } = await generateVerifiedArticle({
+      const {
+        article: generatedArticle,
+        verified,
+        unresolvedClaims,
+        sideRepairUsed,
+      } = await generateVerifiedArticle({
         issueTitle: issue.title,
         isReported,
         sources: cumulativeSources,
@@ -183,6 +189,7 @@ async function main() {
         estatStats,
         previousArticle: { lead: summaryJson?.lead ?? "", articleHtml: issue.articleHtml },
       });
+      let article = generatedArticle;
 
       if (!verified) {
         const reasons = unresolvedClaims.map((c) => `${c.text}(${c.reason})`).join(" / ");
@@ -197,11 +204,26 @@ async function main() {
       }
 
       try {
-        const gate = await checkArticleQualityGate({
-          title: issue.title,
-          lead: article.lead,
-          articleHtml: article.articleHtml,
+        const hints = collectSourceHintsForRepair({
+          reportExcerpts,
+          primaryExcerpts,
+          internationalReportExcerpts,
+          dietSpeeches,
+          claimDiffBlock,
         });
+        const { gate, articleHtml: gatedHtml, repaired } = await checkArticleQualityGateWithRepair(
+          {
+            title: issue.title,
+            lead: article.lead,
+            articleHtml: article.articleHtml,
+          },
+          hints,
+          { sideRepairAlreadyUsed: sideRepairUsed },
+        );
+        if (repaired) {
+          article = { ...article, articleHtml: gatedHtml };
+          console.log(`  🔧 両側mini修理で品質ゲート通過: ${issue.title}`);
+        }
         if (!gate.ok) {
           console.warn(`  ⚠️ 品質ゲート不合格「${gate.reason}」→ 更新せず既存記事を維持`);
           continue;

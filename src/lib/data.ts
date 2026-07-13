@@ -276,7 +276,7 @@ export async function searchIssues(query: string, limit = 8): Promise<IssueSearc
   }));
 }
 
-export async function getIssueBySlug(slug: string): Promise<Issue | null> {
+export const getIssueBySlug = cache(async (slug: string): Promise<Issue | null> => {
   if (!isDbEnabled()) return mockIssueBySlug(slug) ?? null;
 
   const cached = await getCachedIssue(slug);
@@ -287,7 +287,7 @@ export async function getIssueBySlug(slug: string): Promise<Issue | null> {
   const mapped = mapIssue(issue);
   await setCachedIssue(slug, mapped);
   return mapped;
-}
+});
 
 function issueBrief(issue: DbIssue) {
   return {

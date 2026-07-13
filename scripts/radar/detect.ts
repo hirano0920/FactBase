@@ -66,7 +66,8 @@ import { ensureEvidence, evidenceToArticleFacts, internationalNewsSources } from
 import { resolveIssueTitle } from "./lib/issue-title";
 import { splitIncoherentPrimaryClusters } from "./lib/split-clusters";
 import { generateVerifiedArticle, violatesBan } from "../../src/lib/radar-article";
-import { checkArticleQualityGate } from "./lib/article-judge";
+import { checkArticleQualityGateWithRepair } from "./lib/article-judge";
+import { collectSourceHintsForRepair } from "../../src/lib/article-repair";
 import { buildClaimDiff, formatClaimDiffBlock } from "./lib/claim-diff";
 import { resolveDebateType } from "../../src/lib/debate-type";
 import { notifyRadarFailure } from "./notify";
@@ -757,7 +758,12 @@ async function main() {
         } catch (e) {
           console.warn(`  ⚠️ 媒体diffのnano失敗（fail-open・生抜粋のみで続行）: ${cluster.title} (${e})`);
         }
-        const { article, verified, unresolvedClaims } = await generateVerifiedArticle({
+        const {
+          article: generatedArticle,
+          verified,
+          unresolvedClaims,
+          sideRepairUsed,
+        } = await generateVerifiedArticle({
           issueTitle,
           isReported: false,
           sources,
@@ -768,6 +774,7 @@ async function main() {
           background,
           laws,
         });
+        let article = generatedArticle;
         if (!verified) {
           const reasons = unresolvedClaims.map((c) => `${c.text}(${c.reason})`).join(" / ");
           await holdForArticle(`unverified_claim:${reasons.slice(0, 200)}`);
@@ -779,11 +786,25 @@ async function main() {
           continue;
         }
         try {
-          const gate = await checkArticleQualityGate({
-            title: issueTitle,
-            lead: article.lead,
-            articleHtml: article.articleHtml,
+          const hints = collectSourceHintsForRepair({
+            primaryExcerpts,
+            internationalReportExcerpts,
+            dietSpeeches,
+            claimDiffBlock,
           });
+          const { gate, articleHtml: gatedHtml, repaired } = await checkArticleQualityGateWithRepair(
+            {
+              title: issueTitle,
+              lead: article.lead,
+              articleHtml: article.articleHtml,
+            },
+            hints,
+            { sideRepairAlreadyUsed: sideRepairUsed },
+          );
+          if (repaired) {
+            article = { ...article, articleHtml: gatedHtml };
+            console.log(`  🔧 両側mini修理で品質ゲート通過: ${cluster.title}`);
+          }
           if (!gate.ok) {
             await holdForArticle(`quality_gate:${(gate.reason ?? "").slice(0, 200)}`);
             continue;

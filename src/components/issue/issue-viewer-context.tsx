@@ -1,6 +1,14 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { BookmarkButton } from "@/components/issue/bookmark-button";
 import { CommentSection } from "@/components/issue/comment-section";
 import { QualityReportButton } from "@/components/issue/quality-report-button";
@@ -17,22 +25,13 @@ import {
   canViewAnalytics,
   canUseRebuttalAi,
 } from "@/lib/plan-features";
-
-interface ViewerResponseGuest {
-  isLoggedIn: false;
-}
-
-interface ViewerResponseAuthed {
-  isLoggedIn: true;
-  plan: Plan;
-  userVote: VoteChoiceId | null;
-  bookmarked: boolean;
-}
-
-type ViewerResponse = ViewerResponseGuest | ViewerResponseAuthed;
+import { fetchIssueViewer, hasLikelySessionCookie } from "@/lib/issue-viewer-client";
 
 interface IssueViewerContextValue {
-  loaded: boolean;
+  /** viewer API（投票・プラン）が確定したか。コメント取得は待たない */
+  viewerReady: boolean;
+  /** ログイン時コメント一覧の取得完了 */
+  commentsReady: boolean;
   isLoggedIn: boolean;
   plan: Plan | null;
   userVote: VoteChoiceId | null;
@@ -65,7 +64,11 @@ export function IssueViewerProvider({
   guestComments,
   children,
 }: IssueViewerProviderProps) {
-  const [loaded, setLoaded] = useState(false);
+  // セッションcookieが無ければゲスト確定扱いで投票を即描画（viewer RTTを待たない）
+  const [viewerReady, setViewerReady] = useState(() =>
+    typeof document !== "undefined" ? !hasLikelySessionCookie() : false,
+  );
+  const [commentsReady, setCommentsReady] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [userVote, setUserVote] = useState<VoteChoiceId | null>(null);
@@ -76,9 +79,10 @@ export function IssueViewerProvider({
 
   useEffect(() => {
     let cancelled = false;
+    const guestLikely = !hasLikelySessionCookie();
 
-    // 争点ページ間のクライアント遷移で前の争点の投票・コメントが一瞬残るのを防ぐ
-    setLoaded(false);
+    setViewerReady(guestLikely);
+    setCommentsReady(false);
     setIsLoggedIn(false);
     setPlan(null);
     setUserVote(null);
@@ -89,43 +93,56 @@ export function IssueViewerProvider({
 
     (async () => {
       try {
-        const viewerRes = await fetch(`/api/issues/${encodeURIComponent(slug)}/viewer`);
-        if (!viewerRes.ok || cancelled) return;
+        const viewer = await fetchIssueViewer(slug);
+        if (cancelled) return;
 
-        const viewer = (await viewerRes.json()) as ViewerResponse;
-        if (!viewer.isLoggedIn) return;
+        if (!viewer.isLoggedIn) {
+          setIsLoggedIn(false);
+          setPlan(null);
+          setUserVote(null);
+          setBookmarked(false);
+          setViewerReady(true);
+          setCommentsReady(true);
+          return;
+        }
 
         setIsLoggedIn(true);
         setPlan(viewer.plan);
         setUserVote(viewer.userVote);
         setBookmarked(viewer.bookmarked);
+        setViewerReady(true);
 
+        // コメントは投票と独立に取る（投票ボタンをコメントRTTで待たせない）
         const commentsRes = await fetch(
           `/api/comments?issueId=${encodeURIComponent(issueId)}`,
         );
-        if (!commentsRes.ok || cancelled) return;
-
+        if (!commentsRes.ok || cancelled) {
+          setCommentsReady(true);
+          return;
+        }
         const page = (await commentsRes.json()) as {
           comments: Comment[];
           nextCursor: string | null;
         };
+        if (cancelled) return;
         setComments(page.comments);
         setNextCursor(page.nextCursor);
+        setCommentsReady(true);
       } catch {
-        // ゲスト表示のまま継続
-      } finally {
-        if (!cancelled) setLoaded(true);
+        if (!cancelled) {
+          setViewerReady(true);
+          setCommentsReady(true);
+        }
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [slug, issueId, guestComments]);
+    // guestComments は初期表示用。参照が変わるたびに再fetchすると投票が何度もスケルトンに戻る
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- slug/issueId の遷移時のみ再取得
+  }, [slug, issueId]);
 
-  // 投票直後の合図(justVoted)だけでなく、コメント欄のゲート判定に使うuserVote本体もここで更新する。
-  // これを怠ると、投票パネル自身は(ローカルstateで)即座に投票済み表示になる一方、
-  // コメント欄は共有コンテキストの古いuserVote(null)を見続けて「投票してください」と出続けるバグになる。
   const markJustVoted = useCallback((choice: VoteChoiceId) => {
     setJustVoted(choice);
     setUserVote(choice);
@@ -133,7 +150,8 @@ export function IssueViewerProvider({
 
   const value = useMemo(
     () => ({
-      loaded,
+      viewerReady,
+      commentsReady,
       isLoggedIn,
       plan,
       userVote,
@@ -143,7 +161,18 @@ export function IssueViewerProvider({
       justVoted,
       markJustVoted,
     }),
-    [loaded, isLoggedIn, plan, userVote, bookmarked, comments, nextCursor, justVoted, markJustVoted],
+    [
+      viewerReady,
+      commentsReady,
+      isLoggedIn,
+      plan,
+      userVote,
+      bookmarked,
+      comments,
+      nextCursor,
+      justVoted,
+      markJustVoted,
+    ],
   );
 
   return (
@@ -163,10 +192,8 @@ export function IssueBookmarkSlot({ slug }: { slug: string }) {
 }
 
 /**
- * 投票ボタンの読み込み中プレースホルダ。isLoggedIn/userVoteが未確定のまま描画すると、
- * 「未ログイン・未投票」というゲスト既定値でボタンが一瞬出たあとログイン済み/投票済みの
- * 本来の状態に切り替わる、という見た目のチラつきが起きる。loadedが確定するまでは
- * 中身を出さずスケルトンだけ見せて、確定後に一度で正しい状態を描画する
+ * 投票ボタンの読み込み中プレースホルダ。
+ * ログイン済みの可能性があるときだけ出す（ゲストは即本描画）。
  */
 function VoteSkeleton() {
   return (
@@ -188,8 +215,8 @@ interface IssueVoteSlotProps {
 }
 
 export function IssueVoteSlot({ issueId, initialTally, labels }: IssueVoteSlotProps) {
-  const { loaded, isLoggedIn, userVote, markJustVoted } = useIssueViewer();
-  if (!loaded) return <VoteSkeleton />;
+  const { viewerReady, isLoggedIn, userVote, markJustVoted } = useIssueViewer();
+  if (!viewerReady) return <VoteSkeleton />;
   return (
     <VotePanelLive
       issueId={issueId}
@@ -209,10 +236,6 @@ interface IssueCommentsSlotProps {
   voteTally: VoteTally;
 }
 
-/**
- * 未投票者向けの投票ゲート。ゲスト・ログイン済み未投票の両方が対象
- * （以前はゲストだけプレビューを見せていたが、「一票入れるまで議論は見せない」に統一した）。
- */
 function VoteToUnlockGate({ commentCount }: { commentCount: number }) {
   const scrollToVote = () => {
     document.getElementById("vote-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -235,7 +258,6 @@ function VoteToUnlockGate({ commentCount }: { commentCount: number }) {
   );
 }
 
-/** 議論欄の読み込み中プレースホルダ。理由はVoteSkeletonと同じ（loaded確定までチラつかせない） */
 function CommentsSkeleton() {
   return (
     <div className="animate-pulse space-y-4" aria-hidden="true">
@@ -250,19 +272,18 @@ function CommentsSkeleton() {
 }
 
 export function IssueCommentsSlot({ slug, issueId, commentCount, voteTally }: IssueCommentsSlotProps) {
-  const { loaded, isLoggedIn, plan, userVote, comments, nextCursor, justVoted } = useIssueViewer();
+  const { viewerReady, commentsReady, isLoggedIn, plan, userVote, comments, nextCursor, justVoted } =
+    useIssueViewer();
   const canComment = canPostComment(isLoggedIn);
   const canFactCheck = canUseFactCheck(plan);
   const canRebuttalAi = canUseRebuttalAi(plan);
 
-  // isLoggedIn/userVoteが未確定のまま描画すると、ゲスト既定表示→本来の状態への
-  // チラつきが起きるため、loadedが確定するまではスケルトンだけ見せる
-  if (!loaded) return <CommentsSkeleton />;
-
-  // 一票入れるまでは議論を一切見せない（ゲストもログイン済み未投票も同じ扱い）
+  // 投票ゲート判定には viewer だけ必要。未投票ならコメント取得完了を待たずゲートを出す
+  if (!viewerReady) return <CommentsSkeleton />;
   if (!userVote) {
     return <VoteToUnlockGate commentCount={commentCount} />;
   }
+  if (!commentsReady) return <CommentsSkeleton />;
 
   return (
     <CommentSection
@@ -287,14 +308,12 @@ export function IssueQualityReportSlot({ slug }: { slug: string }) {
   return <QualityReportButton slug={slug} isLoggedIn={isLoggedIn} />;
 }
 
-/** 投票済みログインユーザーにのみ「読了後スライダー」を出す(未投票者はそもそも議論が見えていないため) */
 export function IssueSpectrumSlot({ slug, labels }: { slug: string; labels?: VoteLabels | null }) {
   const { isLoggedIn, plan, userVote } = useIssueViewer();
   if (!isLoggedIn || !userVote) return null;
   return <SpectrumVote slug={slug} canViewDetail={canViewAnalytics(plan)} labels={labels} />;
 }
 
-/** 層の動き・両陣営マップ・MVP（Freeは概要、Plus/Proは詳細） */
 export function IssueIntelligenceSlot({ slug }: { slug: string }) {
   const { plan } = useIssueViewer();
   const isPlus = plan === "COMMENT" || plan === "FACTCHECK";

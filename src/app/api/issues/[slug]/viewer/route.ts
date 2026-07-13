@@ -13,18 +13,18 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ slug: string }> },
 ) {
-  const { slug } = await params;
+  // ゲストは DB を叩かず即返す（投票UIの待ち時間を短縮）
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ isLoggedIn: false as const });
+  }
 
+  const { slug } = await params;
   const issue = await prisma.issue.findUnique({
     where: { slug },
     select: { id: true },
   });
   if (!issue) return errors.notFound("この争点は存在しません");
-
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ isLoggedIn: false as const });
-  }
 
   const [userVote, bookmarked] = await Promise.all([
     isDbEnabled() ? getUserVote(session.user.id, issue.id) : Promise.resolve(null),

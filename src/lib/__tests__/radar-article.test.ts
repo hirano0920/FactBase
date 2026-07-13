@@ -185,16 +185,17 @@ describe("generateVerifiedArticle", () => {
   });
 });
 
-describe("violatesBan", () => {
-  it("既存の断定表現チェックはclaimsフィールド追加後も変わらず動作する", () => {
-    const banned = violatesBan({
-      lead: "これは間違いない事実です",
-      bullets: [],
-      articleHtml: "",
-    });
-    expect(banned).not.toBeNull();
+
+describe("stripStrongMarks", () => {
+  it("指定テキストのstrongだけ外す", async () => {
+    const { stripStrongMarks } = await import("@/lib/radar-article");
+    const html = `<p>予算は<strong>100億円</strong>で、<strong>重要</strong>です</p>`;
+    expect(stripStrongMarks(html, ["100億円"])).toBe(
+      `<p>予算は100億円で、<strong>重要</strong>です</p>`,
+    );
   });
 });
+
 
 describe("extractArgumentSections", () => {
   it("賛成側/反対側セクションだけを抽出し、背景・出典等は除外する", () => {
@@ -336,22 +337,22 @@ describe("generateVerifiedArticle（網羅性チェック）", () => {
     primaryExcerpts: [{ title: "資料", url: "https://known", text: "予算は100億円と決定されました" }],
   };
 
-  it("claimsに無くタグ付けも無い<strong>強調の捏造数値は、資料に無ければ最終的にHELD相当になる", async () => {
-    // claims配列自体を出さない（自己申告漏れ）ケースを想定 — articleHtml直接スキャンで捕まえられるか
+  it("claimsに無く資料にも無い<strong>強調は強調だけ外して合格できる（全文再生成しない）", async () => {
+    // 数値以外の強調漏れは HELD にせず、strong 解除で0円修復する
+    // ※「与党…」はラベル除外されるため、事実トークン付きの非数値フレーズを使う
     const badArticle = {
       lead: "lead",
       bullets: [],
-      articleHtml: "<h2>ポイント</h2><li><strong>予算は999億円</strong>に決定</li>",
+      articleHtml: "<h2>ポイント</h2><li><strong>円安で家計負担が増えた</strong>と指摘された</li>",
       claims: [],
     };
     mockArticleResponse(badArticle);
-    mockArticleResponse(badArticle);
-    mockArticleResponse(badArticle);
 
     const result = await generateVerifiedArticle(baseParams, 2);
-    expect(result.verified).toBe(false);
-    expect(result.unresolvedClaims.some((c) => c.reason === "unclaimed_highlight")).toBe(true);
-    expect(mocks.create).toHaveBeenCalledTimes(3); // 執筆のみ×3（nanoは一度も呼ばれない・claims空のため）
+    expect(result.verified).toBe(true);
+    expect(result.article?.articleHtml).toContain("円安で家計負担が増えた");
+    expect(result.article?.articleHtml).not.toContain("<strong>円安で家計負担が増えた</strong>");
+    expect(mocks.create).toHaveBeenCalledTimes(1); // 執筆1回のみ（nano・再生成なし）
   });
 
   it("資料本文に実在する数値の強調はclaims自己申告が無くても合格する", async () => {
@@ -421,6 +422,8 @@ describe("generateArticle（TwoSides導火線フォーマット）", () => {
     expect(systemContent).toContain("声明対立");
     expect(systemContent).toContain("国内が主戦場");
     expect(systemContent).toContain("辞書定義");
+    expect(systemContent).toContain("教科書一般論");
+    expect(systemContent).toContain("まだ分からないこと");
     expect(sentContent).toContain("<h2>いま何が論点か</h2>");
     expect(sentContent).toContain("<h2>どこで意見が分かれるか</h2>");
     expect(sentContent).toContain("<h2>賛成側が言うこと</h2>");
@@ -428,6 +431,8 @@ describe("generateArticle（TwoSides導火線フォーマット）", () => {
     expect(sentContent).toContain("報道の具体的内容");
     expect(sentContent).toContain("既出の事実を繰り返さない");
     expect(sentContent).toContain("賛成側が言うこと:");
+    expect(sentContent).toContain("教科書一般論");
+    expect(sentContent).toMatch(/使える帰属ラベル|教科書一般論で両側を埋めない/);
     expect(sentContent).not.toContain("<h2>現時点で確認できること</h2>");
     expect(sentContent).not.toContain("<h2>各立場の主張</h2>");
     expect(sentContent).not.toContain("<h2>報道の共通点と相違点</h2>");

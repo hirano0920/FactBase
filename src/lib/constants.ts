@@ -336,10 +336,15 @@ export const RADAR = {
   enrichRefreshHours: 12,
   /**
    * article-judge（gpt-5-mini、書き手とは別モデル）による品質ゲートの最低点（5点満点）。
-   * bothSidesQuality/neutrality/depth/clarity がこれ未満なら公開せずHELD。
+   * neutrality/depth/clarity がこれ未満なら公開せずHELD。
    * depth/clarity は「事件内容が後段」「薄い言い換え」を落とすためにゲートに含める。
    */
   judgeQualityGateMinScore: 3,
+  /**
+   * 両論性だけは一段厳しくする（教科書的な片側埋め・根拠なし一般論を落とす）。
+   * bothSidesQuality がこれ未満なら公開せずHELD。
+   */
+  judgeBothSidesMinScore: 4,
 } as const;
 
 /** 称号ランク（役に立った評価の累計数で決まる）。特典はバッジ表示・並び順やや優先のみ。 */
