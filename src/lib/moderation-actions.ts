@@ -120,7 +120,12 @@ export async function listRecentRadarIssues(limit = 30) {
   });
 }
 
-export async function listHeldRadarCandidates(limit = 20) {
+/**
+ * HELD候補一覧。以前はcreatedAt降順20件固定で、古い候補がこのリストから
+ * 一切見えなくなり「なぜHELDが溜まっているか分からない」原因の一つになっていた。
+ * 全件出すページネーションまでは実装していないが、まず可視範囲を広げる。
+ */
+export async function listHeldRadarCandidates(limit = 50) {
   return prisma.topicCandidate.findMany({
     where: { status: "HELD" },
     orderBy: { createdAt: "desc" },

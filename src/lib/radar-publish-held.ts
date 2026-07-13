@@ -7,8 +7,10 @@ import { prisma } from "@/lib/prisma";
 import { invalidateOnIssueChanged } from "@/lib/cache-invalidate";
 import { isRoutineOfficialUpdate, toIssueCategory } from "@/lib/radar";
 import { generateVerifiedArticle, violatesBan } from "@/lib/radar-article";
+import { assessReportExcerptThickness } from "@/lib/article-quality";
 import { fetchPrimaryExcerpts } from "../../scripts/radar/lib/primary-text";
 import { fetchReportExcerpts } from "../../scripts/radar/lib/report-text";
+import { checkArticleQualityGate } from "../../scripts/radar/lib/article-judge";
 import {
   ensureEvidence,
   evidenceToArticleFacts,
@@ -62,6 +64,19 @@ export async function publishHeldRadarCandidate(candidate: TopicCandidateRow): P
     ? await fetchReportExcerpts(internationalNewsSources(evidence))
     : [];
 
+  // promote.ts と同じ機械品質ゲート。以前はここが一切呼ばれておらず、
+  // 「薄い報道抜粋」「両論性不足」等でHELDになった候補でも管理者の承認だけで
+  // 無検証のまま公開できてしまっていた（自動ゲートより承認フローの方が緩いという逆転構造）。
+  if (!effectiveOfficial) {
+    const thickness = assessReportExcerptThickness([
+      ...reportExcerpts,
+      ...internationalReportExcerpts,
+    ]);
+    if (!thickness.ok) {
+      throw new Error(`報道抜粋が薄いため公開できません: ${thickness.reason ?? ""}`);
+    }
+  }
+
   const issueTitle = await resolveIssueTitle({
     question: candidate.title,
     clusterTitle: candidate.title,
@@ -94,6 +109,22 @@ export async function publishHeldRadarCandidate(candidate: TopicCandidateRow): P
   const banned = violatesBan(article);
   if (banned) {
     throw new Error(`断定表現を検出: ${banned}`);
+  }
+
+  try {
+    const gate = await checkArticleQualityGate({
+      title: issueTitle,
+      lead: article.lead,
+      articleHtml: article.articleHtml,
+    });
+    if (!gate.ok) {
+      throw new Error(`品質ゲート不合格: ${gate.reason ?? ""}`);
+    }
+  } catch (e) {
+    // nano呼び出し自体の失敗はfail-open（promote.tsと同じ方針）。
+    // ゲート判定自体がokでなかった場合(上のthrow)はそのまま公開をブロックする。
+    if (e instanceof Error && e.message.startsWith("品質ゲート不合格")) throw e;
+    console.warn(`[radar-publish-held] 品質ゲートnano失敗（fail-open・公開続行）: ${e}`);
   }
 
   const slug = `radar-${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID().slice(0, 8)}`;

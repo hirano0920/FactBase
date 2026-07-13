@@ -680,11 +680,26 @@ export async function filterRelevantTopics(
         reignite: resolved?.reignite ?? false,
         reason: t.reason.trim(),
         question: (t.question.trim() || `${topic}、賛成ですか？`).slice(0, 40),
-        choices: {
-          for: (t.choices.for.trim() || "支持する").slice(0, VOTE_CHOICE_MAX_CHARS),
-          against: (t.choices.against.trim() || "支持しない").slice(0, VOTE_CHOICE_MAX_CHARS),
-          undecided: (t.choices.undecided.trim() || "わからない").slice(0, VOTE_CHOICE_MAX_CHARS),
-        },
+        // discover段階の仮選択肢。空応答時は争点非依存の「支持する/支持しない」ではなく、
+        // 争点タイプ別のデフォルト（defaultPolarChoices）にフォールバックする。
+        // どのみちpromote段階のcomposeVoteQuestionで記事本文に合わせて作り直されるが、
+        // 万一そこも失敗した場合にこのdiscover段階の値がそのまま公開されるため、
+        // 最低限争点タイプに沿った文言にしておく。
+        choices: (() => {
+          const defaults =
+            resolved?.debateType != null ? defaultPolarChoices(resolved.debateType) : null;
+          return {
+            for: (t.choices.for.trim() || defaults?.for || "支持する").slice(0, VOTE_CHOICE_MAX_CHARS),
+            against: (t.choices.against.trim() || defaults?.against || "支持しない").slice(
+              0,
+              VOTE_CHOICE_MAX_CHARS,
+            ),
+            undecided: (t.choices.undecided.trim() || defaults?.undecided || "わからない").slice(
+              0,
+              VOTE_CHOICE_MAX_CHARS,
+            ),
+          };
+        })(),
       };
     })
     .filter((t) => t.debateType !== null);
@@ -780,15 +795,27 @@ discoverの段階（記事本文がまだ無い時点）で仮に作った設問
 - 「あなたはどう見る？」だけに偏らず、争点に合わせて言い回しを変える
   （例:「〜、賛成ですか？」「〜、妥当だと思いますか？」「〜への対応、十分ですか？」）
 - 断定・煽り・一方の立場に不利な言葉選びは禁止
+- declaration / geopolitics で、記事が「対立する2つの当事者/国のどちらの言い分に説得力を感じるか」を
+  読者に聞く内容なら、質問も「どちらの主張が妥当だと思いますか？」のように当事者比較の形にする。
+  「〜は容認できますか？」「〜は正当化されますか？」のような是非・legitimacyを問う聞き方をした場合は、
+  下のchoicesも必ず是非の判断語にする（陣営名にしない。setと矛盾させない）
 
-# choices（for/against/undecided、各12字以内）
+# choices（for/against/undecided、各${VOTE_CHOICE_MAX_CHARS}字以内）
 - 争点タイプのヒントに従う
 - policy / indicator / org_response / norm_flare:
   賛否・評価の短い立場語のみ（例:「法案に賛成」「法案に反対」「対応を支持」「問題視」）
   人物名・団体名・「○○氏賛成」「○○会反対」は禁止。読者が法案・対応そのものに投票できるようにする
   bulletsに「支持・慎重派」など賛否混在ラベルがあっても無視し、極性だけのラベルにする
-- declaration / geopolitics:
-  記事本文の両側見出しと同じ主体を指す短いラベル。個別人物名への言い換えは避け、陣営名・当事者呼称で揃える
+  ただし「法案」「対応」だけの抽象語で済ませず、争点固有の名詞を1つは入れる
+  （悪い例:「法案に賛成」「対応を支持」← どの記事でも使い回せてしまう。
+   良い例:「増税に賛成」「介入は妥当」「値上げを支持」← この記事だけの対立軸だと分かる）
+- declaration / geopolitics: 上のquestionルールと必ず対応させる。2パターンのどちらかを選ぶ（混在禁止）
+  (a) 当事者比較型の設問 → 記事本文の両側見出しと同じ主体を指す短いラベル
+      （個別人物名への言い換えは避け、陣営名・当事者呼称で揃える）
+  (b) 是非・legitimacy型の設問 → 是非の判断語（例:「容認できる」「容認できない」「正当」「不当」）
+      悪い例: 設問「ホルムズ海峡封鎖は容認できますか？」に対し choices=「イラン側」「米軍側」
+        ← 国家間の軍事衝突で「どちらの味方か」を選ばせる形になり、設問にも答えていない。
+      良い例: 同じ設問なら choices=「封鎖は容認できる」「容認できない」
 - undecidedは「どちらとも言えない」「まだ判断できない」等
 - 短い立場ラベルにする。説明文・長文にしない
 
@@ -862,11 +889,41 @@ ${input.bullets.map((b) => `- ${b}`).join("\n")}`,
     if (!question || !choices.for || !choices.against) return fallback;
     return {
       question,
-      choices: sanitizePolarVoteChoices(input.debateType, choices, input.fallbackChoices),
+      choices: fixLegitimacyQuestionChoiceMismatch(
+        question,
+        input.debateType,
+        sanitizePolarVoteChoices(input.debateType, choices, input.fallbackChoices),
+      ),
     };
   } catch {
     return fallback;
   }
+}
+
+/**
+ * 是非（legitimacy）を問う設問なのに、declaration/geopolitics型の「陣営名ラベル」ルールが
+ * 誤って適用され、選択肢が国名・陣営名のままになるケースの保険。
+ * 例: 設問「ホルムズ海峡封鎖は容認できますか？」に choices=「イラン側」「米軍側」は、
+ * 設問に答える形になっておらず、国家間紛争で「どちらの味方か」を選ばせる構図になってしまう
+ * （実際に本番でこの組み合わせが公開された）。
+ * プロンプト側にも整合ルールを追加済みだが、LLMが従わない場合に機械的に是正する。
+ */
+const LEGITIMACY_QUESTION = /容認|正当化|許され|適切|妥当/;
+// 「どちらの主張が/言い分が」等は当事者比較型なので、legitimacy語を含んでいても対象外にする
+const COMPARATIVE_QUESTION = /どちら/;
+const LEGITIMACY_CHOICE_VOCAB = /容認|正当|妥当|適切|賛成|反対|支持|批判|問題視/;
+
+function fixLegitimacyQuestionChoiceMismatch(
+  question: string,
+  debateType: DebateType,
+  choices: { for: string; against: string; undecided: string },
+): { for: string; against: string; undecided: string } {
+  if (debateType !== "declaration" && debateType !== "geopolitics") return choices;
+  if (!LEGITIMACY_QUESTION.test(question) || COMPARATIVE_QUESTION.test(question)) return choices;
+  if (LEGITIMACY_CHOICE_VOCAB.test(choices.for) || LEGITIMACY_CHOICE_VOCAB.test(choices.against)) {
+    return choices;
+  }
+  return { for: "容認できる", against: "容認できない", undecided: choices.undecided };
 }
 
 /** policy系で人物名・団体名ボタンになった場合は賛否ラベルへ戻す */

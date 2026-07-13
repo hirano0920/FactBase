@@ -19,7 +19,7 @@ import {
   composeVoteQuestion,
   sanitizePolarVoteChoices,
 } from "@/lib/ai";
-import { AI_MODELS, RADAR } from "@/lib/constants";
+import { AI_MODELS, RADAR, VOTE_CHOICE_MAX_CHARS } from "@/lib/constants";
 
 function mockContent(content: string) {
   mocks.create.mockResolvedValueOnce({ choices: [{ message: { content } }] });
@@ -299,7 +299,9 @@ describe("filterRelevantTopics", () => {
     expect(topics[0].choices).toEqual({ for: "賛成", against: "反対", undecided: "わからない" });
     expect(topics[0].debateType).toBe("policy");
     expect(topics[1].question).toContain("為替介入");
-    expect(topics[1].choices).toEqual({ for: "支持する", against: "支持しない", undecided: "わからない" });
+    // 空応答時のフォールバックは争点タイプ非依存の汎用文言ではなく、
+    // debateType別のデフォルト（indicator→妥当だ/不適切だ）を使う
+    expect(topics[1].choices).toEqual({ for: "妥当だ", against: "不適切だ", undecided: "まだ判断できない" });
     expect(topics[1].debateType).toBe("indicator");
   });
 
@@ -325,9 +327,9 @@ describe("filterRelevantTopics", () => {
       }),
     );
     const topics = await filterRelevantTopics([{ term: "国旗損壊罪" }]);
-    expect(topics[0].choices.for.length).toBeLessThanOrEqual(12);
-    expect(topics[0].choices.against.length).toBeLessThanOrEqual(12);
-    expect(topics[0].choices.undecided.length).toBeLessThanOrEqual(12);
+    expect(topics[0].choices.for.length).toBeLessThanOrEqual(VOTE_CHOICE_MAX_CHARS);
+    expect(topics[0].choices.against.length).toBeLessThanOrEqual(VOTE_CHOICE_MAX_CHARS);
+    expect(topics[0].choices.undecided.length).toBeLessThanOrEqual(VOTE_CHOICE_MAX_CHARS);
   });
 
   it("debatable=falseやdebateType不明は落とす", async () => {
@@ -379,7 +381,7 @@ describe("composeVoteQuestion", () => {
     expect(result.choices).toEqual({ for: "新設に賛成", against: "新設に反対", undecided: "まだ判断できない" });
   });
 
-  it("choicesが長すぎる場合は12字に切り詰める", async () => {
+  it("choicesが長すぎる場合はVOTE_CHOICE_MAX_CHARSに切り詰める", async () => {
     mockContent(
       JSON.stringify({
         question: "国旗損壊罪の新設、賛成ですか？",
@@ -391,8 +393,8 @@ describe("composeVoteQuestion", () => {
       }),
     );
     const result = await composeVoteQuestion(fallback);
-    expect(result.choices.for.length).toBeLessThanOrEqual(12);
-    expect(result.choices.against.length).toBeLessThanOrEqual(12);
+    expect(result.choices.for.length).toBeLessThanOrEqual(VOTE_CHOICE_MAX_CHARS);
+    expect(result.choices.against.length).toBeLessThanOrEqual(VOTE_CHOICE_MAX_CHARS);
   });
 
   it("空応答時はfallbackの設問・選択肢を返す", async () => {
@@ -420,6 +422,41 @@ describe("composeVoteQuestion", () => {
       against: "反対",
       undecided: "わからない",
     });
+  });
+
+  it("geopoliticsで是非を問う設問なのに陣営名ラベルが返った場合は是非ラベルに矯正する", async () => {
+    // 実際に本番で公開されたバグ: 設問「容認できますか？」なのに choices が国名/陣営名のままだった
+    mockContent(
+      JSON.stringify({
+        question: "ホルムズ海峡封鎖は容認できますか？",
+        choices: { for: "イラン側", against: "米軍側", undecided: "まだ判断できない" },
+      }),
+    );
+    const result = await composeVoteQuestion({
+      ...fallback,
+      debateType: "geopolitics",
+      issueTitle: "ホルムズ海峡封鎖",
+    });
+    expect(result.choices).toEqual({
+      for: "容認できる",
+      against: "容認できない",
+      undecided: "まだ判断できない",
+    });
+  });
+
+  it("geopoliticsでも当事者比較型の設問なら陣営名ラベルはそのまま通す", async () => {
+    mockContent(
+      JSON.stringify({
+        question: "どちらの主張が妥当だと思いますか？",
+        choices: { for: "イラン側", against: "米軍側", undecided: "まだ判断できない" },
+      }),
+    );
+    const result = await composeVoteQuestion({
+      ...fallback,
+      debateType: "geopolitics",
+      issueTitle: "ホルムズ海峡封鎖",
+    });
+    expect(result.choices).toEqual({ for: "イラン側", against: "米軍側", undecided: "まだ判断できない" });
   });
 });
 
