@@ -36,8 +36,8 @@ import {
   type ActiveIssueForDedup,
 } from "./lib/promote-logic";
 import { resolveDebateType } from "../../src/lib/debate-type";
-import { isWithinPeakWindow } from "./lib/schedule";
-import { notifyRadarFailure } from "./notify";
+import { isWithinPeakWindow, minutesToNearestWindow } from "./lib/schedule";
+import { notifyRadarFailure, notifyRadarSkip } from "./notify";
 import { notifyRevalidate } from "./lib/notify-revalidate";
 import { linkBuzzSourcesToIssue } from "./lib/link-buzz-sources";
 import {
@@ -71,6 +71,16 @@ async function main() {
   console.log(`📰 Radar promote 開始${DRY_RUN ? "（--dry-run: DB書き込みなし）" : ""}`);
 
   if (!FORCE && !isWithinPeakWindow(new Date(), RADAR.peakWindowsJst, RADAR.peakWindowToleranceMin)) {
+    const distance = minutesToNearestWindow(new Date(), RADAR.peakWindowsJst);
+    // 許容幅は超えたが近接ピークからさほど離れていない場合、GitHub Actionsの
+    // cron遅延/欠落で本来のピーク回を逃した可能性が高いため警告を出す
+    // （discover専用の時間帯では毎回距離が大きく鳴らないようnearMiss内だけに限定）。
+    if (distance <= RADAR.peakWindowNearMissMin) {
+      console.warn(`  ⚠️ ピーク時間帯から${distance}分超過してのスキップ（cron遅延の疑い）`);
+      await notifyRadarSkip(
+        `promote.ts: ピーク時間帯を${distance}分超過してスキップ（許容${RADAR.peakWindowToleranceMin}分）。GitHub Actionsのcron遅延/欠落の可能性`,
+      );
+    }
     console.log("  ピーク時間帯外のためスキップ（--forceで無視可）");
     return;
   }

@@ -1,12 +1,22 @@
 # TwoSides Radar
 #
-# 意図どおりの実行頻度（スクリプト側の窓チェックと一致）:
+# 意図どおりの実行頻度（スクリプト側の窓チェックと一致。src/lib/constants.ts の
+# discoverWindowsJst / peakWindowsJst と必ず対で変更すること）:
 #   - discover: JST 1日7回（PENDING 作成・深掘り）
-#   - promote:  JST ピーク3回（7:30 / 12:00 / 19:30）に記事公開
+#   - promote:  JST ピーク3回（7:37 / 12:07 / 19:37）に記事公開
 #
 # 以前は */15 で Workflow 自体を回し、スクリプトが no-op する方式だったため
 # GitHub Actions 上では日中だけで約70回/日走って見えていた。
 # 実作業が無い run（npm ci だけ）を減らすため、起動時刻を窓に合わせる。
+#
+# cronの分は意図的に「ちょうど0分・30分」を避けている。GitHub Actionsの
+# scheduled cronは毎時ちょうどに世界中のジョブが集中し混雑・数十分の遅延や
+# トリガー自体の欠落が起きやすい（GitHub公式ドキュメントも明記）。
+# 実際に2026-07-12〜13、"0 3 * * *"(12:00 JST)のpromote runがトリガー自体
+# 欠落し、"30 22 * * *"(07:30 JST)も44分遅れて発火 → スクリプト側の
+# ±10分許容(旧peakWindowToleranceMin)を超えてスキップし、3回連続で
+# 記事が1本も公開されない障害が発生した。分をずらし、かつ許容幅も広げて
+# 二重に緩衝する（このコメントの数字を変えたらconstants.tsの値も合わせる）。
 #
 # detect（RSS/LIVE・30分おき）と followup（続報・毎時）は radar-live.yml に分離。
 name: TwoSides Radar
@@ -14,17 +24,17 @@ name: TwoSides Radar
 on:
   schedule:
     # —— discover 7/day（JST → UTC = JST−9）——
-    - cron: "0 21 * * *" # 06:00 JST
-    - cron: "0 1 * * *" # 10:00 JST
-    - cron: "30 4 * * *" # 13:30 JST
-    - cron: "0 7 * * *" # 16:00 JST
-    - cron: "0 9 * * *" # 18:00 JST
-    - cron: "0 12 * * *" # 21:00 JST
-    - cron: "0 15 * * *" # 00:00 JST
+    - cron: "7 21 * * *" # 06:07 JST
+    - cron: "7 1 * * *" # 10:07 JST
+    - cron: "37 4 * * *" # 13:37 JST
+    - cron: "7 7 * * *" # 16:07 JST
+    - cron: "7 9 * * *" # 18:07 JST
+    - cron: "7 12 * * *" # 21:07 JST
+    - cron: "7 15 * * *" # 00:07 JST
     # —— promote 3/day ——
-    - cron: "30 22 * * *" # 07:30 JST
-    - cron: "0 3 * * *" # 12:00 JST
-    - cron: "30 10 * * *" # 19:30 JST
+    - cron: "37 22 * * *" # 07:37 JST
+    - cron: "7 3 * * *" # 12:07 JST
+    - cron: "37 10 * * *" # 19:37 JST
   workflow_dispatch: {}
 
 concurrency:

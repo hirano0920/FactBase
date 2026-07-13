@@ -14,10 +14,15 @@ export function isWithinPeakWindow(
   windows: readonly { hour: number; minute: number }[],
   toleranceMin: number,
 ): boolean {
+  return minutesToNearestWindow(now, windows) <= toleranceMin;
+}
+
+/** 現在時刻から最も近い時間帯までの距離（分）。cron遅延の見逃し検知に使う */
+export function minutesToNearestWindow(
+  now: Date,
+  windows: readonly { hour: number; minute: number }[],
+): number {
   const jst = new Date(now.getTime() + 9 * 60 * 60_000);
   const nowMinutes = jst.getUTCHours() * 60 + jst.getUTCMinutes();
-  return windows.some((w) => {
-    const target = w.hour * 60 + w.minute;
-    return Math.abs(nowMinutes - target) <= toleranceMin;
-  });
+  return Math.min(...windows.map((w) => Math.abs(nowMinutes - (w.hour * 60 + w.minute))));
 }

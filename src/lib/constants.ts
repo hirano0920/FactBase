@@ -42,10 +42,12 @@ export type VoteChoiceId = (typeof VOTE_CHOICES)[number]["id"];
 
 /**
  * Radar生成のカスタム投票選択肢（voteLabelsJson）の文字数上限。
- * 3列固定幅ボタンに収める想定。プロンプト側（TOPIC_FILTER_PROMPT）にも同じ上限を明記しているが、
- * AI出力の暴走に備えてUI側・生成コード側の両方で防御的にtruncateする。
+ * 3列固定幅ボタンに収める想定。プロンプト側（TOPIC_FILTER_PROMPT/VOTE_QUESTION_PROMPT）にも
+ * 同じ上限を明記しているが、AI出力の暴走に備えてUI側・生成コード側の両方で防御的にtruncateする。
+ * 旧12字は「法案に賛成」等の抽象テンプレしか収まらず争点固有の名詞が削られがちだったため
+ * 16字に拡張（「増税に賛成」等、対象名詞込みでも収まる幅）。
  */
-export const VOTE_CHOICE_MAX_CHARS = 12;
+export const VOTE_CHOICE_MAX_CHARS = 16;
 
 export const SITE = {
   name: "TwoSides",
@@ -235,16 +237,21 @@ export const RADAR = {
    * 各 promote ピークの約90分前に加え、昼後・夕方の中間スイープで1日のバズを取りこぼさない。
    * 1時間おきの再実行は意味が薄いため間隔を空ける。時間外は完全 no-op（nano/API も呼ばない）。 */
   discoverWindowsJst: [
-    { hour: 6, minute: 0 }, // → 7:30 ピーク
-    { hour: 10, minute: 0 }, // → 12:00 ピーク
-    { hour: 13, minute: 30 }, // 午後スイープ
-    { hour: 16, minute: 0 }, // 夕方前スイープ
-    { hour: 18, minute: 0 }, // → 19:30 ピーク
-    { hour: 21, minute: 0 }, // 夜スイープ
-    { hour: 0, minute: 0 }, // 24:00 JST（夜バズ → 翌朝 7:30）
+    { hour: 6, minute: 7 }, // → 7:37 ピーク
+    { hour: 10, minute: 7 }, // → 12:07 ピーク
+    { hour: 13, minute: 37 }, // 午後スイープ
+    { hour: 16, minute: 7 }, // 夕方前スイープ
+    { hour: 18, minute: 7 }, // → 19:37 ピーク
+    { hour: 21, minute: 7 }, // 夜スイープ
+    { hour: 0, minute: 7 }, // 24:07 JST（夜バズ → 翌朝 7:37）
   ],
-  /** discover起動時間帯とみなす許容幅（分）。cron 15分間隔のジッターを吸収 */
-  discoverWindowToleranceMin: 10,
+  /**
+   * discover起動時間帯とみなす許容幅（分）。
+   * GitHub Actions の scheduled cron は毎時ちょうどの混雑で数十分遅れる/
+   * トリガー自体が欠落することがあるため、cronのジッター想定を10→20分に拡大。
+   * .github/workflows/radar.yml の discoverWindowsJst 相当のcron時刻と対で変更すること。
+   */
+  discoverWindowToleranceMin: 20,
   /**
    * 1 discover 実行あたり深掘りするバズ争点の上限（buzzScore 降順で選ぶ）。
    * 元8→10。「その日の本命が枠外に落ちる」容量ボトルネックを緩和する狙い（外部API呼び出し増分は許容範囲）。
@@ -295,13 +302,26 @@ export const RADAR = {
    * 政治・経済・国際・戦争・人権等を広く拾うという方針に合わせて偏りを抑える。
    */
   maxSameCategoryPerPromoteWindow: 2,
-  /** ピーク時間帯とみなす許容幅（分）。cronのジッターを吸収しつつ隣接15分枠と重複させない */
-  peakWindowToleranceMin: 10,
+  /**
+   * ピーク時間帯とみなす許容幅（分）。
+   * 旧10分では、GitHub Actions側のcron遅延（実測44分）で3ピーク連続スキップ→
+   * 記事が1本も公開されない障害につながった。20分に広げたcronのジッター想定
+   * （discoverWindowToleranceMin）よりさらに緩衝を厚くする。
+   * .github/workflows/radar.yml の promote cron時刻と対で変更すること。
+   */
+  peakWindowToleranceMin: 25,
+  /**
+   * 許容幅を超えてスキップした場合でも、直近のピーク時刻からこの分数以内なら
+   * 「GitHub Actionsの遅延で本来ならピークだったはずの回」とみなしてSlackへ
+   * 警告を送る（notifyRadarSkip）。無関係な discover 専用時間帯での毎回通知を
+   * 避けつつ、tolerance超過の見逃しを可視化する。
+   */
+  peakWindowNearMissMin: 90,
   /** 1日の記事化ピーク時間帯（JST）。通勤・昼休み・夜の可処分時間 */
   peakWindowsJst: [
-    { hour: 7, minute: 30 },
-    { hour: 12, minute: 0 },
-    { hour: 19, minute: 30 },
+    { hour: 7, minute: 37 },
+    { hour: 12, minute: 7 },
+    { hour: 19, minute: 37 },
   ],
   /** buzzScore（4ソース + Newsクラスタ）の公開最低ライン。effectiveScore≥2 */
   minBuzzScoreForPromotion: 2,
