@@ -11,7 +11,7 @@ import { ArticleTimeline } from "@/components/issue/article-timeline";
 import { getIssueBySlug, getRelatedIssues } from "@/lib/data";
 import { sanitizeArticleHtml } from "@/lib/sanitize";
 import { extractListItems, isOpeningSectionHeading, splitArticleSections } from "@/lib/article-sections";
-import { debateTypeHasPolarity } from "@/lib/debate-type";
+import { debateTypeHasPolarity, detectForSideIndex } from "@/lib/debate-type";
 import { HOME_THREE_COL_GRID, SITE } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import type { Metadata } from "next";
@@ -200,6 +200,10 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
             // ペアの2つ目が来た時点で、1つ目と合わせて左右スプリットを1回だけ描画する
             if (i === splitPair[1]) return null;
             const other = sections[splitPair[1]];
+            // 見出し文言から賛成寄り/反対寄りを判定する。生成順（1つ目=賛成のはず）に賭けると、
+            // AIが実際には反対側を先に書いた場合に賛成なのに赤・反対なのに緑という逆転が起きるため、
+            // 判定できない時だけ生成順にフォールバックする
+            const forIndex = detectForSideIndex(section.heading ?? "", other.heading ?? "") ?? 0;
             return (
               <div
                 key="split"
@@ -207,15 +211,16 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
                 style={{ animationDelay: `${Math.min(i, 6) * 60}ms` }}
               >
                 {[section, other].map((side, sideIdx) => {
+                  const isForSide = sideIdx === forIndex;
                   const borderBg = splitHasPolarity
-                    ? sideIdx === 0
+                    ? isForSide
                       ? "border-for/25 bg-for-muted/40"
                       : "border-against/25 bg-against-muted/40"
                     : sideIdx === 0
                       ? "border-accent/25 bg-accent-soft/60"
                       : "border-warm/25 bg-warm-muted/40";
                   const text = splitHasPolarity
-                    ? sideIdx === 0
+                    ? isForSide
                       ? "text-for"
                       : "text-against"
                     : sideIdx === 0

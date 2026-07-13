@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import {
   debateTypePromoteBonus,
+  detectForSideIndex,
   inferDebateType,
   isPromotableDebateType,
   resolveDebateType,
@@ -132,5 +133,31 @@ describe("debateTypeChoiceHint", () => {
   it("policyは人物名禁止・賛否ラベルを案内する", () => {
     expect(debateTypeChoiceHint("policy")).toContain("人物名");
     expect(debateTypeChoiceHint("policy")).toMatch(/賛成|反対/);
+  });
+});
+
+describe("detectForSideIndex", () => {
+  it("生成順どおり（賛成が先）でも正しく判定する", () => {
+    expect(detectForSideIndex("賛成側が言うこと", "反対側が言うこと")).toBe(0);
+  });
+
+  it("AIが反対側を先に書いた場合、位置でなく文言で賛成側を判定する（回帰テスト: 色反転バグ）", () => {
+    expect(detectForSideIndex("反対側が言うこと", "賛成側が言うこと")).toBe(1);
+  });
+
+  it("org_response型（支持/問題）も判定できる", () => {
+    expect(detectForSideIndex("問題だとする側", "対応を支持する側")).toBe(1);
+  });
+
+  it("norm_flare型（擁護/批判）も判定できる", () => {
+    expect(detectForSideIndex("擁護側が言うこと", "批判側が言うこと")).toBe(0);
+  });
+
+  it("どちらの見出しにも極性語が無ければnull（呼び出し側は生成順にフォールバック）", () => {
+    expect(detectForSideIndex("週刊文春・報道側", "佐藤二朗さん側")).toBeNull();
+  });
+
+  it("両方に賛成/反対語が混在するなど曖昧な場合はnull", () => {
+    expect(detectForSideIndex("賛成でも反対でもある側", "もう一方の側")).toBeNull();
   });
 });

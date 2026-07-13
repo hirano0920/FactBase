@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
-import { debateTypeHasPolarity, type DebateType } from "@/lib/debate-type";
+import { debateTypeHasPolarity, detectForSideIndex, type DebateType } from "@/lib/debate-type";
 import { parseBullet, splitClaimAndPoints } from "@/lib/summary-display";
 import type { IssueSummary } from "@/types";
 
@@ -40,6 +40,9 @@ export function SummaryCard({
   const hasPolarity = debateTypeHasPolarity(debateType);
   const sideAParts = parsedSideA ? splitClaimAndPoints(parsedSideA.text) : null;
   const sideBParts = parsedSideB ? splitClaimAndPoints(parsedSideB.text) : null;
+  // bulletsはJSON配列の自由文なので、プロンプト上「賛成側が先」という順序指示をAIが必ず守るとは限らない。
+  // 見出しラベルの文言から賛成寄り/反対寄りを判定し、判定できない時だけ生成順(A=賛成)にフォールバックする
+  const aIsFor = detectForSideIndex(parsedSideA?.label ?? "", parsedSideB?.label ?? "") !== 1;
 
   return (
     <div className={compact ? "space-y-2.5" : "space-y-4"}>
@@ -86,7 +89,7 @@ export function SummaryCard({
               <StancePanel
                 label={parsedSideA.label ?? "一方の立場"}
                 claim={sideAParts.claim}
-                tone={hasPolarity ? "for" : "accent"}
+                tone={hasPolarity ? (aIsFor ? "for" : "against") : "accent"}
                 compact={compact}
               />
 
@@ -103,7 +106,7 @@ export function SummaryCard({
               <StancePanel
                 label={parsedSideB.label ?? "もう一方の立場"}
                 claim={sideBParts.claim}
-                tone={hasPolarity ? "against" : "warm"}
+                tone={hasPolarity ? (aIsFor ? "against" : "for") : "warm"}
                 compact={compact}
               />
             </div>

@@ -160,6 +160,31 @@ export function debateTypeHasPolarity(debateType: DebateType | null | undefined)
   return debateType !== "declaration" && debateType !== "geopolitics";
 }
 
+const FOR_HEADING_HINT = /賛成|支持|擁護/;
+const AGAINST_HEADING_HINT = /反対|批判|問題/;
+
+/**
+ * 記事本文のh2見出し2つのうち、どちらが「賛成寄り」でどちらが「反対寄り」かを見出し文言から判定する。
+ *
+ * debateTypeArticleHint は「賛成側が言うこと」を先・「反対側が言うこと」を後、という順で書くよう
+ * 指示しているが、これは文章生成への指示に過ぎずAIが必ず守るとは限らない（「いま分かっていること」
+ * セクションの流れ次第で反対側を先に書くことがある）。以前は見出しの中身を見ず「1つ目の見出し=賛成/緑、
+ * 2つ目=反対/赤」と機械的に決めていたため、実際の生成順が入れ替わると賛成なのに赤・反対なのに緑という
+ * 逆転が起きた。bulletsのJSON配列（summary-card.tsx側）はスキーマで順序が固定されるため起きないが、
+ * こちらは自由文なので見出し文言そのもので判定する。
+ *
+ * 戻り値: 0なら1つ目が賛成寄り、1なら2つ目が賛成寄り、判定不能ならnull（呼び出し側は生成順にフォールバック）。
+ */
+export function detectForSideIndex(headingA: string, headingB: string): 0 | 1 | null {
+  const aFor = FOR_HEADING_HINT.test(headingA);
+  const aAgainst = AGAINST_HEADING_HINT.test(headingA);
+  const bFor = FOR_HEADING_HINT.test(headingB);
+  const bAgainst = AGAINST_HEADING_HINT.test(headingB);
+  if (aFor && !aAgainst && bAgainst && !bFor) return 0;
+  if (bFor && !bAgainst && aAgainst && !aFor) return 1;
+  return null;
+}
+
 /** 記事 HTML の両側見出し・書き方ヒント（Writer プロンプト注入用） */
 export function debateTypeArticleHint(debateType: DebateType, reignite = false): string {
   const reigniteLine = reignite
