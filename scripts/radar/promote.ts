@@ -24,6 +24,7 @@ import { collectSourceHintsForRepair } from "../../src/lib/article-repair";
 import { buildClaimDiff, formatClaimDiffBlock } from "./lib/claim-diff";
 import { fetchArticleThumbnail } from "./lib/og-image";
 import { composeIssueTitle, composeVoteQuestion } from "../../src/lib/ai";
+import { composeGlossary } from "../../src/lib/glossary";
 import { fetchPrimaryExcerpts } from "./lib/primary-text";
 import { fetchReportExcerpts } from "./lib/report-text";
 import { pollingNewsSources } from "./lib/enrich";
@@ -447,18 +448,21 @@ async function promoteOne(c: PromotionCandidate): Promise<string | null> {
 
   // shareTitle（X/OG/SEO用の「自分ごとフック」）はtitle（中立な投票設問）と分離して生成する。
   // 失敗してもtitleへフォールバックするだけなので記事公開は止めない。
-  const shareTitle = await composeIssueTitle({
-    clusterTitle: c.title,
-    question: voteQuestionTitle,
-    sourceTitles: c.sourceUrls.map((s) => s.title),
-    classification: isOfficial ? "official" : "reported",
-    category: c.category ?? "",
-    primaryExcerpts,
-    debateType: debateResolved?.debateType,
-  }).catch((e) => {
-    console.warn(`  ⚠️ shareTitle生成失敗（titleにフォールバック）: ${e}`);
-    return "";
-  });
+  const [shareTitle, glossary] = await Promise.all([
+    composeIssueTitle({
+      clusterTitle: c.title,
+      question: voteQuestionTitle,
+      sourceTitles: c.sourceUrls.map((s) => s.title),
+      classification: isOfficial ? "official" : "reported",
+      category: c.category ?? "",
+      primaryExcerpts,
+      debateType: debateResolved?.debateType,
+    }).catch((e) => {
+      console.warn(`  ⚠️ shareTitle生成失敗（titleにフォールバック）: ${e}`);
+      return "";
+    }),
+    composeGlossary({ lead: article.lead, bullets: article.bullets }),
+  ]);
 
   const issue = await prisma.issue.create({
     data: {
@@ -476,6 +480,7 @@ async function promoteOne(c: PromotionCandidate): Promise<string | null> {
       articleHtml: article.articleHtml,
       articleGeneratedAt: new Date(),
       voteLabelsJson: choices as unknown as Prisma.InputJsonValue,
+      glossaryJson: glossary.length > 0 ? (glossary as unknown as Prisma.InputJsonValue) : undefined,
       debateType: debateResolved?.debateType ?? null,
       thumbnailUrl: thumbnail?.thumbnailUrl ?? null,
       thumbnailSourceUrl: thumbnail?.thumbnailSourceUrl ?? null,

@@ -8,6 +8,18 @@ export interface IssueSummary {
   sources: { label: string; url: string }[];
 }
 
+export interface GlossaryTerm {
+  /** 一覧表示・キー用の正式名（例:「オルタナティブ投資」） */
+  term: string;
+  /** 記事本文中で実際にマッチさせる表記。termと異なることがある（例:「乖離許容幅」） */
+  matchText: string;
+  /** 吹き出しに出す説明（80字程度） */
+  def: string;
+  source: "wikipedia" | "ai";
+  /** source=wikipediaの時だけ、出典リンク用のページURL */
+  wikipediaUrl?: string;
+}
+
 export interface VoteTally {
   for: number;
   against: number;
@@ -49,6 +61,8 @@ export interface Issue {
   thumbnailSourceUrl: string | null;
   /** カード上の出典表記（媒体名） */
   thumbnailSourceFeed: string | null;
+  /** 要点カードの難語ポップオーバー用語集。null/[]=未生成（旧記事） */
+  glossary: GlossaryTerm[];
 }
 
 export interface Comment {

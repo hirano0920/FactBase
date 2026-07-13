@@ -8,6 +8,7 @@ import { invalidateOnIssueChanged } from "@/lib/cache-invalidate";
 import { isRoutineOfficialUpdate, toIssueCategory } from "@/lib/radar";
 import { generateVerifiedArticle, violatesBan } from "@/lib/radar-article";
 import { assessReportExcerptThickness } from "@/lib/article-quality";
+import { composeGlossary } from "@/lib/glossary";
 import { fetchPrimaryExcerpts } from "../../scripts/radar/lib/primary-text";
 import { fetchReportExcerpts } from "../../scripts/radar/lib/report-text";
 import { checkArticleQualityGate } from "../../scripts/radar/lib/article-judge";
@@ -127,6 +128,8 @@ export async function publishHeldRadarCandidate(candidate: TopicCandidateRow): P
     console.warn(`[radar-publish-held] 品質ゲートnano失敗（fail-open・公開続行）: ${e}`);
   }
 
+  const glossary = await composeGlossary({ lead: article.lead, bullets: article.bullets });
+
   const slug = `radar-${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID().slice(0, 8)}`;
   const issue = await prisma.issue.create({
     data: {
@@ -145,6 +148,7 @@ export async function publishHeldRadarCandidate(candidate: TopicCandidateRow): P
       } as unknown as Prisma.InputJsonValue,
       articleHtml: article.articleHtml,
       articleGeneratedAt: new Date(),
+      glossaryJson: glossary.length > 0 ? (glossary as unknown as Prisma.InputJsonValue) : undefined,
       keywords: candidate.topicTerm ? [candidate.topicTerm] : [issueTitle],
       monitoringUntil: new Date(Date.now() + 60 * 86400_000),
     },

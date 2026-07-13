@@ -32,6 +32,7 @@ export const MOCK_ISSUES: Issue[] = DEMO_ISSUES.map((def, index) => ({
   createdAt: def.createdAt,
   confirmation: def.confirmation,
   voteLabels: null,
+  glossary: [],
   debateType: null,
   underReview: false,
   thumbnailUrl: null,

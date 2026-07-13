@@ -38,6 +38,13 @@
   --color-undecided: #a16207;
   --color-undecided-muted: #fef3c7;
 
+  /* 要点カードの難語ポップオーバー用。undecidedと近い黄系だが別トークン
+     （投票の「わからない」極性と紛らわしくならないよう意図的に分離） */
+  --color-glossary: #9a6b12;
+  --color-glossary-underline: #d9a441;
+  --color-glossary-muted: #fbf1dc;
+  --color-glossary-border: #e8c883;
+
   --color-link: #3f6690;
   --color-link-hover: #315274;
 
@@ -105,6 +112,11 @@
 
   --color-undecided: #e3b341;
   --color-undecided-muted: #3a2f10;
+
+  --color-glossary: #e8c883;
+  --color-glossary-underline: #c99a3f;
+  --color-glossary-muted: #2c2413;
+  --color-glossary-border: #4a3c1c;
 
   --color-link: #7aa3c9;
   --color-link-hover: #93b6d8;

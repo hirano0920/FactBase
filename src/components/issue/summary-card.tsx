@@ -2,7 +2,8 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { debateTypeHasPolarity, detectForSideIndex, type DebateType } from "@/lib/debate-type";
 import { parseBullet, splitClaimAndPoints } from "@/lib/summary-display";
-import type { IssueSummary } from "@/types";
+import { renderTextWithGlossary } from "@/lib/glossary-render";
+import type { GlossaryTerm, IssueSummary } from "@/types";
 
 interface SummaryCardProps {
   summary: IssueSummary;
@@ -18,6 +19,8 @@ interface SummaryCardProps {
    * その場合はaccent/warmの中立配色にする。
    */
   debateType?: DebateType | null;
+  /** 難語ポップオーバー用語集。未生成（旧記事）はundefined/[]で、その場合は素の文字列のまま表示 */
+  glossary?: GlossaryTerm[] | null;
 }
 
 /**
@@ -30,6 +33,7 @@ export function SummaryCard({
   articleSlug,
   compact = false,
   debateType = null,
+  glossary = null,
 }: SummaryCardProps) {
   const bullets = summary.bullets.slice(0, 3);
   const [context, sideA, sideB] = bullets;
@@ -54,7 +58,7 @@ export function SummaryCard({
             compact ? "line-clamp-4 text-sm" : "text-base",
           )}
         >
-          {summary.lead}
+          {renderTextWithGlossary(summary.lead, glossary)}
         </p>
       )}
 
@@ -75,7 +79,7 @@ export function SummaryCard({
                 compact ? "line-clamp-3 text-sm" : "text-[15px]",
               )}
             >
-              {parsedContext.text}
+              {renderTextWithGlossary(parsedContext.text, glossary)}
             </p>
           </div>
 
@@ -91,6 +95,7 @@ export function SummaryCard({
                 claim={sideAParts.claim}
                 tone={hasPolarity ? (aIsFor ? "for" : "against") : "accent"}
                 compact={compact}
+                glossary={glossary}
               />
 
               <div
@@ -108,6 +113,7 @@ export function SummaryCard({
                 claim={sideBParts.claim}
                 tone={hasPolarity ? (aIsFor ? "against" : "for") : "warm"}
                 compact={compact}
+                glossary={glossary}
               />
             </div>
           </div>
@@ -130,10 +136,10 @@ export function SummaryCard({
                   {parsed.label ? (
                     <>
                       <span className="font-semibold text-ink-muted">{parsed.label}: </span>
-                      {parsed.text}
+                      {renderTextWithGlossary(parsed.text, glossary)}
                     </>
                   ) : (
-                    bullet
+                    renderTextWithGlossary(bullet, glossary)
                   )}
                 </li>
               );
@@ -162,11 +168,13 @@ function StancePanel({
   claim,
   tone,
   compact,
+  glossary,
 }: {
   label: string;
   claim: string;
   tone: "for" | "against" | "accent" | "warm";
   compact: boolean;
+  glossary?: GlossaryTerm[] | null;
 }) {
   const shell =
     tone === "for"
@@ -211,7 +219,7 @@ function StancePanel({
           compact ? "text-sm" : "text-[15px]",
         )}
       >
-        {claim}
+        {renderTextWithGlossary(claim, glossary)}
       </p>
     </div>
   );

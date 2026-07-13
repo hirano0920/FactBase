@@ -119,6 +119,7 @@ export default async function IssuePage({ params }: IssuePageProps) {
                     summary={issue.summary}
                     articleSlug={issue.articleHtml ? issue.slug : undefined}
                     debateType={issue.debateType}
+                    glossary={issue.glossary}
                   />
 
                   <div className="mt-6 border-t border-border pt-6 text-center">

@@ -167,6 +167,9 @@ model Issue {
   thumbnailUrl       String?
   thumbnailSourceUrl String? // 出典明記・クリックで元記事に飛べるようにする
   thumbnailSourceFeed String? // カード上の出典表記（媒体名）
+  // 要点カード中の難語ポップオーバー用語集。[{"term","matchText","def","source":"wikipedia"|"ai","wikipediaUrl"}]
+  // 生成時（composeGlossary）に一度だけ作る。null=旧記事（未生成）
+  glossaryJson Json?
   // 公開後の品質報告（誤った要約・的外れなスレ立て等）が閾値に達すると true。
   // 人間確認が終わるまでトレンド表示・新規流入から外す（削除はしない＝透明性ログとして残す）
   underReview    Boolean              @default(false)

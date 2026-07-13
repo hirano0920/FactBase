@@ -23,6 +23,19 @@ export interface ReportExcerpt {
   text: string;
 }
 
+/**
+ * ハングル・キリル・タイ文字等、日本語の文中に混ぜると読めない文字列になるスクリプト。
+ * Google Newsが返す媒体名（feed）はキーワード検索でヒットした海外語圏メディアの表記が
+ * そのまま入ることがあり、Writerがそれを地の文に埋め込むと壊れた表記になる
+ * （実例: 韓国メディア「디지털투데이」を引用した文が「ディ지털투데이が伝えています」になった）。
+ * 英字（Bloomberg等）・漢字仮名は日本語の文中でもそのまま読めるため対象外。
+ */
+const NON_JA_SCRIPT = /[가-힣ᄀ-ᇿ㄰-㆏Ѐ-ӿ฀-๿؀-ۿऀ-ॿ]/;
+
+function normalizeFeedName(feed: string): string {
+  return NON_JA_SCRIPT.test(feed) ? "海外メディア" : feed;
+}
+
 const MAX_OUTLETS = 6;
 const MAX_CHARS_PER_OUTLET = 2000;
 const MIN_EXCERPT_CHARS = 80;
@@ -291,7 +304,10 @@ export async function fetchReportExcerpts(
   sources: { title: string; url: string; feed: string }[],
 ): Promise<ReportExcerpt[]> {
   const byFeedLatest = new Map<string, { title: string; url: string; feed: string }>();
-  for (const s of sources) byFeedLatest.set(s.feed, s);
+  for (const raw of sources) {
+    const s = { ...raw, feed: normalizeFeedName(raw.feed) };
+    byFeedLatest.set(s.feed, s);
+  }
   const all = Array.from(byFeedLatest.values());
   const targets = all.slice(0, MAX_OUTLETS);
 
