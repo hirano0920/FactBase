@@ -253,6 +253,13 @@ export const RADAR = {
    */
   discoverWindowToleranceMin: 20,
   /**
+   * 時間帯許容幅を使い切ってもなお実行できていない場合の最終防衛ライン（時間）。
+   * 実測: GitHub Actionsのcronが6回連続で全時間帯を外し、discover/promoteが17時間超
+   * 完全停止する事故が発生した。許容幅をいくら広げても原理的に取りこぼしうるため、
+   * 「最後の実行からこの時間を超えたら、時間帯に関わらず強制的に走らせる」を保険として持つ。
+   */
+  discoverOverdueHours: 5,
+  /**
    * 1 discover 実行あたり深掘りするバズ争点の上限（buzzScore 降順で選ぶ）。
    * 元8→10。「その日の本命が枠外に落ちる」容量ボトルネックを緩和する狙い（外部API呼び出し増分は許容範囲）。
    */
@@ -317,6 +324,12 @@ export const RADAR = {
    * 避けつつ、tolerance超過の見逃しを可視化する。
    */
   peakWindowNearMissMin: 90,
+  /**
+   * discoverOverdueHoursと同じ考え方の最終防衛ライン。ピーク3回（約4〜7.5時間間隔）を
+   * 全部逃した場合に備え、最終公開からこの時間を超えたら時間帯外でも強制的に公開する
+   * （深夜早朝は除く。promote.ts側でJST時刻ガードと組み合わせて使う）。
+   */
+  promoteOverdueHours: 6,
   /** 1日の記事化ピーク時間帯（JST）。通勤・昼休み・夜の可処分時間 */
   peakWindowsJst: [
     { hour: 7, minute: 37 },

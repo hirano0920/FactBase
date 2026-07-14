@@ -38,7 +38,7 @@ import {
   type ActiveIssueForDedup,
 } from "./lib/promote-logic";
 import { resolveDebateType } from "../../src/lib/debate-type";
-import { isWithinPeakWindow, minutesToNearestWindow } from "./lib/schedule";
+import { isWithinPeakWindow, minutesToNearestWindow, isOverdue } from "./lib/schedule";
 import { notifyRadarFailure, notifyRadarSkip } from "./notify";
 import { notifyRevalidate } from "./lib/notify-revalidate";
 import { linkBuzzSourcesToIssue } from "./lib/link-buzz-sources";
@@ -83,8 +83,22 @@ async function main() {
         `promote.ts: ピーク時間帯を${distance}分超過してスキップ（許容${RADAR.peakWindowToleranceMin}分）。GitHub Actionsのcron遅延/欠落の可能性`,
       );
     }
-    console.log("  ピーク時間帯外のためスキップ（--forceで無視可）");
-    return;
+
+    // 最終防衛ライン: 時間帯を外し続けて何時間も1本も公開されていない場合、
+    // 深夜早朝（daily_limit等と紛れないよう配信に適さない時間は除く）以外なら強制的に走らせる。
+    // 実際にcronが6回連続で全時間帯を外し、17時間超公開ゼロが続いた事故が起きたための保険。
+    const jstHour = new Date(Date.now() + 9 * 60 * 60_000).getUTCHours();
+    const withinPublishableHours = jstHour >= 6 && jstHour < 24;
+    const lastIssue = await prisma.issue.findFirst({ orderBy: { createdAt: "desc" }, select: { createdAt: true } });
+    if (withinPublishableHours && isOverdue(lastIssue?.createdAt ?? null, RADAR.promoteOverdueHours)) {
+      console.warn(`  ⚠️ 時間帯外だが最終公開から${RADAR.promoteOverdueHours}時間超過 → 停止防止のため強制実行`);
+      await notifyRadarSkip(
+        `promote.ts: 最終公開から${RADAR.promoteOverdueHours}時間超過を検知し、時間帯外だが強制実行しました`,
+      );
+    } else {
+      console.log("  ピーク時間帯外のためスキップ（--forceで無視可）");
+      return;
+    }
   }
 
   const freshSince = new Date(Date.now() - CANDIDATE_FRESHNESS_HOURS * 60 * 60_000);

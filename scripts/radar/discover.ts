@@ -35,7 +35,7 @@ import {
   type EvidenceBundle,
 } from "./lib/research";
 import type { SavedEvidence } from "./lib/promote-logic";
-import { isWithinPeakWindow } from "./lib/schedule";
+import { isWithinPeakWindow, isOverdue } from "./lib/schedule";
 import { fetchTrendingKeywords } from "./sources/trends";
 import { fetchYahooRealtimeBuzzPolitics } from "./sources/yahoo-realtime";
 import {
@@ -97,8 +97,20 @@ async function main() {
     FORCE || isWithinPeakWindow(new Date(), RADAR.discoverWindowsJst, RADAR.discoverWindowToleranceMin);
 
   if (!inDiscoverWindow) {
-    console.log("  discover 時間帯外のためスキップ（--forceで無視可）");
-    return;
+    // GitHub Actionsのcron遅延で全時間帯を外し続けるとdiscoverが完全に止まる事故が
+    // 実際に起きた（6回連続スキップ・17時間超の停止）。時間帯を大きく外していても、
+    // 最後の候補更新からRADAR.discoverOverdueHours以上経っていれば強制的に走らせる。
+    const lastCandidate = await prisma.topicCandidate.findFirst({
+      orderBy: { updatedAt: "desc" },
+      select: { updatedAt: true },
+    });
+    if (!isOverdue(lastCandidate?.updatedAt ?? null, RADAR.discoverOverdueHours)) {
+      console.log("  discover 時間帯外のためスキップ（--forceで無視可）");
+      return;
+    }
+    console.warn(
+      `  ⚠️ 時間帯外だが最終更新から${RADAR.discoverOverdueHours}時間超過 → 停止防止のため強制実行`,
+    );
   }
 
   const researchLimit = RADAR.researchTopicsPerRun;
