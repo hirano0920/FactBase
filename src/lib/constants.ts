@@ -234,24 +234,26 @@ export const RADAR = {
   followupWindowToleranceMin: 8,
   // --- 能動調査パイプライン（discover.ts、①②③）---
   /** discover.ts（PENDING作成＋深掘り）の起動時間帯（JST）。1日7回・2.5〜4時間間隔。
-   * 各 promote ピークの約90分前に加え、昼後・夕方の中間スイープで1日のバズを取りこぼさない。
-   * 1時間おきの再実行は意味が薄いため間隔を空ける。時間外は完全 no-op（nano/API も呼ばない）。 */
+   * 各 promote ピーク（6:33/11:03/16:03）の約90分前に加え、昼・夕方・夜間の中間スイープで
+   * 1日のバズを取りこぼさない。1時間おきの再実行は意味が薄いため間隔を空ける。
+   * 時間外は完全 no-op（nano/API も呼ばない）。 */
   discoverWindowsJst: [
-    { hour: 6, minute: 7 }, // → 7:37 ピーク
-    { hour: 10, minute: 7 }, // → 12:07 ピーク
-    { hour: 13, minute: 37 }, // 午後スイープ
-    { hour: 16, minute: 7 }, // 夕方前スイープ
-    { hour: 18, minute: 7 }, // → 19:37 ピーク
-    { hour: 21, minute: 7 }, // 夜スイープ
-    { hour: 0, minute: 7 }, // 24:07 JST（夜バズ → 翌朝 7:37）
+    { hour: 5, minute: 3 }, // → 6:33 ピーク
+    { hour: 9, minute: 33 }, // → 11:03 ピーク
+    { hour: 12, minute: 33 }, // 昼過ぎスイープ
+    { hour: 14, minute: 33 }, // → 16:03 ピーク
+    { hour: 18, minute: 3 }, // 夕方スイープ
+    { hour: 21, minute: 3 }, // 夜スイープ
+    { hour: 0, minute: 33 }, // 深夜スイープ（夜バズ → 翌朝 6:33）
   ],
   /**
    * discover起動時間帯とみなす許容幅（分）。
-   * GitHub Actions の scheduled cron は毎時ちょうどの混雑で数十分遅れる/
-   * トリガー自体が欠落することがあるため、cronのジッター想定を10→20分に拡大。
+   * GitHub Actions の scheduled cron は「時間指定=ベストエフォート」の仕様上、混雑時に
+   * 数十分〜1時間規模で遅れることを前提にする（早く動く分には副作用が無いため、
+   * 「早すぎる」は気にしない設計に変更）。
    * .github/workflows/radar.yml の discoverWindowsJst 相当のcron時刻と対で変更すること。
    */
-  discoverWindowToleranceMin: 20,
+  discoverWindowToleranceMin: 45,
   /**
    * 時間帯許容幅を使い切ってもなお実行できていない場合の最終防衛ライン（時間）。
    * 実測: GitHub Actionsのcronが6回連続で全時間帯を外し、discover/promoteが17時間超
@@ -311,30 +313,37 @@ export const RADAR = {
   maxSameCategoryPerPromoteWindow: 2,
   /**
    * ピーク時間帯とみなす許容幅（分）。
-   * 旧10分では、GitHub Actions側のcron遅延（実測44分）で3ピーク連続スキップ→
-   * 記事が1本も公開されない障害につながった。20分に広げたcronのジッター想定
-   * （discoverWindowToleranceMin）よりさらに緩衝を厚くする。
+   * GitHub Actionsのscheduled cronは「ベストエフォート」の仕様上、遅れることはあっても
+   * 早く動くことは無い。なら「実際に読まれる時刻の1時間前」をcron時刻にしてしまえば、
+   * 多少遅れても実害が無く、早く公開されても問題ない（早いこと自体はデメリットが無い）。
+   * peakWindowsJstはこの前提で「読者が見る時刻」ではなく「1時間早めたcron目標時刻」を
+   * 入れてあるので、許容幅も「そこから最大+60分の遅れまでは同じピーク扱い」にする。
    * .github/workflows/radar.yml の promote cron時刻と対で変更すること。
    */
-  peakWindowToleranceMin: 25,
+  peakWindowToleranceMin: 60,
   /**
    * 許容幅を超えてスキップした場合でも、直近のピーク時刻からこの分数以内なら
    * 「GitHub Actionsの遅延で本来ならピークだったはずの回」とみなしてSlackへ
    * 警告を送る（notifyRadarSkip）。無関係な discover 専用時間帯での毎回通知を
    * 避けつつ、tolerance超過の見逃しを可視化する。
    */
-  peakWindowNearMissMin: 90,
+  peakWindowNearMissMin: 120,
   /**
-   * discoverOverdueHoursと同じ考え方の最終防衛ライン。ピーク3回（約4〜7.5時間間隔）を
+   * discoverOverdueHoursと同じ考え方の最終防衛ライン。ピーク3回（約4.5〜7時間間隔）を
    * 全部逃した場合に備え、最終公開からこの時間を超えたら時間帯外でも強制的に公開する
    * （深夜早朝は除く。promote.ts側でJST時刻ガードと組み合わせて使う）。
    */
   promoteOverdueHours: 6,
-  /** 1日の記事化ピーク時間帯（JST）。通勤・昼休み・夜の可処分時間 */
+  /**
+   * 1日の記事化ピーク時間帯（JST）。「読者が見る時刻」の1時間前を狙って設定してある
+   * （朝7:30・昼12:00・夕方17:00の通勤・昼休み・夕方の可処分時間の1時間前＝
+   * 6:33・11:03・16:03）。cronが多少遅れても実際の読者到達時刻には十分間に合い、
+   * 早く公開される分には何の問題も無いという方針（2026-07-14、ユーザーとの合意）。
+   */
   peakWindowsJst: [
-    { hour: 7, minute: 37 },
-    { hour: 12, minute: 7 },
-    { hour: 19, minute: 37 },
+    { hour: 6, minute: 33 },
+    { hour: 11, minute: 3 },
+    { hour: 16, minute: 3 },
   ],
   /** buzzScore（4ソース + Newsクラスタ）の公開最低ライン。effectiveScore≥2 */
   minBuzzScoreForPromotion: 2,
