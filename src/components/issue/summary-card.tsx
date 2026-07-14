@@ -227,12 +227,9 @@ function StancePanel({
         {renderTextWithGlossary(claim, glossary)}
       </p>
       {points && points.length > 0 && (
-        <p
-          className={cn(
-            "pl-2 mt-1.5 leading-snug text-ink-secondary",
-            compact ? "text-xs line-clamp-2" : "text-[13px] line-clamp-3",
-          )}
-        >
+        // line-clampで省略すると文の途中でぶつ切りになり、読者が「読めるようで読めない」
+        // 状態になる（実例で指摘あり）。根拠を見せるのが目的なので、省略はせず全文out表示する。
+        <p className={cn("pl-2 mt-1.5 leading-snug text-ink-secondary", compact ? "text-xs" : "text-[13px]")}>
           {renderTextWithGlossary(points.join(" "), glossary)}
         </p>
       )}
