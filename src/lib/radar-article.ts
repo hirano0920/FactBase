@@ -26,13 +26,18 @@
  */
 import { AI_MODELS, SITE } from "@/lib/constants";
 import { createArticleClient, resolveArticleModel } from "@/lib/openai-client";
-import { verifyClaimsAgainstSources, type ClaimToVerify } from "@/lib/ai";
+import { verifyClaimsAgainstSources, verifySidesAxisAlignment, type ClaimToVerify } from "@/lib/ai";
 import {
   debateTypeArticleHint,
   debateTypeBulletsSpec,
   type DebateType,
 } from "@/lib/debate-type";
-import { findStructureIssues, autoRepairArticle, normalizeArticleSurfaces } from "@/lib/article-quality";
+import {
+  findStructureIssues,
+  autoRepairArticle,
+  normalizeArticleSurfaces,
+  sideSectionsPlain,
+} from "@/lib/article-quality";
 import {
   repairSideSectionsWithMini,
   collectSourceHintsForRepair,
@@ -47,9 +52,20 @@ const SYSTEM = `あなたは${SITE.name}の編集デスクです。
 
 # 絶対ルール（法的リスク回避・厳守）
 - 与えられた見出し・一次資料抜粋・報道抜粋に書かれていること以外を書かない。憶測・記憶での補完は禁止
-- 報道は事実として断定しない。「〜と○○が報じています」「〜と伝えられています」形式
-  （悪い例:「日銀は金利を引き上げました」「フジがハラスメントと認定しました」）
-  （良い例:「朝日新聞は、日銀が金利を引き上げたと報じています」）
+- 報道を事実として断定しない。ただし「いま何が論点か」の冒頭段落とlead・bulletsでは
+  帰属（「〜と報じています」「〜と述べた」）を書かなくてよい
+  （読者にはUI側で常に「報道ベース・真偽は未確認」バッジが表示されるため、
+  冒頭で毎回「報道」「報じる」と書くと読みにくくなりタイパを損なう）。
+  代わりに事実をストレートに書くが、断定しないよう「〜とされる」「〜の可能性が報じられている」
+  「〜との見方が広がっている」等の控えめな表現を用いる。
+  （良い例:「日銀が金利を引き上げたとされる。朝日など複数メディアが伝えた。」）
+  （悪い例:「日銀は金利を引き上げました」← 事実断定）
+- 冒頭以降のセクション（賛成側/反対側・各社は何を伝えているか）では従来通り帰属を付ける。
+  同じセクション内で同じ媒体の話を続ける2文目以降は、帰属を毎文繰り返さなくてよい。
+  ただし確定した事実であるかのような断定語（「認定した」「確定した」「事実だ」等）は全セクションで禁止。
+  帰属を1回にまとめようとして複数の事実を1文に詰め込まない（「1文60字以内」ルール違反）。
+  （良い例:「朝日新聞は、日銀が金利を引き上げたと報じています。同じ紙面で物価見通しの
+  上方修正も伝えています。」← 1文目で帰属済みなので2文目は繰り返さなくてよい）
 - 例外1: 一次資料抜粋は「〜と発表されています」「法案は〜を定めています」と書いてよい
 - 例外2: 報道抜粋は媒体名付き帰属のみ。複数媒体なら一致点と食い違いを比較。差が無ければ無理に作らない
 - 例外3: 国会会議録は発言者名付きで引用してよい
@@ -59,12 +75,20 @@ const SYSTEM = `あなたは${SITE.name}の編集デスクです。
 - 「違法」「有罪」「汚職」「犯罪」を事実断定しない。個人評価（「悪質」等）も書かない
 - 抜粋にない固有名詞・数値・日付を書かない。抜粋が無いとき具体数値は書かない
 - 数値は抜粋の表記をそのまま使う。leadで「A円からB円台」のように矛盾して読める並べ方をしない
+- ★固有名詞は「翻訳」してから使う: GPIF→「年金運用の巨大基金」、学位剥奪→「博士号はく奪」等
+  一般読者に一発で意味が通じる形に変換すること。トランプ・岸田首相等、誰でも分かる固有名詞はそのままでOK
+  55字以内に収まらない固有名詞は、固有名詞を削って一般語だけで書け
 - leadは「いま何が論点か」（またはOFFICIALの「いま分かっていること」）と同一内容にする。短い別要約を作らない
 - leadに「報道ベースで真偽未確認」等の定型ラベルを付けない
 - bulletsの1項目目は冒頭と同じ具体事実。2・3項目目は両側セクションと同じ芯。フィード・スレッド・記事で別要約を書かない
 
 # 何を書くか（最低限）
-1. いま何が論点か — 冒頭3〜4文。①報道・公式が「何を」言ったか（具体的内容を先に）②経緯③反応と対立軸。可能なら一般読者への影響（生活・お金・安全・仕事・表現等）を1文含める
+1. いま何が論点か — 冒頭3〜4文。必ず以下の順序で書く:
+   ① 何が起きたか — 固有名詞を「翻訳」しながら書け（「GPIF→年金運用の巨大基金」「学位剥奪→博士号はく奪」等、
+      一般読者が一発で意味を理解できるように）。固有名詞だけで意味が通じる（トランプ、岸田首相）はそのままでOK
+   ② それが読者の生活・お金・安全・権利にどう影響するか = フック（最重要。ここが無いと誰も読み続けない）
+   ③ 最小限の経緯（1文あれば十分）
+   ④ 意見が分かれる軸
 2. どこで意見が分かれるか — 両側の立場を1行ずつ。タイトルの自分ごとフック（例:貿易・円・燃料・SNS）があれば対立軸にも落とす
 3. 両側の主張（最重要・同じ分量・同じ根拠密度）。①で書いた事実の再掲禁止。理由・反論・論点だけ
 4. 各社の差 — 冒頭と重複する事実の再掲禁止。論調の違い・追加情報のみ
@@ -108,7 +132,8 @@ const SYSTEM = `あなたは${SITE.name}の編集デスクです。
 - <strong>は事実トークン（数字・固有名詞）のみ。観点ラベル自体を囲まない
 - 官公庁的な言い回し（「〜に鑑み」「〜と存じます」「〜を踏まえ」等）を避け、話し言葉に近い平易な言葉を使う
 - 「〜性」「〜化」「〜的」を多用した硬い体言止めより、動詞で言い切る文を優先する
-- 各箇条書きは結論を先に書いてから理由・詳細を続ける（結論ファースト。「なぜなら」の説明から書き始めない）`;
+- 各箇条書きは結論を先に書いてから理由・詳細を続ける（結論ファースト。「なぜなら」の説明から書き始めない）
+- **句読点ルール: 読点（、）は文の構造を明確にするためだけに使う。冗長な読点は避ける。「A、B」のように修飾語と被修飾語の間に入れる読点は不要（「加熱式たばこ、40円値上げ」ではなく「加熱式たばこ40円値上げ」）。外しても意味が通じる読点はすべて削れ。**`;
 
 export interface ArticleClaim {
   text: string;
@@ -130,6 +155,51 @@ const BANNED_PATTERNS = [
   /間違いな[いく]/,
   /確実に(?:違法|不正|犯罪)/,
 ];
+
+/** 30字超の長いclaimは検証が不安定になるため、事前に分割・短縮する */
+const MAX_CLAIM_CHARS = 30;
+
+/** attribution-only / vague / too-long claims — skip nano verify to save cost */
+const THIN_CLAIM_PATTERN =
+  /^(?:と(?:報じ|伝え|述べ|指摘|主張)|(?:報じ|伝え|述べ|指摘|主張)(?:ている|ています|られた)|その他|なお|また|一方|加えて|さらに|具体的|詳細は|記事で|以下|上記|下記)/u;
+
+function isThinClaim(text: string): boolean {
+  const t = text.trim();
+  if (t.length > MAX_CLAIM_CHARS) return true;      // too long → unstable for nano
+  if (t.length < 5) return true;                     // too short
+  return THIN_CLAIM_PATTERN.test(t);
+}
+
+/**
+ * UnsupportedになったclaimをarticleHtmlから該当文を削除して局所修正する。
+ * 全文再生成より遥かに安い（0円）。該当文が見つからなければ元のHTMLをそのまま返す。
+ */
+function stripUnsupportedClaimsFromHtml(
+  articleHtml: string,
+  unsupported: UngroundedClaim[],
+): string {
+  let html = articleHtml;
+  for (const u of unsupported) {
+    // unsupported.text は claim の text。最大で20文字前方・後方を含めて削除する
+    const target = u.text.trim();
+    if (target.length < 6) continue;
+    // 「。Aは〜と報じている。」のような文を丸ごと削除
+    // 前後に句点があれば含めて削除、なければclaim文字列だけ削除
+    const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // 文単位で削除: 「。claim_text。」または「 claim_text」を削除
+    const patterns = [
+      new RegExp(`。${escaped}[。．]?`, "g"),
+      new RegExp(`[。．]${escaped}`, "g"),
+      new RegExp(`<li>[^<]*?${escaped}[^<]*?</li>`, "gi"),
+    ];
+    for (const re of patterns) {
+      const before = html.length;
+      html = html.replace(re, "");
+      if (html.length < before) break; // 削除成功 → 次へ
+    }
+  }
+  return html;
+}
 
 export function violatesBan(article: ArticleJson): string | null {
   const all = `${article.lead} ${article.bullets.join(" ")} ${article.articleHtml} ${article.followUpNote ?? ""}`;
@@ -227,6 +297,12 @@ export interface GenerateArticleParams {
    * geopolitics + sustained 等で、冒頭=直近24h / タイムライン=確認済み経緯 に分離する。
    */
   timelineFirst?: boolean;
+  /**
+   * 軸ロック: 現実の対立軸を証拠から確定した結果。Writerに「この軸で書け」と拘束するためのもの。
+   * buildLockedAxis（axis-lock.ts）が抽出した軸で、null/undefinedの場合は従来通りWriterが
+   * 与えられた資料から軸を判断する（fail-soft）。
+   */
+  lockedAxis?: { axis: string; sideA: string; sideB: string };
 }
 
 /**
@@ -241,6 +317,7 @@ const OFFICIAL_FORMAT = `<h2>いま分かっていること</h2>
       - 事件・災害の公式発表: <ul><li><strong>何が起きたか:</strong> …</li><li><strong>被害・対応:</strong> …</li><li><strong>これから:</strong> …</li></ul>
       - 要人の声明・人事: <ul><li><strong>何が起きたか:</strong> …</li><li><strong>経緯:</strong> …</li><li><strong>これから:</strong> …</li></ul>
       分からない項目は「一次資料からは確認できない」と書く
+      固有名詞は翻訳して使うこと（GPIF→「年金運用の巨大基金」等）。一般読者が一発で意味を理解できるように。
     <h2>背景</h2><ul><li>…</li></ul>（国会会議録またはWikipediaで本件固有の経緯が補える場合のみ。辞書定義は禁止。使えなければ省略）
     <h2>法律ではどうなっているか</h2><ul><li>…</li></ul>（関連法令の抜粋がある場合のみ。無ければ省略。「資料にありません」禁止）
     <h2>海外ではどう報じられているか</h2><ul><li><strong>共通:</strong> …</li><li><strong>国内:</strong> …</li><li><strong>海外:</strong> …</li></ul>
@@ -262,10 +339,12 @@ const OFFICIAL_FORMAT = `<h2>いま分かっていること</h2>
  * 空セクション・プレースホルダ・他国混入・一般論賛否を禁止。
  */
 const REPORTED_FORMAT = `<h2>いま何が論点か</h2><p>3〜4文。必ずこの順序で書く:
-      ① 何が報じられたか — 媒体名付き（「週刊文春は〜と報じています」）。報道の具体的内容（行為・発言・出来事）を最初に書く。否定や反応の前に、読者が「何の話か」を100%把握できること
-      ② 最小限の経緯（時期・場面・共演等）
-      ③ 当事者・関係者の反応と、意見が分かれる軸。可能なら一般読者への影響（生活・お金・安全・仕事・表現・SNS等）を1文
-      断定禁止・帰属付き。2文だけの薄い要約禁止。lead・bullets1項目目と同一内容</p>
+     ① 何が起きたか — 事実をストレートに。媒体名は不要。一般読者に伝わる言葉で書く。固有名詞は翻訳する
+        （「GPIF→年金運用の巨大基金」「学位剥奪→博士号はく奪」「宮崎麗果→約1.5億円脱税のインフルエンサー」等）
+     ② この話が読者の生活・お金・安全・権利にどう関係するか = フック（必ず1文入れる。ここが無いと最後まで読まれない）
+     ③ 最小限の経緯（省略してもよい）
+     ④ 意見が分かれる軸
+     「〜と報じている」「〜と述べた」は書かない。断定しないよう「〜とされる」「〜との見方」等の控えめ表現。lead・bullets1項目目と同一内容</p>
     <h2>どこで意見が分かれるか</h2><ul><li><strong>立場A:</strong> …</li><li><strong>立場B:</strong> …</li></ul>
       （資料の言い分だけ。両側が視覚的に対になるラベル。声明対立は当事者名。戦争・外交は実陣営名。
       曖昧ラベル禁止。立場が分かれない争点は省略。
@@ -350,10 +429,11 @@ const TIMELINE_SECTION_ADDENDUM = `
  * 長期争点（geopolitics / sustained）向け。速報と確認済み経緯を分離する。
  */
 const TIMELINE_FIRST_REPORTED_FORMAT = `<h2>いま何が論点か</h2><p>直近24時間で新たに報じられたことだけを3〜4文。
-      ① 何が報じられたか — 媒体名付き帰属（「〜と報じています」）。行為・発言・決定を具体語で最初に
-      ② それが何の続きか（1文。詳細は「これまでの流れ」へ）
-      ③ いま意見が分かれる軸
-      数ヶ月前の経緯の要約をここに詰め込まない。真偽が揺れている速報は断定せず帰属のみ</p>
+     ① 何が起きたか — 事実をストレートに。固有名詞は翻訳する。媒体名・帰属は不要
+     ② この話が読者の生活・お金・安全・権利にどう関係するか = フック（必ず1文入れる）
+     ③ それが何の続きか（1文。詳細は「これまでの流れ」へ）
+     ④ いま意見が分かれる軸
+     数ヶ月前の経緯の要約をここに詰め込まない。断定しないよう控えめな表現に</p>
     <h2>これまでの流れ</h2><ul><li><strong>M月D日:</strong> 媒体名が報じた確認済みの出来事</li></ul>
       （過去報道抜粋の日付付き項目だけ。古い順。5〜12項目。日付不明は含めない。
       速報の未確認情報を混ぜない。「〜と報じられた」帰属付き）
@@ -406,9 +486,14 @@ export async function generateArticle(params: GenerateArticleParams): Promise<Ar
 ${primaryExcerpts.map((e, i) => `【資料${i + 1}】${e.title}\n${e.url}\n${e.text}`).join("\n---\n")}`
       : "";
 
+  const claimDiffHint =
+    claimDiffBlock
+      ? claimDiffBlock
+      : "";
+
   const reportExcerptBlock =
     reportExcerpts.length > 0
-      ? `\n\n# 報道抜粋（各社ページ本文。必ず媒体名付きの帰属引用として使い、媒体間の一致・食い違いを比較すること）
+      ? `\n\n# 報道本文（参考資料。冒頭の媒体比較ブロックと併せて参照し、事実の裏取り・帰属引用に使う。全件を読もうとせず差分だけ確認すること）
 ${reportExcerpts.map((e, i) => `【報道${i + 1}: ${e.feed}】${e.title}\n${e.url}\n${e.text}`).join("\n---\n")}`
       : "";
 
@@ -494,10 +579,10 @@ ${revisionFeedback.map((f, i) => `${i + 1}. ${f}`).join("\n")}`
     ? TIMELINE_FIRST_REPORTED_FORMAT
     : (isReported ? REPORTED_FORMAT : OFFICIAL_FORMAT) + (includeTimeline ? TIMELINE_SECTION_ADDENDUM : "");
   const leadSpec = timelineFirst
-    ? "「いま何が論点か」と同一。直近24時間の新規報道だけ。150〜280字。帰属付き・断定禁止。経緯の百科要約は禁止"
+    ? "「いま何が論点か」と同一。直近24時間の新規報道だけ。読者への影響（フック）を最初に。固有名詞は翻訳。120〜200字。帰属不要・断定しない。経緯の百科要約は禁止"
     : isReported
-      ? "「いま何が論点か」セクションと同一内容（短い別要約は作らない）。報道の具体的内容を①として含める。150〜280字。帰属付き・断定禁止"
-      : "「いま分かっていること」と同内容。短い別要約は作らない。150〜280字";
+      ? "「いま何が論点か」と同一。読者への影響（フック）を最初に書く。固有名詞は翻訳する。120〜200字。帰属不要・断定しない"
+      : "「いま分かっていること」と同内容。読者への影響（フック）を最初に。固有名詞は翻訳。短い別要約は作らない。120〜200字";
   const effectiveType: DebateType = debateType ?? "policy";
   const bulletsSpec = debateTypeBulletsSpec(effectiveType, isReported);
   const typeHint = debateTypeArticleHint(effectiveType, reignite);
@@ -527,6 +612,11 @@ ${revisionFeedback.map((f, i) => `${i + 1}. ${f}`).join("\n")}`
       ? `\n# 使える帰属ラベル（両側の各項目で積極的に使う。これに無い一般論で埋めない）: ${attributionLabels.join("、")}`
       : "\n# 帰属: 資料にある媒体名・発言者名だけを使い、教科書一般論で両側を埋めない。";
 
+  // ★★★ 軸ロックブロック: buildLockedAxisが確定した対立軸。この軸から逸脱した執筆を禁止する。
+  const lockedAxisBlock = params.lockedAxis
+    ? `\n# ★★★ 論争の軸（厳守: この軸から逸脱しないこと。以下の軸について賛成/反対の両側から整理すること）★★★\n論点: ${params.lockedAxis.axis}\n${params.lockedAxis.sideA} ←→ ${params.lockedAxis.sideB}`
+    : "";
+
   const res = await openai.chat.completions.create({
     model: resolveArticleModel(AI_MODELS.article),
     response_format: { type: "json_object" },
@@ -535,15 +625,16 @@ ${revisionFeedback.map((f, i) => `${i + 1}. ${f}`).join("\n")}`
       {
         role: "user",
         content: `争点: ${issueTitle}
-種別: ${isReported ? "報道ベース（断定禁止・帰属付き）" : "公式発表ベース"}
+種別: ${isReported ? "報道ベース（冒頭は帰属不要・簡潔な事実。詳細セクションでのみ帰属）" : "公式発表ベース"}
 目的: スプリットスレッド参加者への最低限の中立土台（長文まとめ・偏向報道にしない）${intlHint}${timelineFirstHint}${attributionHint}
 
 # この争点の書き方（厳守）
 ${typeHint}
-${excerptBlock}${reportExcerptBlock}${internationalReportExcerptBlock}${claimDiffBlock}${pollingExcerptBlock}${dietBlock}${datedExcerptBlock}${backgroundBlock}${lawsBlock}${estatBlock}${previousBlock}${revisionBlock}
+${excerptBlock}${claimDiffHint}${reportExcerptBlock}${internationalReportExcerptBlock}${pollingExcerptBlock}${dietBlock}${datedExcerptBlock}${backgroundBlock}${lawsBlock}${estatBlock}${previousBlock}${revisionBlock}
 
 # 確認済みの報道見出し（前回分含む最新の全件）
 ${sourceList}
+${lockedAxisBlock}
 
 # 出力形式（JSONのみ）
 {
@@ -551,7 +642,7 @@ ${sourceList}
   "bullets": ${bulletsSpec},
   "articleHtml": "HTML。見出しの文言・順序は厳守。各セクション内は箇条書き中心で、長い段落にしない:
     ${format}"${followUpFieldBlock},
-  "claims": [{"text": "本文中の具体的事実の要約（60字以内）", "sourceUrl": "根拠にした資料抜粋のURL"}]
+  "claims": [{"text": "本文中の具体的事実の要約（30字以内）", "sourceUrl": "根拠にした資料抜粋のURL"}]
 }`,
       },
     ],
@@ -610,7 +701,35 @@ export interface UngroundedClaim extends ArticleClaim {
     | "sides_ungrounded"
     | "sides_asymmetric"
     | "lead_opening_mismatch"
-    | "relatability_missing";
+    | "relatability_missing"
+    | "sentence_too_long"
+    | "sides_axis_mismatch";
+}
+
+/**
+ * UngroundedClaim.reasonのうち「文章の書き方・構成」の問題（本文中の見出しラベル・箇条書きの薄さ・
+ * 文の長さ等）で、資料に無い事実を書いた（捏造・裏取り失敗）とは全く別種の失敗。
+ * 呼び出し側（promote.ts等）がHELD理由を"unverified_claim"と一括りにして記録すると、
+ * 実際には文章のスタイル要件を満たせなかっただけの記事まで「事実がでっち上げられた」ように
+ * 見えてしまう（2026-07-16、実データの精査でこの混同を発見）。HELD理由を出す側は
+ * hasFactualClaimIssue で分岐し、スタイルのみの失敗は別のdecisionプレフィックスにすること。
+ */
+export const STRUCTURE_CLAIM_REASONS = new Set<UngroundedClaim["reason"]>([
+  "opening_too_thin",
+  "incident_first_missing",
+  "duplicate_facts",
+  "bullets_too_thin",
+  "sides_ungrounded",
+  "sides_asymmetric",
+  "lead_opening_mismatch",
+  "relatability_missing",
+  "sentence_too_long",
+  "sides_axis_mismatch",
+]);
+
+/** unresolvedClaimsに、資料に無い事実を書いた（本物の裏取り失敗）ものが1件でも含まれるか */
+export function hasFactualClaimIssue(claims: readonly UngroundedClaim[]): boolean {
+  return claims.some((c) => !STRUCTURE_CLAIM_REASONS.has(c.reason));
 }
 
 /**
@@ -772,8 +891,12 @@ export async function generateVerifiedArticle(
     article = await generateArticle({ ...params, revisionFeedback: feedback });
     const claims = article.claims ?? [];
 
-    const missingSource = findUngroundedByMissingSource(claims, index);
-    const withSource = claims.filter((c) => index.has(c.sourceUrl));
+    // ★ A1: thin claim pre-filter — 帰属だけ・短すぎ・長すぎのclaimはnano検証に回さない
+    const thickClaims = claims.filter((c) => !isThinClaim(c.text));
+    const thinClaimCount = claims.length - thickClaims.length;
+
+    const missingSource = findUngroundedByMissingSource(thickClaims, index);
+    const withSource = thickClaims.filter((c) => index.has(c.sourceUrl));
     // timeline-first: 帰属付き速報クレームはソフトパス対象なので nano を呼ばない（コスト削減）
     // タイムライン用（datedExcerpts URL）のクレームは従来どおり厳格照合
     const softPass = (c: (typeof claims)[number]) =>
@@ -818,6 +941,22 @@ export async function generateVerifiedArticle(
         haystacks,
       ).map((text) => ({ text, sourceUrl: "", reason: "unclaimed_highlight" as const }));
     }
+
+    // ★ A2: unsupported claims を局所削除（全文再生成より安い）
+    let surgeryCleared: UngroundedClaim[] = [];
+    if (unsupported.length > 0) {
+      const before = workingHtml.length;
+      const stripped = stripUnsupportedClaimsFromHtml(workingHtml, unsupported);
+      if (stripped.length < before) {
+        workingHtml = stripped;
+        surgeryCleared = unsupported;
+        console.log(
+          `  🔪 claim局所削除: unsupported${unsupported.length}件 / thinスキップ${thinClaimCount}件 — 全文再生成を回避（attempt ${attempt}）`,
+        );
+      }
+    }
+    // 局所削除で解消したunsupportedは失敗リストから除外
+    const surgeryClearedSet = new Set(surgeryCleared.map((u) => u.text));
 
     // 0円修復 →（両側だけダメなら）mini局所リライト最大1回
     let working = autoRepairArticle(
@@ -867,6 +1006,34 @@ export async function generateVerifiedArticle(
         }
       }
     }
+    // 両側の論点が設問と同じ軸を向いているか（軸のすり替え検出）。
+    // SYSTEM prompt内の注意書き（★両側は同じ論点について…）はWriterへの指示だけで機械検証が
+    // 無かったため、regexでは拾えない意味的なズレ（例:「対応の是非」vs「事前管理の是非」）をnanoで補う。
+    if (structureIssues.length === 0) {
+      const sides = sideSectionsPlain(working.articleHtml);
+      if (sides.length >= 2) {
+        const [sideA, sideB] = sides;
+        const itemsA = sideA.items.length > 0 ? sideA.items : [sideA.text];
+        const itemsB = sideB.items.length > 0 ? sideB.items : [sideB.text];
+        if (itemsA.some(Boolean) && itemsB.some(Boolean)) {
+          const axisCheck = await verifySidesAxisAlignment({
+            question: params.issueTitle,
+            sideA: { heading: sideA.heading, items: itemsA },
+            sideB: { heading: sideB.heading, items: itemsB },
+          });
+          if (!axisCheck.aligned) {
+            structureIssues = [
+              ...structureIssues,
+              {
+                reason: "sides_axis_mismatch",
+                message: `「${sideA.heading}」と「${sideB.heading}」が設問と同じ軸で対応していません（${axisCheck.reason || "論点がすり替わっています"}）。どちらか1つの論点に両側を揃えるか、設問側を両側を包含する広さに調整してください。`,
+              },
+            ];
+          }
+        }
+      }
+    }
+
     article = {
       ...article,
       lead: working.lead,
@@ -882,12 +1049,13 @@ export async function generateVerifiedArticle(
 
     const failed = [
       ...missingSource,
-      ...unsupported,
+      ...unsupported.filter((u) => !surgeryClearedSet.has(u.text)),
       ...ungroundedNumbers,
       ...unclaimedHighlights,
       ...structureFails,
     ];
     if (failed.length === 0) {
+      console.log("DEBUG_FINAL articleHtml:", JSON.stringify(article.articleHtml));
       const synced = normalizeArticleSurfaces(article);
       return {
         article: { ...article, lead: synced.lead, bullets: synced.bullets },
@@ -907,18 +1075,8 @@ export async function generateVerifiedArticle(
         sideRepairUsed,
       };
     }
-    const STRUCTURE_REASONS = new Set([
-      "opening_too_thin",
-      "incident_first_missing",
-      "duplicate_facts",
-      "bullets_too_thin",
-      "sides_ungrounded",
-      "sides_asymmetric",
-      "lead_opening_mismatch",
-      "relatability_missing",
-    ]);
     feedback = failed.map((f) => {
-      if (STRUCTURE_REASONS.has(f.reason)) {
+      if (STRUCTURE_CLAIM_REASONS.has(f.reason)) {
         return f.text;
       }
       return f.sourceUrl

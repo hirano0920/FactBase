@@ -1,0 +1,103 @@
+name: Radar Pipeline (discover → promote)
+
+on:
+  schedule:
+    # --- Discover ───────────────────────────────────
+    # 各 promote ピーク（6:33 / 11:03 / 16:03 JST）の約90分前＋昼/夕方/夜間スイープ
+    # 時刻は UTC（JST-9h）。分の丸めは constants.ts の許容幅(±45分)で吸収
+    - cron: '3 20 * * *'   #  5:03 JST → 朝ピーク
+    - cron: '33 0 * * *'   #  9:33 JST → 昼ピーク
+    - cron: '33 3 * * *'   # 12:33 JST 昼過ぎスイープ
+    - cron: '33 5 * * *'   # 14:33 JST → 夕方ピーク
+    - cron: '3 9 * * *'    # 18:03 JST 夕方スイープ
+    - cron: '3 12 * * *'   # 21:03 JST 夜スイープ
+    - cron: '33 15 * * *'  #  0:33 JST 深夜スイープ
+
+    # --- Promote ────────────────────────────────────
+    # 通勤・昼休み・夕方の読者ピークに合わせて公開
+    - cron: '33 21 * * *'  #  6:33 JST 朝
+    - cron: '3 2 * * *'    # 11:03 JST 昼
+    - cron: '3 7 * * *'    # 16:03 JST 夕方
+
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: '実行モード'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - discover-only
+          - promote-only
+      dry_run:
+        description: '動作確認モード（DB書込なし）'
+        required: false
+        default: false
+        type: boolean
+      force:
+        description: '時間帯チェックを無視して強制実行'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: radar-pipeline
+  cancel-in-progress: false
+
+env:
+  AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+  AZURE_OPENAI_BASE_URL: ${{ secrets.AZURE_OPENAI_BASE_URL }}
+  ARTICLE_MODEL: ${{ secrets.ARTICLE_MODEL || 'gpt-4o-mini' }}
+  DATABASE_URL: ${{ secrets.DATABASE_URL }}
+  YOUTUBE_DATA_API_KEY: ${{ secrets.YOUTUBE_DATA_API_KEY }}
+  TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+  AUTH_URL: ${{ secrets.AUTH_URL }}
+  NODE_ENV: production
+
+jobs:
+  discover:
+    name: ①-③ 収集 → 調査
+    if: |
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' &&
+       (github.event.inputs.mode == 'both' || github.event.inputs.mode == 'discover-only'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npx prisma generate
+      - name: Run discover
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.dry_run}}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          if [ "${{ github.event.inputs.force}}" = "true" ]; then ARGS="$ARGS --force"; fi
+          npx tsx scripts/radar/discover.ts $ARGS
+
+  promote:
+    name: ④-⑨ 選定 → 公開
+    if: |
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' &&
+       (github.event.inputs.mode == 'both' || github.event.inputs.mode == 'promote-only'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npx prisma generate
+      - name: Run promote
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.dry_run}}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          if [ "${{ github.event.inputs.force}}" = "true" ]; then ARGS="$ARGS --force"; fi
+          npx tsx scripts/radar/promote.ts $ARGS

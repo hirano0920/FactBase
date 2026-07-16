@@ -6,6 +6,7 @@ import {
   fetchYahooCommentRankingTitles,
   fetchYahooCommentRankingEntries,
   fetchYahooArticleCommentCount,
+  fetchYahooArticleComments,
 } from "../yahoo-news-ranking";
 
 // 旧マークアップ（div）と新マークアップ（p）の両方
@@ -159,5 +160,67 @@ describe("fetchYahooArticleCommentCount", () => {
     expect(await fetchYahooArticleCommentCount("https://news.yahoo.co.jp/articles/x")).toBeNull();
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network error")));
     expect(await fetchYahooArticleCommentCount("https://news.yahoo.co.jp/articles/x")).toBeNull();
+  });
+});
+
+describe("fetchYahooArticleComments", () => {
+  // 2026-07-15にnews.yahoo.co.jp/articles/{id}/commentsで実際に確認した構造の縮小版
+  const samplePage = (state: unknown) =>
+    `<html><body><script>window.__PRELOADED_STATE__ = ${JSON.stringify(state)};</script></body></html>`;
+
+  it("__PRELOADED_STATE__のuserCommentListから本文と反応数を抽出する", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            samplePage({
+              commentFull: {
+                userCommentList: [
+                  {
+                    text: "副首都はあっても良いとは思うが大阪はない",
+                    empathyCount: 998,
+                    insightCount: 185,
+                    negativeCount: 281,
+                  },
+                  { text: "首都機能の補完は重要だと思うけど一箇所は反対" }, // 反応数フィールド無し→0扱い
+                  { text: "短い" }, // 10字未満は除外される
+                ],
+              },
+            }),
+          ),
+      }),
+    );
+    const comments = await fetchYahooArticleComments("https://news.yahoo.co.jp/articles/abc123");
+    expect(comments).toEqual([
+      {
+        text: "副首都はあっても良いとは思うが大阪はない",
+        empathyCount: 998,
+        insightCount: 185,
+        negativeCount: 281,
+      },
+      {
+        text: "首都機能の補完は重要だと思うけど一箇所は反対",
+        empathyCount: 0,
+        insightCount: 0,
+        negativeCount: 0,
+      },
+    ]);
+  });
+
+  it("__PRELOADED_STATE__が無ければ空配列", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, text: () => Promise.resolve("<html></html>") }),
+    );
+    expect(await fetchYahooArticleComments("https://news.yahoo.co.jp/articles/abc123")).toEqual([]);
+  });
+
+  it("HTTPエラー・fetch失敗時は空配列を返す", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404 }));
+    expect(await fetchYahooArticleComments("https://news.yahoo.co.jp/articles/abc123")).toEqual([]);
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network error")));
+    expect(await fetchYahooArticleComments("https://news.yahoo.co.jp/articles/abc123")).toEqual([]);
   });
 });

@@ -554,6 +554,7 @@ interface BridgingCandidateRow {
   id: string;
   helpfulCount: number;
   crossHelpful: number;
+  neutralHelpful: number;
   createdAt: Date;
 }
 
@@ -578,7 +579,8 @@ async function fetchBridgingCandidates(
       c.id,
       c."helpfulCount",
       c."createdAt",
-      COALESCE(cross_counts.n, 0)::int AS "crossHelpful"
+      COALESCE(cross_counts.n, 0)::int AS "crossHelpful",
+      COALESCE(neutral_counts.n, 0)::int AS "neutralHelpful"
     FROM "Comment" c
     LEFT JOIN LATERAL (
       SELECT COUNT(*)::int AS n
@@ -590,6 +592,15 @@ async function fetchBridgingCandidates(
         AND v.choice != 'UNDECIDED'
         AND u."createdAt" <= ${antiBrigadeCutoff}
     ) cross_counts ON true
+    LEFT JOIN LATERAL (
+      SELECT COUNT(*)::int AS n
+      FROM "Helpful" h
+      JOIN "Vote" v ON v."userId" = h."userId" AND v."issueId" = c."issueId"
+      JOIN "User" u ON u.id = h."userId"
+      WHERE h."commentId" = c.id
+        AND v.choice = 'UNDECIDED'
+        AND u."createdAt" <= ${antiBrigadeCutoff}
+    ) neutral_counts ON true
     WHERE c."issueId" = ${issueId}
       AND c."isHidden" = false
       AND c."parentId" IS NULL
@@ -620,6 +631,7 @@ async function getSplitColumn(
 
   const idsToFetch = pageRows.map((r) => r.id);
   const crossHelpfulById = new Map(pageRows.map((r) => [r.id, r.crossHelpful]));
+  const neutralHelpfulById = new Map(pageRows.map((r) => [r.id, r.neutralHelpful]));
 
   const rows = await prisma.comment.findMany({
     where: { id: { in: idsToFetch } },
@@ -635,6 +647,7 @@ async function getSplitColumn(
     comments: ordered.map((row) => ({
       ...mapComment(row, statsMap),
       crossHelpful: crossHelpfulById.get(row.id) ?? 0,
+      neutralHelpful: neutralHelpfulById.get(row.id) ?? 0,
     })),
     nextCursor: hasMore ? idsToFetch[idsToFetch.length - 1] : null,
   };
@@ -663,6 +676,7 @@ function buildSteelmanComment(issueId: string, stance: VoteChoice, argument: str
     replyCount: 0,
     replies: [],
     crossHelpful: 0,
+    neutralHelpful: 0,
     isAiSteelman: true,
   };
 }

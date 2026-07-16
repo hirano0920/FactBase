@@ -34,13 +34,14 @@ import { shouldUseInternationalReports } from "../../src/lib/radar";
 const KEYS = ["佐藤二朗", "橋本愛", "ハラスメント", "文春"];
 
 async function main() {
-  const [trendsRaw, yahooRt, news, yt] = await Promise.all([
+  const [trendsRaw, yahooRt, news, ytTrending] = await Promise.all([
     fetchTrendingKeywords(),
     fetchYahooRealtimeBuzzPolitics(),
     fetchYahooNewsRankingTitles(),
     fetchYouTubeTrendingTitles(),
   ]);
   const trends = trendsRaw.map((t) => (typeof t === "string" ? t : String(t)));
+  const yt = ytTrending.all.map((e) => e.title);
 
   console.log("=== source sizes ===", {
     trends: trends.length,
@@ -68,7 +69,7 @@ async function main() {
     googleTerms: trends,
     yahooRealtimeTerms: yahooRt.map((t) => t.term),
     newsRankingTitles: news,
-    youtubeTrendingTitles: yt,
+    youtubeTrendingTitles: ytTrending.organic.map((e) => e.title),
   };
 
   console.log("\n=== buzzScore ===");

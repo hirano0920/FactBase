@@ -12,6 +12,17 @@ export interface IssueSummary {
    * 旧記事はundefined（表示側はsources.lengthにフォールバック）。
    */
   sourceCount?: number;
+  /**
+   * Yahoo!ニュース「みんなの意見」で一致した設問（あれば）。読者投票の前に
+   * 「実際に世の中の意見もこれくらい割れている」という外部実測を見せるための参考情報。
+   * 旧記事・未一致はundefined。
+   */
+  externalPoll?: {
+    question: string;
+    url: string;
+    choices: { choice: string; count: number; percent: number }[];
+    divisionScore: number;
+  };
 }
 
 export interface GlossaryTerm {
@@ -99,6 +110,8 @@ export interface Comment {
 /** スプリットスレッド専用。相手陣営からのhelpful数（越境評価バッジ表示用） */
 export interface SplitComment extends Comment {
   crossHelpful: number;
+  /** 中立（UNDECIDED）からのhelpful数。中立派を納得させた意見の強さを示す */
+  neutralHelpful: number;
   /** trueならAIが記事の材料から生成した論点提示（コールドスタート対策）。DBには保存されない仮想コメント */
   isAiSteelman?: boolean;
 }

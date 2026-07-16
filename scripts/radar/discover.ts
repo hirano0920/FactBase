@@ -12,7 +12,7 @@
  *   ③ 調査: 上位トピックについて国会会議録・法令・関連ニュースを横断取得し証拠バンドル化
  * 成果物は TopicCandidate(discoverySource, evidenceJson, status=PENDING)。
  * evidenceJsonには証拠バンドルに加えbuzzScore/buzzSources/voteQuestion/voteChoicesも埋め込む
- * （promote.tsがピーク時間帯にこれを読んでbuzzScore順に記事化する）。
+ * （promote.tsがピーク時間帯にこれを読んで Selection V2（Buzz'×Heat'）順に記事化する）。
  *
  * 実行タイミング: cron は15分間隔だが discover 本体は JST 1日7回(RADAR.discoverWindowsJst)のみ。
  * 各 promote ピークの約90分前＋昼後/夕方/夜の中間スイープで1日のバズを取りこぼさない。
@@ -21,6 +21,24 @@
  * TrendSighting の書き込みは従来 detect.ts が担当していた。cron から外したため sustained は
  * 徐々に古くなる。4ソースのライブ取得は毎 discover で行うので主力検知は維持される。
  */
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+// tsx は .env.local を自動ロードしない（CI では secrets が既にあるので no-op）
+(function loadLocalEnv() {
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+  for (const name of [".env.local", ".env"]) {
+    const path = resolve(root, name);
+    if (!existsSync(path)) continue;
+    try {
+      process.loadEnvFile(path);
+    } catch {
+      /* Node が古い等 */
+    }
+  }
+})();
+
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../src/lib/prisma";
 import { RADAR } from "../../src/lib/constants";
@@ -32,6 +50,7 @@ import {
   isEmptyEvidence,
   evaluateEvidenceSufficiency,
   evaluateBuzzPromoteSufficiency,
+  createPollDetailCache,
   type EvidenceBundle,
 } from "./lib/research";
 import type { SavedEvidence } from "./lib/promote-logic";
@@ -44,7 +63,13 @@ import {
   fetchYahooArticleCommentCount,
   type YahooRankingEntry,
 } from "./sources/yahoo-news-ranking";
-import { fetchYouTubeTrendingTitles } from "./sources/youtube-trending";
+import {
+  fetchYouTubeTrendingTitles,
+  matchYouTubeEntry,
+  fetchYouTubeReplyIntensity,
+  type YouTubeVideoEntry,
+} from "./sources/youtube-trending";
+import { fetchRecentYahooPolls } from "./sources/yahoo-polls";
 import { fetchShugiinBills, fetchSangiinBills } from "./sources/diet";
 import { notifyRadarFailure } from "./notify";
 import { prefilterBuzzInputs, type BuzzTermInput } from "../../src/lib/buzz-prefilter";
@@ -52,6 +77,7 @@ import { buildBuzzAnchorCandidates, assembleBuzzScore, buzzMatchesTitleCorpus } 
 import { selectResearchTargets } from "./lib/discover-logic";
 import { CONSENSUS_MIN_OUTLETS } from "./lib/promote-logic";
 import { matchBroadcastArticle, mergeBroadcastMatch } from "./lib/match-broadcast";
+import { matchYahooTweetCount } from "./lib/match-tweet-count";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const FORCE = process.argv.includes("--force"); // 起動時間帯チェックを無視（動作確認用）
@@ -80,6 +106,10 @@ interface TopicToResearch {
   choices: { for: string; against: string; undecided: string };
   /** Trends/Yahoo/Yahooニュース/YouTubeのクロス照合スコア（bill由来はundefined=対象外） */
   buzz?: BuzzSourceHit;
+  /** Yahoo RT の tweetCount（X投稿量）。Selection V2 Heat' 用。突合できなければ undefined */
+  tweetCount?: number;
+  /** 突合できたYouTube動画の再生数・コメント数（「実際に見られている・議論になっている」の実測） */
+  youtubeEntry?: YouTubeVideoEntry;
   /** detect.ts（RSS経路）が見送った候補を引き取って調査するもの（media consensus 経路で promote 可） */
   carriedOver?: boolean;
   /** 一次情報や対立する言い分を根拠に議論を組み立てられるか（filterRelevantTopicsの判定。法案/引き取りは常にtrue） */
@@ -118,6 +148,9 @@ async function main() {
 
   // ① 収集 — バズ検知4ソース（政治・経済・国際・時事寄りは②のnanoが最終フィルタ）:
   //   Google Trends / Yahoo!リアルタイム / Yahoo!ニュースランキング / YouTube Data API
+  //   YouTubeはタイトルだけでなくview/like/コメント数も取得し（videos.listのstatisticsは
+  //   snippetと同時取得でも無料）、突合できた候補はevidence.youtubeViewCount/youtubeCommentCount
+  //   として保存する（Heat'のsecondaryHeatにも合流。詳細はsources/youtube-trending.ts参照）。
   const [
     googleTerms,
     yahooBuzz,
@@ -139,14 +172,20 @@ async function main() {
   ]);
   const commentRankingTitles = commentRankingEntries.map((e) => e.title);
 
-  const youtubeTitles = await fetchYouTubeTrendingTitles(newsRankingTitles);
+  const youtubeTrending = await fetchYouTubeTrendingTitles(newsRankingTitles);
+  // discover候補の掘り起こしは「ニュース見出しシード検索」込みのallでよいが、
+  // バズ横断スコア（cross-match）は自己参照を避けるためorganicだけを使う（下記buzzSourceInputs）。
+  const youtubeTitles = youtubeTrending.all.map((e) => e.title);
+  // Yahoo!「みんなの意見」新着一覧は1実行につき1回だけ取得し、③の調査対象トピック全件で使い回す
+  // （researchTopicごとに一覧を叩き直すのは無駄打ち）。
+  const yahooPolls = await fetchRecentYahooPolls();
 
   // バズ検知4ソースが同時に全滅＝スクレイピング系の構造変化が疑われる（個々は静かに空配列へ落ちる）。
   if (
     googleTerms.length === 0 &&
     yahooBuzz.length === 0 &&
     newsRankingTitles.length === 0 &&
-    youtubeTitles.length === 0
+    youtubeTrending.organic.length === 0
   ) {
     await notifyRadarFailure(
       "バズ検知ソース全滅（discover）",
@@ -167,7 +206,10 @@ async function main() {
     googleTerms,
     yahooRealtimeTerms: yahooBuzz.map((b) => b.term),
     newsRankingTitles,
-    youtubeTrendingTitles: youtubeTitles,
+    // cross-match（横断バズ判定）はニュース見出しシード検索を含まないorganicのみを使う。
+    // シード検索はクエリ自体がニュース見出し由来のため、allを使うと「Yahoo!ニュースに載っている」
+    // ことと「YouTubeで独立にバズっている」ことを同じ1ソースで二重カウントしてしまう。
+    youtubeTrendingTitles: youtubeTrending.organic.map((e) => e.title),
     commentRankingTitles,
   };
   const anchorCandidates = buildBuzzAnchorCandidates(filteredInputs, buzzSourceInputs);
@@ -221,19 +263,31 @@ async function main() {
   );
 
   // トピック統合（法案優先、続いて継続的話題→通常のバズ）
-  const buzzTopics: TopicToResearch[] = relevant.map((r) => ({
-    topic: r.topic,
-    category: r.category,
-    discoverySource: "buzz",
-    sustained: sustainedSet.has(r.topic),
-    reason: r.reason,
-    question: r.question,
-    choices: r.choices,
-    buzz: computeBuzzScore(r.topic, buzzSourceInputs),
-    debatable: r.debatable,
-    debateType: r.debateType,
-    reignite: r.reignite,
-  }));
+  const buzzTopics: TopicToResearch[] = relevant.map((r) => {
+    const tweetCount = matchYahooTweetCount(r.topic, yahooBuzz, {
+      matches: (topic, term) =>
+        buzzMatchesTitleCorpus(topic, [term]) || buzzMatchesTitleCorpus(term, [topic]),
+    });
+    const youtubeEntry = matchYouTubeEntry(r.topic, youtubeTrending.all, {
+      matches: (topic, title) =>
+        buzzMatchesTitleCorpus(topic, [title]) || buzzMatchesTitleCorpus(title, [topic]),
+    });
+    return {
+      topic: r.topic,
+      category: r.category,
+      discoverySource: "buzz" as const,
+      sustained: sustainedSet.has(r.topic),
+      reason: r.reason,
+      question: r.question,
+      choices: r.choices,
+      buzz: computeBuzzScore(r.topic, buzzSourceInputs),
+      tweetCount,
+      youtubeEntry,
+      debatable: r.debatable,
+      debateType: r.debateType,
+      reignite: r.reignite,
+    };
+  });
   const billTopics: TopicToResearch[] = billTitles.map((topic) => ({
     topic,
     category: "law",
@@ -299,9 +353,11 @@ async function main() {
 
   // 調査（遅い外部API）は先に並列でまとめて実行し、DB書き込みは後段の短いループに固める。
   // 1件ずつ「調査→書き込み」を交互にやると外部取得中にDB接続が遊んでNeonに切断される(P1017)。
+  // 同一ラン内で同じYahoo投票詳細を二重取得しない
+  const pollDetailCache = createPollDetailCache();
   const researched = await Promise.all(
     targets.map(async (t) => {
-      const evidence = await researchTopic(t.topic, limits, prisma);
+      const evidence = await researchTopic(t.topic, limits, prisma, yahooPolls, pollDetailCache);
       // YouTubeバズ由来のトピックは、放送局公式サイトの記事があれば本文取得できるよう優先的に探して合流する
       if (t.buzz?.inYouTubeTrending) {
         const broadcastMatch = await matchBroadcastArticle(t.topic).catch(() => null);
@@ -314,22 +370,31 @@ async function main() {
       const commentCount = commentEntry
         ? await fetchYahooArticleCommentCount(commentEntry.url)
         : null;
+      // 突合できたYouTube動画があれば、上位コメントへの返信数を合計する。
+      // いいね数と違い「賛同されて終わる」のではなく実際に応酬（賛否のやり取り）が
+      // 起きていることの実測シグナルになる（totalReplyCount）。
+      const youtubeReplyCount = t.youtubeEntry
+        ? await fetchYouTubeReplyIntensity(t.youtubeEntry.videoId)
+        : undefined;
       const summary =
         `国会${evidence.dietSpeeches.length}/法令${evidence.laws.length}/国内報道${evidence.news.length}/海外報道${evidence.internationalNews.length}` +
         `(異なる媒体${suff.distinctNewsOutlets})/背景${evidence.background ? "○" : "×"}/官庁${evidence.officialEvents.length}` +
         `/buzzScore${t.buzz ? buzzEffectiveScore(t.buzz) : "n/a"}(raw${t.buzz?.score ?? "n/a"})/promote${promoteSuff.sufficient ? "可" : "不可"}` +
-        `/コメント${commentCount ?? "n/a"}`;
+        `/コメント${commentCount ?? "n/a"}` +
+        `/Yahoo意見${evidence.externalPoll ? `分断度${evidence.externalPoll.divisionScore.toFixed(2)}` : "n/a"}` +
+        `/コメント摩擦度${typeof evidence.commentFrictionScore === "number" ? evidence.commentFrictionScore.toFixed(2) : "n/a"}` +
+        `/YouTube${t.youtubeEntry ? `再生${t.youtubeEntry.viewCount}・コメ${t.youtubeEntry.commentCount}・返信${youtubeReplyCount ?? 0}` : "n/a"}`;
       const mark = isEmptyEvidence(evidence) ? "⚠️ 証拠なし" : promoteSuff.sufficient ? "✅" : suff.sufficient ? "△promote不可" : "△証拠薄い";
       console.log(`    ${mark} [${t.discoverySource}] ${t.topic} — ${summary}`);
-      return { t, evidence, suff, commentCount };
+      return { t, evidence, suff, commentCount, youtubeReplyCount };
     }),
   );
 
   if (DRY_RUN) {
     for (const { t, evidence } of researched) printEvidence(t, evidence);
   } else {
-    for (const { t, evidence, suff, commentCount } of researched) {
-      await upsertCandidate(t, evidence, suff, commentCount);
+    for (const { t, evidence, suff, commentCount, youtubeReplyCount } of researched) {
+      await upsertCandidate(t, evidence, suff, commentCount, youtubeReplyCount);
     }
   }
 
@@ -408,6 +473,10 @@ async function refreshBuzzScoreOnly(t: TopicToResearch): Promise<void> {
     ...prevEvidence,
     buzzScore: t.buzz ? buzzEffectiveScore(t.buzz) : undefined,
     buzzSources: t.buzz ? buzzSourceLabels(t.buzz) : undefined,
+    tweetCount: t.tweetCount ?? prevEvidence.tweetCount,
+    youtubeViewCount: t.youtubeEntry?.viewCount ?? prevEvidence.youtubeViewCount,
+    youtubeLikeCount: t.youtubeEntry?.likeCount ?? prevEvidence.youtubeLikeCount,
+    youtubeCommentCount: t.youtubeEntry?.commentCount ?? prevEvidence.youtubeCommentCount,
   };
   await prisma.topicCandidate.update({
     where: { id: existing.id },
@@ -424,6 +493,7 @@ async function upsertCandidate(
   evidence: EvidenceBundle,
   suff: ReturnType<typeof evaluateEvidenceSufficiency>,
   commentCount?: number | null,
+  youtubeReplyCount?: number,
 ): Promise<void> {
   const key = dedupKey(t.topic);
   // 関連ニュース（国内+海外）を既存機構が読める sourceUrls 形式に変換（{title,url,feed}）。
@@ -468,6 +538,11 @@ async function upsertCandidate(
     sustained: t.sustained || undefined,
     commentCount: typeof commentCount === "number" ? commentCount : prevCommentCount,
     commentCountSurge: commentCountSurge || undefined,
+    tweetCount: t.tweetCount,
+    youtubeViewCount: t.youtubeEntry?.viewCount,
+    youtubeLikeCount: t.youtubeEntry?.likeCount,
+    youtubeCommentCount: t.youtubeEntry?.commentCount,
+    youtubeReplyCount,
   };
 
   const data = {

@@ -7,10 +7,12 @@ import {
   checkIncidentFirst,
   checkLeadOpeningMatch,
   checkRelatabilityBridge,
+  checkSentenceLength,
   checkSidesGrounding,
   enrichSummaryForDisplay,
   findStructureIssues,
   normalizeArticleSurfaces,
+  finalizeArticleForSave,
   CLEAR_DECLARATION_BAD_HTML,
   CLEAR_DECLARATION_GOOD_HTML,
   MESSY_NORM_FLARE_GOOD_HTML,
@@ -34,6 +36,21 @@ describe("checkIncidentFirst", () => {
 
   it("MESSY_NORM_FLARE（声明の無い炎上）も行為が先なら合格", () => {
     expect(checkIncidentFirst(MESSY_NORM_FLARE_GOOD_HTML, { isReported: true })).toBeNull();
+  });
+});
+
+describe("checkSentenceLength", () => {
+  it("複数事実を1文に詰め込んだ長文（帰属の使い回し）は不合格", () => {
+    const html =
+      "<h2>いま分かっていること</h2><p>Yahoo!ニュースは中央日報の報道を基に中国の作家蔣方舟氏が2019年に提出した修士学位論文で海外論文との重複と引用表記の欠如が確認され中国人民大学から学位を取り消されたと伝えています。さらに週刊文春は別の関係者の独自取材として学位取り消しの背景に大学内部の政治的事情が関与していた可能性にも言及しておりこの点について大学側はコメントを避けていると報じておりさらに文部科学省も事実関係の確認を始めたと各社が伝えており与野党の間では今後の学会の在り方を巡り議論が続いており予断を許さない状況とされている。</p>";
+    const issue = checkSentenceLength({ articleHtml: html });
+    expect(issue?.reason).toBe("sentence_too_long");
+  });
+
+  it("同じ帰属を保ったまま文を分割していれば合格", () => {
+    const html =
+      "<h2>いま分かっていること</h2><p>中央日報は、蔣方舟氏が2019年に修士論文を提出したと伝えています。Yahoo!ニュースは、その論文に海外論文との重複が確認され学位が取り消されたとも報じています。</p>";
+    expect(checkSentenceLength({ articleHtml: html })).toBeNull();
   });
 });
 
@@ -198,6 +215,25 @@ describe("normalizeArticleSurfaces", () => {
   });
 });
 
+describe("finalizeArticleForSave", () => {
+  it("normalizeArticleSurfaces同期後にfindStructureIssuesを実行し、両方の結果を返す", () => {
+    const result = finalizeArticleForSave(
+      {
+        lead: "短い別要約",
+        bullets: [
+          "いま分かっていること: トラブル",
+          "慎重派: 現行法で対応可能だ",
+          "警戒派: 反対",
+        ],
+        articleHtml: CLEAR_DECLARATION_GOOD_HTML,
+      },
+      { isReported: true },
+    );
+    expect(result.article.lead).toContain("週刊文春");
+    expect(Array.isArray(result.issues)).toBe(true);
+  });
+});
+
 describe("enrichSummaryForDisplay", () => {
   it("薄い1項目目を記事冒頭の具体で置き換える", () => {
     const enriched = enrichSummaryForDisplay(
@@ -280,10 +316,20 @@ describe("assessReportExcerptThickness", () => {
   });
 
   it("具体トークンと十分な量があれば合格", () => {
-    const body =
-      "週刊文春は、撮影中の身体的接触と楽屋でのキャリアに関する否定的な発言があったと報じた。".repeat(
-        12,
+    // 新閾値: totalChars >= 1500, concreteSignal >= 3, outlets >= 2
+    const excerpt1 =
+      "文春は、逮捕された元議員の起訴決定を報じた。検察は公選法違反での立件を発表し、押収した証拠を分析している。裁判所は保釈を認める決定をしたが、検察側は即時抗告する方針だ。".repeat(
+        15,
       );
-    expect(assessReportExcerptThickness([{ feed: "文春", text: body }]).ok).toBe(true);
+    const excerpt2 =
+      "朝日も同事件を報じ、公選法違反での起訴に踏み切った検察の判断を伝えている。被告人側は不起訴を求めていたが、起訴決定が下された。今後の裁判で証拠の信用性が争点になる。".repeat(
+        15,
+      );
+    expect(
+      assessReportExcerptThickness([
+        { feed: "文春", text: excerpt1 },
+        { feed: "朝日", text: excerpt2 },
+      ]).ok,
+    ).toBe(true);
   });
 });

@@ -42,6 +42,26 @@ describe("buzz-prefilter", () => {
     ).toBe(true);
   });
 
+  it("yahoo_rtでgenreが空欄でも摩擦マーカーがあれば通す（政治専用ではない）", () => {
+    expect(shouldKeepBuzzTerm({ term: "モバイルSuica障害", source: "yahoo_rt", genre: "" })).toBe(true);
+    expect(shouldKeepBuzzTerm({ term: "サブスク値上げに批判", source: "yahoo_rt", genre: "" })).toBe(true);
+    expect(shouldKeepBuzzTerm({ term: "TWICE BEST", source: "yahoo_rt", genre: "" })).toBe(false);
+    expect(shouldKeepBuzzTerm({ term: "ほの暮しの庭", source: "yahoo_rt", genre: "" })).toBe(false);
+    expect(shouldKeepBuzzTerm({ term: "テーブルマーク新商品", source: "yahoo_rt", genre: "グルメ" })).toBe(
+      false,
+    );
+  });
+
+  it("yahoo_rtでも政治語ヒントがあればgenre不問で通す", () => {
+    expect(shouldKeepBuzzTerm({ term: "増税をめぐる議論再燃", source: "yahoo_rt", genre: "" })).toBe(true);
+  });
+
+  it("yahoo_rtのビジネスgenreも時事枠として通す", () => {
+    expect(shouldKeepBuzzTerm({ term: "企業の大規模リストラ発表", source: "yahoo_rt", genre: "ビジネス" })).toBe(
+      true,
+    );
+  });
+
   it("prefilterBuzzTerms で重複除去", () => {
     const out = prefilterBuzzTerms(["政治資金", "政治資金", "W杯"], "trends");
     expect(out).toEqual(["政治資金"]);

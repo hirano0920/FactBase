@@ -30,7 +30,7 @@ function toCampTop(c: SplitComment): CampTopComment {
     userName: c.userName,
     helpfulCount: c.helpfulCount,
     crossHelpful: c.crossHelpful,
-    bridgingScore: computeBridgingScore(c.helpfulCount, c.crossHelpful),
+    bridgingScore: computeBridgingScore(c.helpfulCount, c.crossHelpful, c.neutralHelpful),
   };
 }
 

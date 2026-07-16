@@ -464,6 +464,31 @@
     animation: route-in 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
+  /* メディアロゴ帯の横スクロール（about ページ）。2本を逆方向に流し、
+     コンテンツをちょうど2回繰り返すことで -50% 地点で継ぎ目なくループする */
+  @keyframes marquee-left {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+  @keyframes marquee-right {
+    from {
+      transform: translateX(-50%);
+    }
+    to {
+      transform: translateX(0);
+    }
+  }
+  .animate-marquee-left {
+    animation: marquee-left 36s linear infinite;
+  }
+  .animate-marquee-right {
+    animation: marquee-right 36s linear infinite;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .reveal-pending {
       opacity: 1;
@@ -485,6 +510,11 @@
     }
 
     .route-transition {
+      animation: none;
+    }
+
+    .animate-marquee-left,
+    .animate-marquee-right {
       animation: none;
     }
   }

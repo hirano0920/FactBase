@@ -50,6 +50,12 @@ const RULES: Array<{ match: RegExp; info: HeldReasonInfo }> = [
     info: { label: "🟠 主張の裏取り不可", tone: "quality", requiresHumanReview: true },
   },
   {
+    // 2026-07-16: 事実の裏取り失敗ではなく、文章の書き方・構成（箇条書きが薄い等）の要件不足。
+    // unverified_claimと同じdecisionプレフィックスに混ざっていたため分離した。
+    match: /style_gate/,
+    info: { label: "🟡 文章の構成・書き方が基準未達", tone: "quality", requiresHumanReview: true },
+  },
+  {
     match: /quality_gate/,
     info: { label: "🟠 品質基準未達（両論性・深さ等）", tone: "quality", requiresHumanReview: true },
   },

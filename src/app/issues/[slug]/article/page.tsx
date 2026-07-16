@@ -77,7 +77,7 @@ function VerificationBar({
 
       {sourceCount > 0 && (
         <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 ring-1 ring-blue-200">
-          {sourceCount}件のソースを横断比較
+          {sourceCount}件のソースを参照
         </span>
       )}
 

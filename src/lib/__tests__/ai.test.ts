@@ -18,6 +18,12 @@ import {
   filterRelevantTopics,
   composeVoteQuestion,
   sanitizePolarVoteChoices,
+  syncVoteQuestionWithChoices,
+  verifySidesAxisAlignment,
+  assessCommentStanceSpread,
+  composeIssueTitle,
+  judgeIssueTitleQuality,
+  verifyVoteChoicesReflectSides,
 } from "@/lib/ai";
 import { AI_MODELS, RADAR, VOTE_CHOICE_MAX_CHARS } from "@/lib/constants";
 
@@ -369,15 +375,16 @@ describe("composeVoteQuestion", () => {
     fallbackChoices: { for: "賛成", against: "反対", undecided: "わからない" },
   };
 
-  it("記事内容から確定した設問・選択肢を返す", async () => {
+  it("記事内容から確定した設問・選択肢を返す（設問末尾にchoicesを埋め込む）", async () => {
     mockContent(
       JSON.stringify({
-        question: "国旗損壊罪の新設、賛成ですか？",
+        question: "国旗損壊罪の新設、新設に賛成？新設に反対？",
         choices: { for: "新設に賛成", against: "新設に反対", undecided: "まだ判断できない" },
       }),
     );
     const result = await composeVoteQuestion(fallback);
-    expect(result.question).toBe("国旗損壊罪の新設、賛成ですか？");
+    expect(result.question).toContain("新設に賛成");
+    expect(result.question).toContain("新設に反対");
     expect(result.choices).toEqual({ for: "新設に賛成", against: "新設に反対", undecided: "まだ判断できない" });
   });
 
@@ -409,10 +416,10 @@ describe("composeVoteQuestion", () => {
     expect(result).toEqual({ question: fallback.fallbackQuestion, choices: fallback.fallbackChoices });
   });
 
-  it("policyで人物名ボタンになった場合は賛否ラベルに矯正する", async () => {
+  it("policyで人物名ボタンになった場合は賛否ラベルに矯正し、設問末尾も同期する", async () => {
     mockContent(
       JSON.stringify({
-        question: "国旗損壊罪法案、賛成ですか？",
+        question: "国旗損壊罪法案、百地章氏賛成？沖縄弁護士会反対？",
         choices: { for: "百地章氏賛成", against: "沖縄弁護士会反対", undecided: "まだ判断できない" },
       }),
     );
@@ -422,10 +429,13 @@ describe("composeVoteQuestion", () => {
       against: "反対",
       undecided: "わからない",
     });
+    expect(result.question).toContain("賛成？");
+    expect(result.question).toContain("反対？");
+    expect(result.question).not.toContain("百地");
+    expect(result.question).not.toContain("弁護士会");
   });
 
-  it("geopoliticsで是非を問う設問なのに陣営名ラベルが返った場合は是非ラベルに矯正する", async () => {
-    // 実際に本番で公開されたバグ: 設問「容認できますか？」なのに choices が国名/陣営名のままだった
+  it("geopoliticsで是非を問う設問なのに陣営名ラベルが返った場合は是非ラベルに矯正し設問も同期する", async () => {
     mockContent(
       JSON.stringify({
         question: "ホルムズ海峡封鎖は容認できますか？",
@@ -442,12 +452,14 @@ describe("composeVoteQuestion", () => {
       against: "容認できない",
       undecided: "まだ判断できない",
     });
+    expect(result.question).toContain("容認できる");
+    expect(result.question).toContain("容認できない");
   });
 
   it("geopoliticsでも当事者比較型の設問なら陣営名ラベルはそのまま通す", async () => {
     mockContent(
       JSON.stringify({
-        question: "どちらの主張が妥当だと思いますか？",
+        question: "どちらの主張が妥当か、イラン側？米軍側？",
         choices: { for: "イラン側", against: "米軍側", undecided: "まだ判断できない" },
       }),
     );
@@ -457,6 +469,50 @@ describe("composeVoteQuestion", () => {
       issueTitle: "ホルムズ海峡封鎖",
     });
     expect(result.choices).toEqual({ for: "イラン側", against: "米軍側", undecided: "まだ判断できない" });
+    expect(result.question).toContain("イラン側");
+    expect(result.question).toContain("米軍側");
+  });
+
+  it("正しい？間違ってる？形式は容認ラベルへ置換せず通す", async () => {
+    mockContent(
+      JSON.stringify({
+        question: "佐藤大臣が辞任した判断は正しい？間違ってる？",
+        choices: { for: "正しい", against: "間違ってる", undecided: "まだ判断できない" },
+      }),
+    );
+    const result = await composeVoteQuestion({
+      ...fallback,
+      debateType: "geopolitics",
+      issueTitle: "佐藤大臣の辞任",
+    });
+    expect(result.choices.for).toBe("正しい");
+    expect(result.choices.against).toBe("間違ってる");
+    expect(result.question).toContain("正しい");
+    expect(result.question).toContain("間違ってる");
+    expect(result.question).not.toContain("容認");
+  });
+});
+
+describe("syncVoteQuestionWithChoices", () => {
+  it("choices変更後に設問末尾を新しいラベルへ揃える", () => {
+    const q = syncVoteQuestionWithChoices("選挙SNS対策法案、自民支持？共産党懸念？", {
+      for: "対応を支持",
+      against: "問題視",
+    });
+    expect(q).toContain("対応を支持？");
+    expect(q).toContain("問題視？");
+    expect(q).not.toContain("自民");
+    expect(q).not.toContain("共産");
+  });
+
+  it("40字超過時は前置きだけ短縮しA？B？は残す", () => {
+    const q = syncVoteQuestionWithChoices(
+      "とても長い前置きで文字数を意図的に押し上げるための状況説明テキスト、支持する？支持しない？",
+      { for: "支持する", against: "支持しない" },
+      40,
+    );
+    expect(q.length).toBeLessThanOrEqual(40);
+    expect(q.endsWith("支持する？支持しない？")).toBe(true);
   });
 });
 
@@ -474,5 +530,169 @@ describe("sanitizePolarVoteChoices", () => {
         { for: "百地章氏賛成", against: "沖縄弁護士会反対", undecided: "まだ判断できない" },
       ),
     ).toEqual({ for: "法案に賛成", against: "法案に反対", undecided: "まだ判断できない" });
+  });
+
+  it("org_responseの政党名ラベルもデフォルト立場ラベルへ（2026-07-15本番で「自民支持」「共産党懸念」を確認）", () => {
+    expect(
+      sanitizePolarVoteChoices(
+        "org_response",
+        { for: "自民支持", against: "共産党懸念", undecided: "どちらとも言えない" },
+        { for: "自民支持", against: "共産党懸念", undecided: "どちらとも言えない" },
+      ),
+    ).toEqual({ for: "対応を支持", against: "問題視", undecided: "どちらとも言えない" });
+  });
+});
+
+describe("verifySidesAxisAlignment", () => {
+  it("両側が同じ軸（対応の是非）なら aligned=true", async () => {
+    mockContent(JSON.stringify({ aligned: true, reason: "" }));
+    const result = await verifySidesAxisAlignment({
+      question: "被災対応は適切だと思いますか？",
+      sideA: { heading: "擁護側", items: ["救助活動を全力で進めていると当局が強調"] },
+      sideB: { heading: "批判側", items: ["対応が後手に回ったと専門家が指摘"] },
+    });
+    expect(result.aligned).toBe(true);
+  });
+
+  it("片方が事後対応、もう片方が事前管理の話にすり替わっていれば aligned=false", async () => {
+    mockContent(
+      JSON.stringify({
+        aligned: false,
+        reason: "対応の是非と事前管理の是非が混在",
+      }),
+    );
+    const result = await verifySidesAxisAlignment({
+      question: "被災対応は適切だと思いますか？",
+      sideA: { heading: "擁護側", items: ["救助活動は全力でやっている"] },
+      sideB: { heading: "批判側", items: ["事前のダム管理に問題があった"] },
+    });
+    expect(result.aligned).toBe(false);
+    expect(result.reason).toContain("事前管理");
+  });
+
+  it("API失敗時は誤検知で記事を止めないよう安全側でaligned=true", async () => {
+    mocks.create.mockRejectedValueOnce(new Error("network error"));
+    const result = await verifySidesAxisAlignment({
+      question: "Q",
+      sideA: { heading: "A", items: ["a"] },
+      sideB: { heading: "B", items: ["b"] },
+    });
+    expect(result.aligned).toBe(true);
+  });
+});
+
+describe("assessCommentStanceSpread", () => {
+  it("コメントが二極化していればsplit=true", async () => {
+    mockContent(JSON.stringify({ split: true, confidence: 0.75 }));
+    const result = await assessCommentStanceSpread(["賛成だ、いいことだ", "反対だ、やめるべきだ"]);
+    expect(result.split).toBe(true);
+    expect(result.confidence).toBeCloseTo(0.75);
+  });
+
+  it("コメント配列が空ならAPIを呼ばずsplit=false", async () => {
+    const result = await assessCommentStanceSpread([]);
+    expect(result.split).toBe(false);
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it("API失敗時は誤って分断ありと過大評価しないよう安全側でsplit=false", async () => {
+    mocks.create.mockRejectedValueOnce(new Error("network error"));
+    const result = await assessCommentStanceSpread(["何かコメント"]);
+    expect(result.split).toBe(false);
+    expect(result.confidence).toBe(0);
+  });
+});
+
+describe("composeIssueTitle", () => {
+  it("titlesの配列を返す（3案）", async () => {
+    mockContent(
+      JSON.stringify({
+        titles: ["一転して学位取消し、大学の説明は二転三転", "学位取消しが一夜で決定", "学位剥奪の理由は"],
+      }),
+    );
+    const titles = await composeIssueTitle({
+      clusterTitle: "学位剥奪",
+      question: "妥当か",
+      sourceTitles: ["学位取消しの記事"],
+      classification: "reported",
+      category: "society",
+    });
+    expect(titles).toHaveLength(3);
+  });
+
+  it("空文字の案は除外する", async () => {
+    mockContent(JSON.stringify({ titles: ["良い見出し", "", "  "] }));
+    const titles = await composeIssueTitle({
+      clusterTitle: "x",
+      question: "y",
+      sourceTitles: [],
+      classification: "reported",
+      category: "society",
+    });
+    expect(titles).toEqual(["良い見出し"]);
+  });
+});
+
+describe("judgeIssueTitleQuality", () => {
+  it("候補が1件なら選抜せずそのまま返す", async () => {
+    const result = await judgeIssueTitleQuality(["唯一の候補"]);
+    expect(result.best).toBe("唯一の候補");
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it("候補が空なら空文字を返す", async () => {
+    const result = await judgeIssueTitleQuality([]);
+    expect(result.best).toBe("");
+  });
+
+  it("複数候補から最良の1つを選ぶ", async () => {
+    mockContent(JSON.stringify({ best: "候補B", reason: "具体的で自然" }));
+    const result = await judgeIssueTitleQuality(["候補A", "候補B", "候補C"]);
+    expect(result.best).toBe("候補B");
+  });
+
+  it("nanoが候補に無い文字列を返したら安全側で先頭候補を採用する", async () => {
+    mockContent(JSON.stringify({ best: "候補X（存在しない）", reason: "" }));
+    const result = await judgeIssueTitleQuality(["候補A", "候補B"]);
+    expect(result.best).toBe("候補A");
+  });
+
+  it("API失敗時は先頭候補を安全側で採用する", async () => {
+    mocks.create.mockRejectedValueOnce(new Error("network error"));
+    const result = await judgeIssueTitleQuality(["候補A", "候補B"]);
+    expect(result.best).toBe("候補A");
+  });
+});
+
+describe("verifyVoteChoicesReflectSides", () => {
+  it("選択肢が両側の主張内容と一致していればaligned=true", async () => {
+    mockContent(JSON.stringify({ aligned: true, reason: "" }));
+    const result = await verifyVoteChoicesReflectSides({
+      choices: { for: "対応を支持", against: "問題視" },
+      sideA: { heading: "支持する側", items: ["政府の説明は妥当だと専門家が指摘"] },
+      sideB: { heading: "問題視する側", items: ["対応が後手に回ったと批判"] },
+    });
+    expect(result.aligned).toBe(true);
+  });
+
+  it("選択肢が政党名等、両側の主張内容とズレていればaligned=false", async () => {
+    mockContent(JSON.stringify({ aligned: false, reason: "政党名になっており対立の芯とズレている" }));
+    const result = await verifyVoteChoicesReflectSides({
+      choices: { for: "自民支持", against: "共産党懸念" },
+      sideA: { heading: "支持する側", items: ["法案は偽情報対策に有効だと説明"] },
+      sideB: { heading: "問題視する側", items: ["表現の自由を萎縮させると懸念"] },
+    });
+    expect(result.aligned).toBe(false);
+    expect(result.reason).toContain("政党名");
+  });
+
+  it("API失敗時は誤検知で記事を止めないよう安全側でaligned=true", async () => {
+    mocks.create.mockRejectedValueOnce(new Error("network error"));
+    const result = await verifyVoteChoicesReflectSides({
+      choices: { for: "A", against: "B" },
+      sideA: { heading: "A側", items: ["a"] },
+      sideB: { heading: "B側", items: ["b"] },
+    });
+    expect(result.aligned).toBe(true);
   });
 });

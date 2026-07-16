@@ -11,6 +11,13 @@ import { UA } from "./primary-text";
 
 const BATCH_EXECUTE_URL = "https://news.google.com/_/DotsSplashUi/data/batchexecute";
 
+/** Yahoo!ニュース個別記事URL（コメント欄サンプリングの起点） */
+const YAHOO_ARTICLE_URL = /^https:\/\/news\.yahoo\.co\.jp\/articles\/[a-f0-9]+/i;
+
+export function isYahooArticleUrl(url: string): boolean {
+  return YAHOO_ARTICLE_URL.test(url);
+}
+
 export function isGoogleNewsArticleUrl(url: string): boolean {
   try {
     const u = new URL(url);
@@ -22,6 +29,7 @@ export function isGoogleNewsArticleUrl(url: string): boolean {
     return false;
   }
 }
+
 
 function articleIdFromUrl(url: string): string {
   return url.replace(/\/$/, "").split("/").pop()?.split("?")[0] ?? "";
@@ -150,4 +158,21 @@ export async function resolvePublisherUrl(url: string): Promise<string | null> {
     console.warn(`  ⚠️ google-news-resolve (${articleId.slice(0, 24)}…): ${e}`);
     return null;
   }
+}
+
+/**
+ * ニュースURL群からYahoo!記事URLを1つ返す。
+ * 直接Yahoo URLが無ければ Google News URL を出版社URLに解決し、Yahooなら採用する。
+ * （discover段階の news はほぼ Google News リンクのため、直URLだけ見るとコメント分断がほぼ取れない）
+ */
+export async function resolveYahooArticleUrl(urls: string[]): Promise<string | null> {
+  for (const url of urls) {
+    if (isYahooArticleUrl(url)) return url.replace(/\/$/, "");
+  }
+  for (const url of urls) {
+    if (!isGoogleNewsArticleUrl(url)) continue;
+    const resolved = await resolvePublisherUrl(url);
+    if (resolved && isYahooArticleUrl(resolved)) return resolved.replace(/\/$/, "");
+  }
+  return null;
 }

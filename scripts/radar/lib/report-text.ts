@@ -36,7 +36,7 @@ function normalizeFeedName(feed: string): string {
   return NON_JA_SCRIPT.test(feed) ? "海外メディア" : feed;
 }
 
-const MAX_OUTLETS = 6;
+const MAX_OUTLETS = 5;
 const MAX_CHARS_PER_OUTLET = 2000;
 const MIN_EXCERPT_CHARS = 80;
 /** extract/Jina がナビだけ返す場合を弾く最低本文長 */
@@ -124,7 +124,49 @@ export function isSubstantiveArticleText(text: string): boolean {
     text.match(/\b(?:Skip to|Browse|Subscribe|Sign in|Accept (?:all )?cookies|Advertisement)\b/gi) ?? []
   ).length;
   if (navHints >= 5 && distilled.length < 1200) return false;
+  if (isSoftBlockedText(text)) return false;
   return true;
+}
+
+/**
+ * JS無効化案内・captcha・bot対策の待機画面など「本文ではない」プレースホルダー文言。
+ * 実際の記事本文にこの文言がそのまま含まれることは実質無いため、文字数に関わらず弾く
+ * （2026-07-16実データで発見: Yahoo!ニュースの「現在JavaScriptが無効になっています」ページが
+ * サイト共通メニュー等で1254字まで水増しされ、旧・text.length<800条件をすり抜けていた）。
+ */
+export function isSoftBlockedText(text: string): boolean {
+  return /Just a moment|Attention Required|現在JavaScriptが無効になっています|Enable JavaScript|Please enable JavaScript|captcha/i.test(
+    text,
+  );
+}
+
+/**
+ * 検索フォールバック（fetchViaTavilySearch）が拾ってきた本文が、そもそも元記事の話題と
+ * 関係があるかの最低限のチェック。文字数・ナビ密度の条件は満たしていても、
+ * 完全に無関係なページ（実測例: Reuters記事の代替としてFidelityの投資信託ページが
+ * ヒットした）を弾く。タイトルから抽出した語が1つも本文に現れなければ無関係とみなす。
+ * 判定材料（意味のある語）が取れない場合はfail-open（弾かない）。
+ */
+export function looksRelevantToTitle(text: string, title: string): boolean {
+  const tokens = new Set<string>();
+  for (const m of title.matchAll(/[一-龠々ァ-ヶーぁ-んA-Za-z0-9]{2,}/g)) {
+    const run = m[0];
+    if (/^[A-Za-z0-9]+$/.test(run)) {
+      if (run.length >= 4) tokens.add(run.toLowerCase()); // 短い英数字はノイズになりやすいので除外
+      continue;
+    }
+    // 日本語は語境界が無いため、長い連続は分かち書きせず丸ごと1トークンにすると
+    // 語順・活用の違いだけで一致しなくなる（実例:「利上げ影響」vs本文の「利上げが...影響」）。
+    // 4字の窓でスライドさせ、部分的な重なりでも拾えるようにする。
+    if (run.length <= 6) {
+      tokens.add(run);
+    } else {
+      for (let i = 0; i <= run.length - 4; i++) tokens.add(run.slice(i, i + 4));
+    }
+  }
+  if (tokens.size === 0) return true;
+  const lower = text.toLowerCase();
+  return [...tokens].some((t) => (/^[a-z0-9]+$/.test(t) ? lower.includes(t) : text.includes(t)));
 }
 
 async function fetchWithBrowserUa(
@@ -151,8 +193,14 @@ async function fetchWithBrowserUa(
       return { text: null, status: res.status };
     }
     const text = stripHtmlToText(await res.text());
+    // 以前はMIN_EXCERPT_CHARS(80字)の長さチェックだけで、JS無効化案内やbot対策ページの
+    // プレースホルダー文言（サイト共通メニュー等で長く水増しされる）がそのまま抜粋として
+    // 通ってしまっていた（2026-07-16実データで発見）。isSubstantiveArticleText相当のチェックを
+    // ここでも必ず通す。
+    const passesLength = text.length >= MIN_EXCERPT_CHARS;
+    const ok = passesLength && !isSoftBlockedText(text);
     return {
-      text: text.length >= MIN_EXCERPT_CHARS ? text.slice(0, maxChars) : null,
+      text: ok ? text.slice(0, maxChars) : null,
       status: res.status,
     };
   } catch {
@@ -172,11 +220,10 @@ async function fetchViaJina(url: string, maxChars: number): Promise<string | nul
     });
     if (!res.ok) return null;
     const text = (await res.text()).replace(/\s+/g, " ").trim();
+    // soft-block/captcha判定（isSoftBlockedText）はisSubstantiveArticleText内で長さに関わらず
+    // 弾かれるようになった（2026-07-16、以前はここで別途text.length<800の条件付きチェックを
+    // していたが冗長かつ抜け穴だったため統合）。
     if (!isSubstantiveArticleText(text)) return null;
-    // soft-block / captcha pages
-    if (/Just a moment|Attention Required|Enable JavaScript|captcha/i.test(text) && text.length < 800) {
-      return null;
-    }
     return text.slice(0, maxChars);
   } catch {
     return null;
@@ -233,7 +280,12 @@ async function fetchViaTavilySearch(
       return { url: same.url, text: same.content.slice(0, maxChars) };
     }
 
-    const best = results.find((r) => r.content.length >= MIN_EXCERPT_CHARS);
+    // sameと違い任意ドメインの検索結果なので、話題と無関係なページ（実測例:
+    // Reuters記事の代替としてFidelityの投資信託ページがヒットした）を弾くため
+    // 最低限のタイトル語重複チェックを通す（2026-07-16追加）。
+    const best = results.find(
+      (r) => r.content.length >= MIN_EXCERPT_CHARS && looksRelevantToTitle(r.content, title),
+    );
     if (best) return { url: best.url, text: best.content.slice(0, maxChars) };
   }
 

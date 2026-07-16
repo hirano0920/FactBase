@@ -43,6 +43,7 @@ export async function getUserInfluenceStats(userId: string): Promise<UserInfluen
 
   const commentIds = comments.filter((c) => c.helpfulCount > 0).map((c) => c.id);
   let crossHelpful = 0;
+  let neutralHelpful = 0;
 
   if (commentIds.length > 0) {
     const rows = await prisma.$queryRaw<{ commentId: string; n: bigint }[]>`
@@ -58,11 +59,26 @@ export async function getUserInfluenceStats(userId: string): Promise<UserInfluen
     for (const row of rows) {
       crossHelpful += Number(row.n);
     }
+    const neutralRows = await prisma.$queryRaw<{ commentId: string; n: bigint }[]>`
+      SELECT h."commentId" AS "commentId", COUNT(*)::bigint AS n
+      FROM "Helpful" h
+      INNER JOIN "Comment" c ON c.id = h."commentId"
+      INNER JOIN "Vote" v ON v."userId" = h."userId" AND v."issueId" = c."issueId"
+      WHERE c."userId" = ${userId}
+        AND v.choice = 'UNDECIDED'
+      GROUP BY h."commentId"
+    `;
+    for (const row of neutralRows) {
+      neutralHelpful += Number(row.n);
+    }
   }
 
   const bridgingRate =
-    totalHelpful > 0 ? Math.round((crossHelpful / totalHelpful) * 1000) / 10 : null;
+    totalHelpful > 0
+      ? Math.min(100, Math.round(((crossHelpful + neutralHelpful) / totalHelpful) * 1000) / 10)
+      : null;
 
+  // JSDoc に合わせて「helpful≥3 かつ crossHelpful≥1」のコメント数（越境された意見の数）
   const bridgingTopCount = comments.filter((c) => c.helpfulCount >= 3).length;
 
   return {

@@ -55,8 +55,13 @@ export async function fetchYahooRealtimeBuzz(): Promise<YahooBuzzTerm[]> {
   }
 }
 
-/** discover 用: スポーツ・エンタメ genre 等のゴミを除外（火種候補は prefilter 経由で通す） */
-export async function fetchYahooRealtimeBuzzPolitics(): Promise<YahooBuzzTerm[]> {
+/** discover / promote 用: スポーツ・エンタメ等のゴミを除外し、TwoSides向きの時事・社会・生活争点を通す */
+export async function fetchYahooRealtimeBuzzScoped(): Promise<YahooBuzzTerm[]> {
   const all = await fetchYahooRealtimeBuzz();
   return all.filter((b) => shouldKeepBuzzTerm({ term: b.term, source: "yahoo_rt", genre: b.genre }));
+}
+
+/** @deprecated fetchYahooRealtimeBuzzScoped を使うこと（政治専用ではない） */
+export async function fetchYahooRealtimeBuzzPolitics(): Promise<YahooBuzzTerm[]> {
+  return fetchYahooRealtimeBuzzScoped();
 }

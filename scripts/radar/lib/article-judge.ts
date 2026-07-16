@@ -162,8 +162,25 @@ export function gateFromScore(score: ArticleJudgeScore): QualityGateResult {
  * 呼び出し側はnano失敗時にfail-open（公開続行）する運用を想定し、ここでは例外をそのまま投げる。
  */
 export async function checkArticleQualityGate(article: ArticleForJudge): Promise<QualityGateResult> {
-  const score = await judgeArticleForGate(article);
-  return gateFromScore(score);
+  try {
+    const score = await judgeArticleForGate(article);
+    return gateFromScore(score);
+  } catch (e) {
+    console.warn(`  ⚠️ 品質ゲートのjudge失敗（fail-open・公開続行）: ${e}`);
+    return {
+      ok: true,
+      score: {
+        bothSidesQuality: { score: 3, reason: "judge失敗（fail-open）" },
+        neutrality: { score: 3, reason: "judge失敗（fail-open）" },
+        depth: { score: 3, reason: "judge失敗（fail-open）" },
+        clarity: { score: 3, reason: "judge失敗（fail-open）" },
+        factualGrounding: { score: 3, reason: "judge失敗（fail-open）" },
+        relatability: { score: 3, reason: "judge失敗（fail-open）" },
+        titleHook: { score: 3, reason: "judge失敗（fail-open）" },
+      },
+      reason: null,
+    };
+  }
 }
 
 /**

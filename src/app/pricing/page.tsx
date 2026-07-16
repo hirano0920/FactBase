@@ -1,10 +1,37 @@
+import { CheckCircleIcon, LockIcon, StarIcon } from "lucide-react";
 import { auth } from "@/auth";
 import { CheckoutButton } from "@/components/pricing/checkout-button";
 import { PlusTrialPromo } from "@/components/pricing/plus-trial-promo";
 import { ManagePlanButton } from "@/components/pricing/manage-plan-button";
 import { PageContainer } from "@/components/layout/page-container";
+import { BorderTrail } from "@/components/ui/border-trail";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { FC_DAILY_LIMITS, PLAN_PRICES, PLANS, SITE } from "@/lib/constants";
 import { cn } from "@/lib/utils";
+
+/** 見出しだけでは伝わりにくい機能に、その場で読める補足を添える */
+const FEATURE_TOOLTIPS: { match: string; tooltip: string }[] = [
+  {
+    match: "沈黙の多数派ヒートマップ",
+    tooltip: "投票はせず読むだけの『サイレントマジョリティ』がどちらに傾いているかを可視化します",
+  },
+  {
+    match: "両陣営論点マップ",
+    tooltip: "賛成/反対それぞれの主要論点と、相手陣営からも支持を得たコメントの上位を表示します",
+  },
+  {
+    match: "個人影響力・MVP",
+    tooltip: "自分の投稿が相手陣営の意見をどれだけ動かしたかをスコア化します",
+  },
+  {
+    match: "レスバ支援 AI",
+    tooltip: "反論の組み立てや事実確認をAIが手伝う機能です",
+  },
+];
+
+function findFeatureTooltip(text: string): string | undefined {
+  return FEATURE_TOOLTIPS.find((f) => text.includes(f.match))?.tooltip;
+}
 
 export const metadata = {
   title: "Plus/Proプラン",
@@ -109,79 +136,111 @@ export default async function PricingPage({ searchParams }: PricingPageProps) {
             <div
               key={plan.id}
               className={cn(
-                "relative flex flex-col rounded-2xl border p-6",
-                premium
-                  ? "border-ink bg-ink text-surface shadow-card"
-                  : highlighted
-                    ? "border-accent/40 bg-surface-raised ring-1 ring-accent/15"
-                    : "border-border bg-surface-raised",
+                "relative flex flex-col overflow-hidden rounded-2xl border",
+                premium ? "border-ink bg-ink text-surface shadow-card" : "border-border bg-surface-raised",
               )}
             >
+              {highlighted && <BorderTrail size={80} />}
+
               {plan.dbPlan !== "FREE" && (
-                <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-warm px-3 py-1 text-xs font-extrabold text-white shadow-card">
+                <span className="absolute -top-3 left-1/2 z-10 -translate-x-1/2 rounded-full bg-warm px-3 py-1 text-xs font-extrabold text-white shadow-card">
                   3日間無料
                 </span>
               )}
-              {premium && (
-                <span className="absolute -top-3 right-4 rounded-full border border-warm/30 bg-surface-raised px-2 py-0.5 text-[10px] font-bold text-warm-hover">
-                  おすすめ
-                </span>
-              )}
 
-              <span className="text-2xl">{plan.icon}</span>
-              <h2 className={cn("mt-3 text-lg font-extrabold", premium ? "text-surface" : "text-ink")}>
-                {plan.name}
-              </h2>
-              <p className={cn("mt-0.5 text-xs font-semibold", premium ? "text-surface/70" : "text-ink-faint")}>
-                {plan.tagline}
-              </p>
-
-              <p className="mt-4 flex items-baseline gap-1">
-                <span className={cn("text-3xl font-extrabold tabular-nums", premium ? "text-surface" : "text-ink")}>
-                  {typeof plan.price === "number" ? `¥${plan.price}` : plan.price}
-                </span>
-                {typeof plan.price === "number" && (
-                  <span className={cn("text-sm font-semibold", premium ? "text-surface/70" : "text-ink-faint")}>
-                    /月
+              <div
+                className={cn(
+                  "relative border-b p-6",
+                  premium ? "border-surface/10 bg-surface/5" : highlighted ? "border-accent/20 bg-accent-soft/40" : "border-border bg-surface-muted/60",
+                )}
+              >
+                {highlighted && (
+                  <span className="absolute right-4 top-4 flex items-center gap-1 rounded-md border border-accent/30 bg-surface-raised px-2 py-0.5 text-[10px] font-bold text-accent">
+                    <StarIcon className="h-3 w-3 fill-current" />
+                    人気
                   </span>
                 )}
-              </p>
 
-              <ul className="mt-6 flex-1 space-y-2.5 text-sm">
-                {plan.features.map((f) => (
-                  <li key={f} className={cn("flex items-start gap-2", premium ? "text-surface/90" : "text-ink-secondary")}>
-                    <span className={premium ? "text-warm" : "text-for"}>✓</span>
-                    {f}
-                  </li>
-                ))}
-                {plan.locked.map((f) => (
-                  <li key={f} className={cn("flex items-start gap-2", premium ? "text-surface/40" : "text-ink-faint")}>
-                    <span>🔒</span>
-                    {f}
-                  </li>
-                ))}
-              </ul>
+                <span className="text-2xl">{plan.icon}</span>
+                <h2 className={cn("mt-3 text-lg font-extrabold", premium ? "text-surface" : "text-ink")}>
+                  {plan.name}
+                </h2>
+                <p className={cn("mt-0.5 text-xs font-semibold", premium ? "text-surface/70" : "text-ink-faint")}>
+                  {plan.tagline}
+                </p>
 
-              {plan.dbPlan === "FREE" && (
-                <p className="mt-4 text-xs text-ink-faint">※無料プランは広告が表示されます</p>
-              )}
-              {plan.dbPlan === "COMMENT" && (
-                <p className="mt-4 text-xs text-ink-faint">※Plusプランは広告が表示されます</p>
-              )}
+                <p className="mt-3 flex items-baseline gap-1">
+                  <span className={cn("text-3xl font-extrabold tabular-nums", premium ? "text-surface" : "text-ink")}>
+                    {typeof plan.price === "number" ? `¥${plan.price}` : plan.price}
+                  </span>
+                  {typeof plan.price === "number" && (
+                    <span className={cn("text-sm font-semibold", premium ? "text-surface/70" : "text-ink-faint")}>
+                      /月
+                    </span>
+                  )}
+                </p>
+              </div>
 
-              {plan.dbPlan !== "FREE" && (
-                <p className="mt-4 text-center text-xs font-bold text-warm-hover">3日間無料体験付き</p>
-              )}
+              <div className={cn("flex-1 p-6", highlighted && !premium && "bg-accent-soft/10")}>
+                <TooltipProvider>
+                  <ul className="space-y-2.5 text-sm">
+                    {plan.features.map((f) => {
+                      const tip = findFeatureTooltip(f);
+                      return (
+                        <li
+                          key={f}
+                          className={cn("flex items-start gap-2", premium ? "text-surface/90" : "text-ink-secondary")}
+                        >
+                          <CheckCircleIcon
+                            className={cn("mt-0.5 h-4 w-4 shrink-0", premium ? "text-warm" : "text-for")}
+                          />
+                          {tip ? (
+                            <Tooltip delayDuration={0}>
+                              <TooltipTrigger asChild>
+                                <span className="cursor-help border-b border-dashed border-current/40">{f}</span>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>{tip}</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          ) : (
+                            <span>{f}</span>
+                          )}
+                        </li>
+                      );
+                    })}
+                    {plan.locked.map((f) => (
+                      <li
+                        key={f}
+                        className={cn("flex items-start gap-2", premium ? "text-surface/40" : "text-ink-faint")}
+                      >
+                        <LockIcon className="mt-0.5 h-4 w-4 shrink-0" />
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+                </TooltipProvider>
+              </div>
 
-              {plan.dbPlan !== "FREE" && (
-                <div className="mt-6">
+              <div className={cn("border-t p-4", premium ? "border-surface/10" : "border-border")}>
+                {plan.dbPlan === "FREE" && (
+                  <p className="mb-3 text-xs text-ink-faint">※無料プランは広告が表示されます</p>
+                )}
+                {plan.dbPlan === "COMMENT" && (
+                  <p className="mb-3 text-xs text-ink-faint">※Plusプランは広告が表示されます</p>
+                )}
+                {plan.dbPlan !== "FREE" && (
+                  <p className="mb-3 text-center text-xs font-bold text-warm-hover">3日間無料体験付き</p>
+                )}
+
+                {plan.dbPlan !== "FREE" && (
                   <CheckoutButton
                     plan={plan.dbPlan as "COMMENT" | "FACTCHECK"}
                     isLoggedIn={isLoggedIn}
                     isCurrent={currentPlan === plan.dbPlan}
                   />
-                </div>
-              )}
+                )}
+              </div>
             </div>
           );
         })}

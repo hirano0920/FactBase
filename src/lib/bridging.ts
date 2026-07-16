@@ -1,19 +1,26 @@
-import { BRIDGING_CROSS_WEIGHT, BRIDGING_MIN_SAMPLE } from "@/lib/constants";
+import { BRIDGING_CROSS_WEIGHT, BRIDGING_MIN_SAMPLE, BRIDGING_NEUTRAL_WEIGHT } from "@/lib/constants";
 
 /**
  * 越境評価スコア。helpfulCountが閾値未満のうちは1票の増減で順位が乱高下するため
  * 単純helpful順にフォールバックし、閾値以上になって初めて相手陣営helpfulを重く見る。
+ * 中立（UNDECIDED）からのhelpfulは反対派よりさらに重く評価する（「まだ決めてない人を納得させた」
+ * 意見が最も価値が高いため）。
  */
-export function computeBridgingScore(helpfulCount: number, crossHelpful: number): number {
+export function computeBridgingScore(
+  helpfulCount: number,
+  crossHelpful: number,
+  neutralHelpful = 0,
+): number {
   if (helpfulCount < BRIDGING_MIN_SAMPLE) return helpfulCount;
-  const sameHelpful = helpfulCount - crossHelpful;
-  return crossHelpful * BRIDGING_CROSS_WEIGHT + sameHelpful;
+  const sameHelpful = Math.max(0, helpfulCount - crossHelpful - neutralHelpful);
+  return crossHelpful * BRIDGING_CROSS_WEIGHT + neutralHelpful * BRIDGING_NEUTRAL_WEIGHT + sameHelpful;
 }
 
 export interface BridgingRow {
   id: string;
   helpfulCount: number;
   crossHelpful: number;
+  neutralHelpful: number;
   createdAt: string | Date;
 }
 
@@ -23,8 +30,8 @@ export interface BridgingRow {
 export function sortByBridgingScore<T extends BridgingRow>(rows: T[]): T[] {
   return [...rows].sort((a, b) => {
     const scoreDiff =
-      computeBridgingScore(b.helpfulCount, b.crossHelpful) -
-      computeBridgingScore(a.helpfulCount, a.crossHelpful);
+      computeBridgingScore(b.helpfulCount, b.crossHelpful, b.neutralHelpful) -
+      computeBridgingScore(a.helpfulCount, a.crossHelpful, a.neutralHelpful);
     if (scoreDiff !== 0) return scoreDiff;
     const createdDiff = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     if (createdDiff !== 0) return createdDiff;

@@ -13,6 +13,8 @@ import { RADAR } from "../../src/lib/constants";
 import { shouldRegenerateFollowUp, jstDayStart } from "../../src/lib/radar";
 import { generateVerifiedArticle, violatesBan } from "../../src/lib/radar-article";
 import { checkArticleQualityGateWithRepair } from "./lib/article-judge";
+import { finalizeArticleForSave } from "../../src/lib/article-quality";
+import type { DebateType } from "../../src/lib/debate-type";
 import { collectSourceHintsForRepair } from "../../src/lib/article-repair";
 import { buildClaimDiff, formatClaimDiffBlock } from "./lib/claim-diff";
 import { isWithinPeakWindow } from "./lib/schedule";
@@ -156,14 +158,14 @@ async function main() {
 
       let claimDiffBlock = "";
       try {
+        const diffExcerpts = [...reportExcerpts, ...internationalReportExcerpts].map((e) => ({
+          feed: e.feed,
+          title: e.title,
+          text: e.text,
+        }));
         claimDiffBlock = formatClaimDiffBlock(
-          await buildClaimDiff(
-            [...reportExcerpts, ...internationalReportExcerpts].map((e) => ({
-              feed: e.feed,
-              title: e.title,
-              text: e.text,
-            })),
-          ),
+          await buildClaimDiff(diffExcerpts),
+          diffExcerpts,
         );
       } catch (e) {
         console.warn(`  ⚠️ 媒体diffのnano失敗（fail-open・生抜粋のみで続行）: ${issue.title} (${e})`);
@@ -230,6 +232,21 @@ async function main() {
         }
       } catch (e) {
         console.warn(`  ⚠️ 品質ゲートnano失敗（fail-open・更新続行）: ${issue.title} (${e})`);
+      }
+
+      // ★promote.tsと共通の最終ゲート(finalizeArticleForSave)を通す。両側mini修理は
+      // articleHtmlだけを差し替えlead/bulletsを再同期しないため、これを通さずに保存すると
+      // 続報でlead≠冒頭セクションのズレを持ち込む。
+      const finalized = finalizeArticleForSave(article, {
+        isReported,
+        debateType: issue.debateType as DebateType | null,
+        issueTitle: issue.title,
+      });
+      article = finalized.article;
+      if (finalized.issues.length > 0) {
+        const reasons = finalized.issues.map((i) => `${i.reason}:${i.message}`).join(" / ");
+        console.warn(`  ⚠️ 最終構造チェック不合格「${reasons}」→ 更新せず既存記事を維持: ${issue.title}`);
+        continue;
       }
 
       await prisma.$transaction([

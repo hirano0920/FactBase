@@ -89,7 +89,9 @@ export const DEBATE_HIGHLIGHT_MIN_COMMENTS = 10;
 /** 越境評価（ブリッジングランキング）: これ未満のhelpfulCountは単純helpful順にフォールバックする */
 export const BRIDGING_MIN_SAMPLE = 3;
 /** 越境評価: 相手陣営からのhelpfulにかける重み */
-export const BRIDGING_CROSS_WEIGHT = 3;
+export const BRIDGING_CROSS_WEIGHT = 5;
+/** 越境評価: 中立（UNDECIDED）からのhelpfulにかける重み（反対派よりさらに高く） */
+export const BRIDGING_NEUTRAL_WEIGHT = 4;
 
 /** 未ログインのゲストが閲覧できるコメント数の上限。投票結果は制限なしで見える。 */
 export const GUEST_COMMENT_LIMIT = 5;
@@ -284,9 +286,9 @@ export const RADAR = {
   /** 1トピックあたり取得する関連法令の件数 */
   lawRecords: 3,
   /** 1トピックあたり取得する国内メディア関連ニュースの件数 */
-  newsRecords: 8,
+  newsRecords: 12,
   /** 1トピックあたり取得する海外/英字メディア関連ニュースの件数 */
-  internationalNewsRecords: 5,
+  internationalNewsRecords: 8,
   /**
    * 1トピックあたりTavily検索で追加発見するURLの件数（TAVILY_API_KEY未設定時は0件扱いで自動スキップ）。
    * Google News検索で拾えない一次情報・専門メディア・海外の穴を埋める発見専用の追加ソース。
@@ -301,10 +303,32 @@ export const RADAR = {
   commentCountSurgeThreshold: 300,
   // --- バズ駆動記事の公開（promote.ts、④）---
   /**
-   * 1ピーク時間帯あたりに公開する記事数。元3→4。1日3ピーク×4本＝12本/日まで許容し、
-   * 「その日の本命が枠外に落ちる」容量ボトルネックを緩和する（Writer呼び出し1本分/回のコスト増）。
+   * 1ピーク時間帯あたりの基本公開本数。日次では min/soft/hard と組み合わせて使う。
+   * ピーク内で失敗（HELD・Azure拒否）が出ても補充できるよう、目標3よりやや大きめ。
    */
   buzzArticlesPerWindow: 4,
+  /**
+   * 1日の最低公開本数。Selection V2 では 0（キャッチアップしない）。
+   * 互換のため定数は残すが、computePromoteRunBudget は参照しない。
+   */
+  dailyPublishMinTarget: 0,
+  /**
+   * 1日の望ましい公開本数の目安（通常ペース）。hardCapより意図的に低くしてあり、
+   * 通常日はここまでのペースで残りピーク数に均等按分される。
+   * 以前はhardCapと同値(9)で、soft到達判定が実質何もしていなかった
+   * （2026-07-16修正: 値を分けて初めてsoft/hardの2段構造が機能する）。
+   */
+  dailyPublishSoftTarget: 6,
+  /**
+   * 1日の硬上限。特に強いバズが重なった例外的な日だけ、softを超えてここまでの
+   * 上振れを許容する（質を落として埋めるための枠ではない）。
+   */
+  dailyPublishHardCap: 9,
+  /**
+   * Writerに進める前の本文取得プール倍率（target本数×この値）。
+   * 薄い候補を先に落とすため、試行枠より広くネットワーク取得する。
+   */
+  researchPoolMultiplier: 5,
   /**
    * 1ピーク時間帯・1カテゴリからの最大公開数。buzzScore純粋順だと単発のメガバズ争点が
    * 同じピーク枠を独占し、政治・国際・法律等の他カテゴリを機械的に押し出すことがあるため、
@@ -366,7 +390,7 @@ export const RADAR = {
    * 両論性だけは一段厳しくする（教科書的な片側埋め・根拠なし一般論を落とす）。
    * bothSidesQuality がこれ未満なら公開せずHELD。
    */
-  judgeBothSidesMinScore: 4,
+  judgeBothSidesMinScore: 3,
 } as const;
 
 /** 称号ランク（役に立った評価の累計数で決まる）。特典はバッジ表示・並び順やや優先のみ。 */

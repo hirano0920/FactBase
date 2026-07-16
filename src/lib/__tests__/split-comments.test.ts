@@ -43,8 +43,8 @@ const baseComment = {
   issue: { category: "POLITICS" },
 };
 
-function candidateRow(id: string, helpfulCount: number, crossHelpful: number, createdAt: string) {
-  return { id, helpfulCount, crossHelpful, createdAt: new Date(createdAt) };
+function candidateRow(id: string, helpfulCount: number, crossHelpful: number, createdAt: string, neutralHelpful = 0) {
+  return { id, helpfulCount, crossHelpful, neutralHelpful, createdAt: new Date(createdAt) };
 }
 
 beforeEach(() => {
@@ -79,9 +79,9 @@ describe("getSplitComments", () => {
     expect(result.against.comments).toEqual([]);
   });
 
-  it("越境評価バッジ表示用にcrossHelpfulを各コメントに含めて返す", async () => {
+  it("越境評価バッジ表示用にcrossHelpfulとneutralHelpfulを各コメントに含めて返す", async () => {
     mocks.queryRaw
-      .mockResolvedValueOnce([candidateRow("a", 5, 3, "2026-01-01")])
+      .mockResolvedValueOnce([candidateRow("a", 5, 3, "2026-01-01", 2)])
       .mockResolvedValueOnce([]);
     mocks.findMany.mockResolvedValueOnce([
       { ...baseComment, id: "a", stance: "FOR", helpfulCount: 5, createdAt: new Date("2026-01-01") },
@@ -90,6 +90,7 @@ describe("getSplitComments", () => {
     const result = await getSplitComments("issue-cross-helpful-field", { limit: 20 });
 
     expect(result.for.comments[0].crossHelpful).toBe(3);
+    expect(result.for.comments[0].neutralHelpful).toBe(2);
   });
 
   it("空の列はissueが見つからなければ空配列のまま（DBの追加コメントクエリは発行しない）", async () => {

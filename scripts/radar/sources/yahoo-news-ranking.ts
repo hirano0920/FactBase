@@ -185,3 +185,71 @@ export async function fetchYahooArticleCommentCount(url: string): Promise<number
     return null;
   }
 }
+
+/** コメント1件分。反応数（共感・なるほど・うーん）は2026-07-16に実データで存在確認済み */
+export interface YahooCommentEntry {
+  text: string;
+  /** 「共感した」の数 */
+  empathyCount: number;
+  /** 「なるほど」の数 */
+  insightCount: number;
+  /** 「うーん」の数 */
+  negativeCount: number;
+}
+
+/**
+ * 記事のコメント（上位表示分・十件程度）を取得する。
+ * `/comments` サブページの `window.__PRELOADED_STATE__` に埋め込まれたJSON
+ * （`commentFull.userCommentList[]`）から本文と反応数を抜き出す。Yahoo!投票のように
+ * 編集部が設問を作るまでのタイムラグが無く、記事公開直後からコメントが付くため、
+ * 速報向けの「世論の分断」実測シグナルとして使う（本文はnano判定、反応数は
+ * comment-friction.tsの算術判定に使う）。
+ */
+export async function fetchYahooArticleComments(articleUrl: string): Promise<YahooCommentEntry[]> {
+  try {
+    const res = await fetch(`${articleUrl.replace(/\/$/, "")}/comments`, {
+      headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml,*/*;q=0.8" },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) return [];
+    const html = await res.text();
+    const marker = "window.__PRELOADED_STATE__ = ";
+    const start = html.indexOf(marker);
+    if (start === -1) return [];
+    const jsonStart = start + marker.length;
+    let depth = 0;
+    let end = -1;
+    for (let i = jsonStart; i < html.length; i++) {
+      if (html[i] === "{") depth++;
+      else if (html[i] === "}") {
+        depth--;
+        if (depth === 0) {
+          end = i + 1;
+          break;
+        }
+      }
+    }
+    if (end === -1) return [];
+    const data = JSON.parse(html.slice(jsonStart, end)) as {
+      commentFull?: {
+        userCommentList?: Array<{
+          text?: string;
+          empathyCount?: number;
+          insightCount?: number;
+          negativeCount?: number;
+        }>;
+      };
+    };
+    return (data.commentFull?.userCommentList ?? [])
+      .filter((c) => (c.text?.trim().length ?? 0) >= 10)
+      .map((c) => ({
+        text: c.text!.trim(),
+        empathyCount: c.empathyCount ?? 0,
+        insightCount: c.insightCount ?? 0,
+        negativeCount: c.negativeCount ?? 0,
+      }));
+  } catch (e) {
+    console.warn(`  ⚠️ yahoo-comments: 取得失敗 ${articleUrl} (${e})`);
+    return [];
+  }
+}

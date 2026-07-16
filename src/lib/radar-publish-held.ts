@@ -144,11 +144,11 @@ export async function publishHeldRadarCandidate(candidate: TopicCandidateRow): P
       summaryJson: {
         lead: article.lead,
         bullets: article.bullets,
-        sources: sources.slice(0, 5).map((s) => ({
+        sources: sources.slice(0, 12).map((s) => ({
           label: `${s.title.slice(0, 40)}（${s.feed}）`,
           url: s.url,
         })),
-        sourceCount: Math.max(distinctSourceCount, Math.min(sources.length, 5)),
+        sourceCount: Math.max(distinctSourceCount, sources.length),
       } as unknown as Prisma.InputJsonValue,
       articleHtml: article.articleHtml,
       articleGeneratedAt: new Date(),

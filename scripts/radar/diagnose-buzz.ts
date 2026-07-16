@@ -26,7 +26,8 @@ async function main() {
     prisma.topicCandidate.count({ where: { discoverySource: "buzz", status: "PENDING" } }),
     prisma.topicCandidate.count({ where: { discoverySource: "bill", status: "PENDING" } }),
   ]);
-  const yt = await fetchYouTubeTrendingTitles(news);
+  const ytTrending = await fetchYouTubeTrendingTitles(news);
+  const yt = ytTrending.all.map((e) => e.title);
 
   console.log("=== DB ===");
   console.log(`  buzz候補（累計）: ${buzzEver}件 / PENDING buzz: ${pendingBuzz} / PENDING bill: ${pendingBill}`);
@@ -44,7 +45,8 @@ async function main() {
     googleTerms: google,
     yahooRealtimeTerms: yahooTerms,
     newsRankingTitles: news,
-    youtubeTrendingTitles: yt,
+    // 横断スコアは自己参照を避けるためorganicのみ（[[youtube-trending-circularity-fix]]参照）
+    youtubeTrendingTitles: ytTrending.organic.map((e) => e.title),
   };
   const anchors = buildBuzzAnchorCandidates(filtered, inputs);
   const buzzTerms = [...new Set(filtered.map((i) => i.term.trim()).filter(Boolean))].sort((a, b) => {

@@ -251,11 +251,13 @@ async function fetchLiveBuzzPreview(): Promise<LiveBuzzPreview> {
     googleTerms: googleTrends,
     yahooRealtimeTerms: yahooRealtime,
     newsRankingTitles: yahooNewsRanking,
-    youtubeTrendingTitles: youtubeTrending,
+    // 横断スコアは自己参照（ニュース見出しシード検索）を避けるためorganicのみを使う
+    youtubeTrendingTitles: youtubeTrending.organic.map((e) => e.title),
   };
 
+  const youtubeTitles = youtubeTrending.all.map((e) => e.title);
   const allTerms = Array.from(
-    new Set([...googleTrends, ...yahooRealtime, ...yahooNewsRanking, ...youtubeTrending]),
+    new Set([...googleTrends, ...yahooRealtime, ...yahooNewsRanking, ...youtubeTitles]),
   );
 
   const termPreviews = allTerms
@@ -273,7 +275,7 @@ async function fetchLiveBuzzPreview(): Promise<LiveBuzzPreview> {
     googleTrends,
     yahooRealtime,
     yahooNewsRanking,
-    youtubeTrending,
+    youtubeTrending: youtubeTitles,
     termPreviews,
   };
 }

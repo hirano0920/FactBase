@@ -27,8 +27,10 @@ import {
   violatesBan,
   extractArgumentSections,
   formatArgumentSectionsForPrompt,
+  hasFactualClaimIssue,
   type ArticleClaim,
   type GenerateArticleParams,
+  type UngroundedClaim,
 } from "@/lib/radar-article";
 
 function mockArticleResponse(content: Record<string, unknown>) {
@@ -45,6 +47,34 @@ function mockVerifyResponse(results: { id: string; supported: boolean }[]) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+describe("hasFactualClaimIssue", () => {
+  function claim(reason: UngroundedClaim["reason"]): UngroundedClaim {
+    return { text: "x", sourceUrl: "", reason };
+  }
+
+  it("スタイル・構成の理由だけならfalse（事実検証の問題ではない）", () => {
+    expect(
+      hasFactualClaimIssue([claim("incident_first_missing"), claim("bullets_too_thin")]),
+    ).toBe(false);
+  });
+
+  it("事実の裏取り失敗（unsupported等）が1件でもあればtrue", () => {
+    expect(
+      hasFactualClaimIssue([claim("incident_first_missing"), claim("unsupported")]),
+    ).toBe(true);
+  });
+
+  it("source_not_found/ungrounded_number/unclaimed_highlightもtrue扱い", () => {
+    expect(hasFactualClaimIssue([claim("source_not_found")])).toBe(true);
+    expect(hasFactualClaimIssue([claim("ungrounded_number")])).toBe(true);
+    expect(hasFactualClaimIssue([claim("unclaimed_highlight")])).toBe(true);
+  });
+
+  it("空配列はfalse", () => {
+    expect(hasFactualClaimIssue([])).toBe(false);
+  });
 });
 
 describe("buildSourceTextIndex", () => {
@@ -180,6 +210,43 @@ describe("generateVerifiedArticle", () => {
     mockVerifyResponse([{ id: "0", supported: true }]);
 
     const result = await generateVerifiedArticle(baseParams, 2);
+    expect(result.verified).toBe(true);
+    expect(result.attempts).toBe(2);
+  });
+
+  it("両側の論点が設問と別の軸にすり替わっていれば差し戻し、2回目で解消されればverified=true", async () => {
+    const opening =
+      "<h2>いま分かっていること</h2><p>台風10号の影響で貯水池が決壊し、広い範囲で浸水被害が出ていると報じられています。多数の住民が避難を余儀なくされました。</p>";
+    const mismatchedHtml =
+      opening +
+      "<h2>擁護側</h2><ul><li>救助活動を全力で進めていると政府が発表しています</li><li>専門家も迅速な対応だったとコメントしています</li></ul>" +
+      "<h2>批判側</h2><ul><li>事前のダム管理に問題があったと専門家が指摘しています</li><li>住民は避難勧告が遅れたと証言しています</li></ul>";
+    mockArticleResponse({ lead: "lead", bullets: [], articleHtml: mismatchedHtml, claims: [] });
+    // 軸チェック（nano）: すり替わっていると判定
+    mocks.create.mockResolvedValueOnce({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({ aligned: false, reason: "対応の是非と事前管理の是非が混在" }),
+          },
+        },
+      ],
+    });
+
+    const alignedHtml =
+      opening +
+      "<h2>擁護側</h2><ul><li>救助活動を全力で進めていると政府が発表しています</li><li>専門家も迅速な対応だったとコメントしています</li></ul>" +
+      "<h2>批判側</h2><ul><li>対応が後手に回ったと専門家が指摘しています</li><li>住民は対応の遅さに不満を証言しています</li></ul>";
+    mockArticleResponse({ lead: "lead", bullets: [], articleHtml: alignedHtml, claims: [] });
+    // 軸チェック（nano）: 2回目は同じ軸と判定
+    mocks.create.mockResolvedValueOnce({
+      choices: [{ message: { content: JSON.stringify({ aligned: true, reason: "" }) } }],
+    });
+
+    const result = await generateVerifiedArticle(
+      { ...baseParams, issueTitle: "被災対応は適切だと思いますか？" },
+      2,
+    );
     expect(result.verified).toBe(true);
     expect(result.attempts).toBe(2);
   });
@@ -428,7 +495,9 @@ describe("generateArticle（TwoSides導火線フォーマット）", () => {
     expect(sentContent).toContain("<h2>どこで意見が分かれるか</h2>");
     expect(sentContent).toContain("<h2>賛成側が言うこと</h2>");
     expect(sentContent).toContain("争点タイプ: policy");
-    expect(sentContent).toContain("報道の具体的内容");
+    expect(sentContent).not.toContain("帰属付き");
+    expect(sentContent).toContain("帰属不要");
+    expect(sentContent).toContain("簡潔");
     expect(sentContent).toContain("既出の事実を繰り返さない");
     expect(sentContent).toContain("賛成側が言うこと:");
     expect(sentContent).toContain("教科書一般論");

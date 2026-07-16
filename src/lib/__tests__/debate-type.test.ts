@@ -121,6 +121,12 @@ describe("debateTypeTitleHint", () => {
     expect(debateTypeTitleHint("policy")).toContain("家計");
     expect(debateTypeTitleHint("indicator")).toContain("家計");
   });
+
+  it("org_responseは空虚な仮定フック（『自分も同じ立場なら』）を案内しない", () => {
+    // 2026-07-15: この文言が「自分が学生ならどう感じる？」等の空虚な仮定フックの
+    // 直接の原因だったため、具体的な影響（返金・補償・処分内容等）を案内する形に修正した
+    expect(debateTypeTitleHint("org_response")).not.toContain("自分も同じ立場なら");
+  });
 });
 
 describe("debateTypeChoiceHint", () => {

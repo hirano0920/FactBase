@@ -65,7 +65,7 @@ import { fetchReportExcerpts } from "./lib/report-text";
 import { ensureEvidence, evidenceToArticleFacts, internationalNewsSources } from "./lib/enrich";
 import { resolveIssueTitle } from "./lib/issue-title";
 import { splitIncoherentPrimaryClusters } from "./lib/split-clusters";
-import { generateVerifiedArticle, violatesBan } from "../../src/lib/radar-article";
+import { generateVerifiedArticle, violatesBan, hasFactualClaimIssue } from "../../src/lib/radar-article";
 import { checkArticleQualityGateWithRepair } from "./lib/article-judge";
 import { collectSourceHintsForRepair } from "../../src/lib/article-repair";
 import { buildClaimDiff, formatClaimDiffBlock } from "./lib/claim-diff";
@@ -293,7 +293,7 @@ async function main() {
     googleTrendsKeywords,
     yahooRealtimeBuzz,
     yahooNewsRankingTitles,
-    youtubeTrendingTitles,
+    youtubeTrending,
   ] = await Promise.all([
     Promise.all(config.feeds.map(fetchFeed)).then((r) => r.flat()),
     fetchCourtsNews(),
@@ -322,7 +322,9 @@ async function main() {
   // trending判定は「瞬間バズ含む全部」、sustained判定は「何時間も出続けている語」だけの部分集合
   const trendingKeywords = Array.from(new Set([...googleTrendsKeywords, ...yahooRealtimeTerms]));
   const sustainedKeywords = Array.from(new Set([...sustainedGoogleTerms, ...sustainedYahooTerms]));
-  const buzzTitles = Array.from(new Set([...yahooNewsRankingTitles, ...youtubeTrendingTitles]));
+  const buzzTitles = Array.from(
+    new Set([...yahooNewsRankingTitles, ...youtubeTrending.all.map((e) => e.title)]),
+  );
 
   // バズ検知4ソースが同時に全滅＝スクレイピング系（Trends/Yahoo/YouTube）の構造変化が疑われる。
   // RSS全滅と違い個々は静かに空配列へフォールバックするため、全滅は明示的に通知しないと
@@ -331,7 +333,7 @@ async function main() {
     googleTrendsKeywords.length === 0 &&
     yahooRealtimeTerms.length === 0 &&
     yahooNewsRankingTitles.length === 0 &&
-    youtubeTrendingTitles.length === 0
+    youtubeTrending.all.length === 0
   ) {
     await notifyRadarFailure(
       "バズ検知ソース全滅",
@@ -776,8 +778,10 @@ async function main() {
         });
         let article = generatedArticle;
         if (!verified) {
+          // 2026-07-16: 事実検証失敗とスタイル要件不足を区別する（詳細はpromote.tsの同種修正を参照）
+          const prefix = hasFactualClaimIssue(unresolvedClaims) ? "unverified_claim" : "style_gate";
           const reasons = unresolvedClaims.map((c) => `${c.text}(${c.reason})`).join(" / ");
-          await holdForArticle(`unverified_claim:${reasons.slice(0, 200)}`);
+          await holdForArticle(`${prefix}:${reasons.slice(0, 200)}`);
           continue;
         }
         const banned = violatesBan(article);
@@ -820,10 +824,10 @@ async function main() {
           newsTitles: members.map((m) => m.title),
         });
         // cluster.choices（見出しだけを見た仮の投票選択肢）を、実際の記事本文と確定debateTypeに
-        // 合わせて作り直す（promote.tsと同じ扱い）。Issue.titleはissueTitle（resolveIssueTitleが
-        // 既に「自分ごとフック」付きで生成済み・detect.tsにはpromote.tsのshareTitle分離が無いため
-        // ここで上書きしない）。
-        const { choices: finalChoices } = await composeVoteQuestion({
+        // 合わせて作り直す（promote.tsと同じ扱い）。
+        // Issue.title = 投票設問、shareTitle = 自分ごとフック（resolveIssueTitleの結果）。
+        // 以前はchoicesだけ保存してtitleにフックを残していたため、設問とボタンがズレていた。
+        const { question: voteQuestionTitle, choices: finalChoices } = await composeVoteQuestion({
           issueTitle,
           lead: article.lead,
           bullets: article.bullets,
@@ -834,7 +838,8 @@ async function main() {
         const issue = await prisma.issue.create({
           data: {
             slug,
-            title: issueTitle,
+            title: voteQuestionTitle,
+            shareTitle: issueTitle,
             category: toIssueCategory(cluster.category),
             status: "TRENDING",
             confirmation: "OFFICIAL",
@@ -869,7 +874,7 @@ async function main() {
         await notifyRevalidate(slug, issue.id);
         publishedThisRun += 1;
         articlesThisRun += 1;
-        console.log(`  ✅ [publish/OFFICIAL]${trending ? " 🔥trending" : ""} /issues/${slug} — ${issueTitle}`);
+        console.log(`  ✅ [publish/OFFICIAL]${trending ? " 🔥trending" : ""} /issues/${slug} — ${voteQuestionTitle}`);
       } catch (e) {
         console.error(`  ❌ OFFICIAL記事生成失敗: ${e}`);
         await notifyRadarFailure(`detect.ts OFFICIAL記事生成失敗: ${cluster.title}`, e);

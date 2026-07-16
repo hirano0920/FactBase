@@ -1,5 +1,5 @@
 /**
- * YouTube Data API v3 — 日本向けトレンド動画タイトル取得（バズ検知用）。
+ * YouTube Data API v3 — 日本向けトレンド動画取得（バズ検知用）。
  * 環境変数 YOUTUBE_DATA_API_KEY が必要（未設定時は空配列でスキップ）。
  *
  * 取得軸（TwoSides: News & Politics に閉じない）:
@@ -7,6 +7,11 @@
  *   2. chart=mostPopular + videoCategoryId=25（News & Politics）
  *   3. 直近6h・order=date の広域検索（社会・時事含む）
  *   4. Yahoo!ニュースランキング見出しをシードにした鮮度優先検索
+ *
+ * 統計情報（view/like/commentCount）も合わせて取得する。videos.list は part を
+ * 増やしてもクォータ消費が変わらない（mostPopular系は無料で取得可）。search.list は
+ * statistics を返さないため、ヒットした動画IDだけ videos.list へ後続バッチ取得する
+ * （1リクエストあたり1ユニットの追加コストのみ・50件まで一括）。
  *
  * 動画本文・文字起こしは取らない（タイトルをバズ検知の入口に使い、
  * 記事生成は報道本文・一次情報の調査に委ねる）。スポーツ等のノイズは prefilter で落とす。
@@ -19,6 +24,9 @@ const UA = "Mozilla/5.0 (compatible; FactBaseRadar/1.0; +https://factbase.tokyo)
 
 /** News & Politics（YouTube Data API の categoryId） */
 const NEWS_POLITICS_CATEGORY = "25";
+
+/** videos.list の id パラメータに一括で渡せる上限（YouTube Data API仕様） */
+const VIDEO_STATS_BATCH_SIZE = 50;
 
 function hoursAgoIso(hours: number): string {
   return new Date(Date.now() - hours * 3600_000).toISOString();
@@ -42,10 +50,100 @@ async function fetchYouTubeApi<T>(label: string, path: string, params: Record<st
   }
 }
 
-function collectTitles(items: Array<{ snippet?: { title?: string } } | undefined> | undefined): string[] {
+interface VideoStatistics {
+  viewCount?: string;
+  likeCount?: string;
+  commentCount?: string;
+}
+
+interface VideoListItem {
+  id?: string;
+  snippet?: { title?: string; channelTitle?: string };
+  statistics?: VideoStatistics;
+}
+
+interface SearchListItem {
+  id?: { videoId?: string };
+  snippet?: { title?: string; channelTitle?: string };
+}
+
+/** バズ検知・DVS実測で使う動画1件分。統計はAPIが返さない/動画側で無効化されていれば0扱い */
+export interface YouTubeVideoEntry {
+  /** commentThreads.list で返信数を取りにいくためのID（search結果はid.videoId、videos.listはid） */
+  videoId: string;
+  title: string;
+  channelTitle: string;
+  viewCount: number;
+  likeCount: number;
+  commentCount: number;
+}
+
+function toNumber(raw: string | undefined): number {
+  const n = Number(raw ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function collectEntriesFromVideoList(items: VideoListItem[] | undefined): YouTubeVideoEntry[] {
   return (items ?? [])
-    .map((item) => item?.snippet?.title?.trim() ?? "")
-    .filter((title) => title.length >= 4);
+    .filter((item) => !!item.id && (item.snippet?.title?.trim().length ?? 0) >= 4)
+    .map((item) => ({
+      videoId: item.id!,
+      title: item.snippet!.title!.trim(),
+      channelTitle: item.snippet?.channelTitle?.trim() ?? "",
+      viewCount: toNumber(item.statistics?.viewCount),
+      likeCount: toNumber(item.statistics?.likeCount),
+      commentCount: toNumber(item.statistics?.commentCount),
+    }));
+}
+
+/**
+ * search.list はstatisticsを返さないため、ヒットした動画IDだけ videos.list(part=statistics) で
+ * 後続バッチ取得して合流する。50件ごとに1リクエスト（追加コストは1ユニット/バッチのみ）。
+ */
+async function fetchStatsForVideoIds(ids: string[]): Promise<Map<string, VideoStatistics>> {
+  const map = new Map<string, VideoStatistics>();
+  const uniqueIds = Array.from(new Set(ids)).filter(Boolean);
+  for (let i = 0; i < uniqueIds.length; i += VIDEO_STATS_BATCH_SIZE) {
+    const chunk = uniqueIds.slice(i, i + VIDEO_STATS_BATCH_SIZE);
+    const res = await fetchYouTubeApi<{ items?: VideoListItem[] }>(`videoStats`, "videos", {
+      part: "statistics",
+      id: chunk.join(","),
+    });
+    for (const item of res?.items ?? []) {
+      if (item.id) map.set(item.id, item.statistics ?? {});
+    }
+  }
+  return map;
+}
+
+function collectEntriesFromSearchList(
+  items: SearchListItem[] | undefined,
+  statsById: Map<string, VideoStatistics>,
+): YouTubeVideoEntry[] {
+  return (items ?? [])
+    .filter((item) => !!item.id?.videoId && (item.snippet?.title?.trim().length ?? 0) >= 4)
+    .map((item) => {
+      const stats = statsById.get(item.id!.videoId!) || {};
+      return {
+        videoId: item.id!.videoId!,
+        title: item.snippet!.title!.trim(),
+        channelTitle: item.snippet?.channelTitle?.trim() ?? "",
+        viewCount: toNumber(stats.viewCount),
+        likeCount: toNumber(stats.likeCount),
+        commentCount: toNumber(stats.commentCount),
+      };
+    });
+}
+
+function dedupeByTitle(entries: YouTubeVideoEntry[]): YouTubeVideoEntry[] {
+  const seen = new Set<string>();
+  const out: YouTubeVideoEntry[] = [];
+  for (const e of entries) {
+    if (seen.has(e.title)) continue;
+    seen.add(e.title);
+    out.push(e);
+  }
+  return out;
 }
 
 /** ニュース見出しから YouTube 検索クエリを生成（鮮度優先検索用） */
@@ -69,11 +167,26 @@ export function buildYouTubeNewsSeedQueries(newsTitles: string[], maxQueries: nu
   return [...queries].slice(0, maxQueries);
 }
 
-export async function fetchYouTubeTrendingTitles(newsSeedTitles: string[] = []): Promise<string[]> {
+export interface YouTubeTrendingTitles {
+  /**
+   * mostPopular（総合・News&Politics）とジャンル横断の広域検索のみ。ニュース見出しをシードにした
+   * 検索は含まない＝「他ソースと無関係にYouTube側で独立して見えている」ことの証拠として使える。
+   * バズ横断スコア（inYouTubeTrending判定）はこちらだけを使うこと。
+   */
+  organic: YouTubeVideoEntry[];
+  /**
+   * organicに加え、Yahoo!ニュースランキング見出しをシードにした検索結果も含む全件。
+   * シード検索はクエリ自体がニュース見出しの単語なので、ヒットしても「YouTubeで独立に
+   * バズっている」証拠にはならない（自己参照）。新規トピック発掘の材料としてのみ使うこと。
+   */
+  all: YouTubeVideoEntry[];
+}
+
+export async function fetchYouTubeTrendingTitles(newsSeedTitles: string[] = []): Promise<YouTubeTrendingTitles> {
   const key = process.env.YOUTUBE_DATA_API_KEY?.trim();
   if (!key) {
     console.warn("  ⚠️ youtube-trending: YOUTUBE_DATA_API_KEY 未設定のためスキップ");
-    return [];
+    return { organic: [], all: [] };
   }
 
   const seedQueries = buildYouTubeNewsSeedQueries(newsSeedTitles, RADAR.youtubeNewsSeedQueries);
@@ -92,37 +205,91 @@ export async function fetchYouTubeTrendingTitles(newsSeedTitles: string[] = []):
   });
 
   const [popularGeneral, popularNews, dateBroad, ...seedResults] = await Promise.all([
-    fetchYouTubeApi<{ items?: Array<{ snippet?: { title?: string } }> }>("mostPopularGeneral", "videos", {
-      part: "snippet",
+    fetchYouTubeApi<{ items?: VideoListItem[] }>("mostPopularGeneral", "videos", {
+      part: "snippet,statistics",
       chart: "mostPopular",
       regionCode: "JP",
       maxResults: "25",
     }),
-    fetchYouTubeApi<{ items?: Array<{ snippet?: { title?: string } }> }>("mostPopularNews", "videos", {
-      part: "snippet",
+    fetchYouTubeApi<{ items?: VideoListItem[] }>("mostPopularNews", "videos", {
+      part: "snippet,statistics",
       chart: "mostPopular",
       regionCode: "JP",
       videoCategoryId: NEWS_POLITICS_CATEGORY,
       maxResults: "25",
     }),
-    fetchYouTubeApi<{ items?: Array<{ snippet?: { title?: string } }> }>(
+    fetchYouTubeApi<{ items?: SearchListItem[] }>(
       "searchDateBroad",
       "search",
       searchParams("社会 OR 炎上 OR 時事 OR 政治 OR 経済 OR 企業"),
     ),
     ...seedQueries.map((q, i) =>
-      fetchYouTubeApi<{ items?: Array<{ snippet?: { title?: string } }> }>(`searchSeed${i}`, "search", searchParams(q)),
+      fetchYouTubeApi<{ items?: SearchListItem[] }>(`searchSeed${i}`, "search", searchParams(q)),
     ),
   ]);
 
-  const titles = Array.from(
-    new Set([
-      ...collectTitles(popularGeneral?.items),
-      ...collectTitles(popularNews?.items),
-      ...collectTitles(dateBroad?.items),
-      ...seedResults.flatMap((r) => collectTitles(r?.items)),
-    ]),
-  );
+  // search.list はstatisticsを返さないため、ヒットした動画IDへ後続バッチ取得する
+  const searchItems = [...(dateBroad?.items ?? []), ...seedResults.flatMap((r) => r?.items ?? [])];
+  const searchVideoIds = searchItems.map((item) => item.id?.videoId).filter((id): id is string => !!id);
+  const statsById = await fetchStatsForVideoIds(searchVideoIds);
 
-  return titles.slice(0, RADAR.youtubeTrendingMaxTitles);
+  const organicEntries = dedupeByTitle([
+    ...collectEntriesFromVideoList(popularGeneral?.items),
+    ...collectEntriesFromVideoList(popularNews?.items),
+    ...collectEntriesFromSearchList(dateBroad?.items, statsById),
+  ]).slice(0, RADAR.youtubeTrendingMaxTitles);
+
+  const allEntries = dedupeByTitle([
+    ...organicEntries,
+    ...seedResults.flatMap((r) => collectEntriesFromSearchList(r?.items, statsById)),
+  ]).slice(0, RADAR.youtubeTrendingMaxTitles);
+
+  return { organic: organicEntries, all: allEntries };
+}
+
+/**
+ * トピックに対応するYouTube動画を探す（あればview/comment数を「実際に見られている・
+ * 議論になっている」の実測シグナルとしてevidenceへ合流する）。複数一致時は最も再生数が多いものを採用。
+ */
+export function matchYouTubeEntry(
+  topic: string,
+  entries: readonly YouTubeVideoEntry[],
+  opts?: { matches?: (topic: string, title: string) => boolean },
+): YouTubeVideoEntry | undefined {
+  const matches = opts?.matches;
+  const hits = entries.filter(
+    (e) =>
+      e.title === topic ||
+      topic.includes(e.title) ||
+      e.title.includes(topic) ||
+      (matches?.(topic, e.title) ?? false),
+  );
+  if (hits.length === 0) return undefined;
+  return hits.reduce((best, e) => (e.viewCount > best.viewCount ? e : best));
+}
+
+/** commentThreads.list で1回に取得する上位コメント数（returnParamの上限に合わせる） */
+const REPLY_INTENSITY_SAMPLE_SIZE = 20;
+
+interface CommentThreadItem {
+  snippet?: {
+    totalReplyCount?: number;
+    topLevelComment?: { snippet?: { likeCount?: number } };
+  };
+}
+
+/**
+ * 動画の上位コメントへの返信数を合計する。いいね数と違い、返信は「賛同されて終わる」のではなく
+ * 実際に応酬（賛成/反対のやり取り）が起きていることの実測シグナルになる
+ * （2026-07-16、実データで`totalReplyCount`フィールドの存在を確認済み）。
+ * コメント欄が無効化されている動画・APIキー未設定時は0（バズ検知自体は止めない）。
+ */
+export async function fetchYouTubeReplyIntensity(videoId: string): Promise<number> {
+  const res = await fetchYouTubeApi<{ items?: CommentThreadItem[] }>("commentThreads", "commentThreads", {
+    part: "snippet",
+    videoId,
+    maxResults: String(REPLY_INTENSITY_SAMPLE_SIZE),
+    order: "relevance",
+  });
+  return (res?.items ?? []).reduce((sum, item) => sum + (item.snippet?.totalReplyCount ?? 0), 0);
 }

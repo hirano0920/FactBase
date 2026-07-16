@@ -7,6 +7,9 @@ import {
   twosidesFitBonus,
   freshnessFactor,
   commentIntensityBonus,
+  divisionScoreBonus,
+  isLopsidedWithoutHeat,
+  isLopsidedByPrediction,
   type PromotionCandidate,
   type SavedEvidence,
   type ActiveIssueForDedup,
@@ -24,6 +27,8 @@ function evidence(overrides: Partial<SavedEvidence> = {}) {
     officialEvents: [],
     gatheredAt: "",
     buzzScore: 3,
+    /** Selection V2: Heat' が無いと RANK_MIN で全滅するためテスト既定で熱量を付与 */
+    tweetCount: 2000,
     debateType: "policy",
     debatable: true,
   };
@@ -58,9 +63,8 @@ const threeOutlets: EvidenceBundle["news"] = [
 
 describe("selectTopicsForPromotion", () => {
 
-  it("media consensus: バズ前でも3媒体以上の一致があれば引き取り候補を公開する", () => {
+  it("media consensus: Selection V2では buzz=0 だと Buzz'×Heat'=0 で RANK_MIN 未達（出さない）", () => {
     const candidates: PromotionCandidate[] = [
-      // buzzScore0だが mediaConsensus かつ 3媒体 → 通す
       {
         id: "carry",
         title: "減税法案の与野党対立",
@@ -69,48 +73,66 @@ describe("selectTopicsForPromotion", () => {
         sourceUrls: [],
         evidence: evidence({ buzzScore: 0, news: threeOutlets, mediaConsensus: true, debateType: "policy" }),
       },
-      // mediaConsensusでも2媒体どまり（CONSENSUS_MIN_OUTLETS未満）→ 落とす
-      {
-        id: "weak",
-        title: "媒体不足",
-        category: "politics",
-        topicTerm: null,
-        sourceUrls: [],
-        evidence: evidence({ buzzScore: 0, news: sufficientNews, mediaConsensus: true, debateType: "policy" }),
-      },
-      // consensusフラグ無しの低buzzは従来通り落とす
-      {
-        id: "plain",
-        title: "低buzz",
-        category: "politics",
-        topicTerm: null,
-        sourceUrls: [],
-        evidence: evidence({ buzzScore: 0, news: threeOutlets, debateType: "policy" }),
-      },
     ];
-    const selected = selectTopicsForPromotion(candidates, 2, 3);
-    expect(selected.map((c) => c.id)).toEqual(["carry"]);
+    expect(selectTopicsForPromotion(candidates, 2, 3)).toHaveLength(0);
   });
 
-  it("単一プラットフォーム救済: コメントランキング一致かつ証拠十分ならminBuzzScore未満でも通す", () => {
+  it("media consensus + 十分な buzz/heat なら通る", () => {
     const candidates: PromotionCandidate[] = [
-      // buzzScore1（通常ゲート2未満）だがコメントランキング一致 → 通す
+      {
+        id: "carry",
+        title: "減税法案の与野党対立",
+        category: "politics",
+        topicTerm: "減税",
+        sourceUrls: [],
+        evidence: evidence({
+          buzzScore: 2,
+          tweetCount: 2500,
+          news: threeOutlets,
+          mediaConsensus: true,
+          debateType: "policy",
+        }),
+      },
+    ];
+    expect(selectTopicsForPromotion(candidates, 2, 3).map((c) => c.id)).toEqual(["carry"]);
+  });
+
+  it("コメントランキング救済: minBuzz未満でも Buzz'≥0.4 かつ Heat' があれば通す", () => {
+    const candidates: PromotionCandidate[] = [
+      // minBuzz=3 未満だがコメントランキング＋Buzz'=0.4＋Heat' → 通す
       candidate("discussed", {
         category: "society",
         evidence: evidence({
-          buzzScore: 1,
+          buzzScore: 2,
+          tweetCount: 2000,
           news: sufficientNews,
           buzzSources: ["yahoo_comment_ranking"],
           debateType: "norm_flare",
         }),
       }),
-      // buzzScore1でコメントランキング一致無し → 従来通り落とす
+      // コメント一致でも Buzz'=0.2 < 0.4 → V2下限で落とす
+      candidate("too-weak-buzz", {
+        category: "society",
+        evidence: evidence({
+          buzzScore: 1,
+          tweetCount: 2000,
+          news: sufficientNews,
+          buzzSources: ["yahoo_comment_ranking"],
+          debateType: "norm_flare",
+        }),
+      }),
+      // ランキング無し・minBuzz未満 → eligible自体から外す
       candidate("not-discussed", {
         category: "society",
-        evidence: evidence({ buzzScore: 1, news: sufficientNews, debateType: "norm_flare" }),
+        evidence: evidence({
+          buzzScore: 2,
+          tweetCount: 2000,
+          news: sufficientNews,
+          debateType: "norm_flare",
+        }),
       }),
     ];
-    const selected = selectTopicsForPromotion(candidates, 2, 3);
+    const selected = selectTopicsForPromotion(candidates, 3, 3);
     expect(selected.map((c) => c.id)).toEqual(["discussed"]);
   });
 
@@ -293,17 +315,18 @@ describe("selectTopicsForPromotion", () => {
     expect(selected.map((c) => c.id)).toEqual(["undefined-debatable"]);
   });
 
-  it("声明対立型は同buzzの政治候補より確実に1位になる（TwoSidesお手本）", () => {
-    const declarationNews: EvidenceBundle["news"] = [
-      { title: "事務所が声明を発表", source: "産経", url: "https://a", pubDate: "", region: "domestic" },
-      { title: "本人は疑惑を否定", source: "朝日", url: "https://b", pubDate: "", region: "domestic" },
-      { title: "契約解除をめぐる反論", source: "毎日", url: "https://c", pubDate: "", region: "domestic" },
-    ];
+  it("Selection V2: debateTypeボーナスではなく Buzz'×Heat' で並ぶ", () => {
     const candidates: PromotionCandidate[] = [
       candidate("politics", {
         title: "日銀の政策金利判断",
         category: "finance",
-        evidence: evidence({ buzzScore: 3, news: threeOutlets, debatable: true, debateType: "indicator" }),
+        evidence: evidence({
+          buzzScore: 3,
+          tweetCount: 500,
+          news: threeOutlets,
+          debatable: true,
+          debateType: "indicator",
+        }),
       }),
       candidate("sato", {
         title: "佐藤二朗と事務所の声明対立",
@@ -311,20 +334,26 @@ describe("selectTopicsForPromotion", () => {
         topicTerm: "佐藤二朗",
         evidence: evidence({
           buzzScore: 2,
-          news: declarationNews,
+          tweetCount: 800,
+          news: threeOutlets,
           debatable: true,
           debateType: "declaration",
-          voteQuestion: "事務所の対応をどう見る？",
         }),
       }),
-      candidate("economy", {
+      candidate("hot", {
         title: "円安の家計への影響",
         category: "economy",
-        evidence: evidence({ buzzScore: 4, news: threeOutlets, debatable: true, debateType: "indicator" }),
+        evidence: evidence({
+          buzzScore: 4,
+          tweetCount: 4000,
+          news: threeOutlets,
+          debatable: true,
+          debateType: "indicator",
+        }),
       }),
     ];
     const selected = selectTopicsForPromotion(candidates, 2, 3);
-    expect(selected[0]?.id).toBe("sato");
+    expect(selected[0]?.id).toBe("hot");
   });
 });
 
@@ -357,77 +386,66 @@ describe("twosidesFitBonus", () => {
   });
 });
 
-describe("weightedPromoteScore", () => {
-  it("debatable=falseはスコアを0.4倍に減点する", () => {
+describe("weightedPromoteScore (Selection V2)", () => {
+  it("Buzz'×Heat' の積（tweet無だと0）", () => {
     expect(
       weightedPromoteScore(
-        candidate("a", { evidence: evidence({ buzzScore: 5, debatable: true, debateType: "policy" }) }),
+        candidate("a", { evidence: evidence({ buzzScore: 5, tweetCount: undefined }) }),
         2,
       ),
-    ).toBeCloseTo(5.25);
-    expect(
-      weightedPromoteScore(
-        candidate("b", { evidence: evidence({ buzzScore: 5, debatable: false, debateType: "policy" }) }),
-        2,
-      ),
-    ).toBe(2);
+    ).toBe(0);
   });
 
-  it("媒体数が2未満だとoutletsFactorで比例減点される", () => {
-    expect(
-      weightedPromoteScore(candidate("a", { evidence: evidence({ buzzScore: 4, debateType: "policy" }) }), 1),
-    ).toBeCloseTo(2.25);
-    expect(
-      weightedPromoteScore(candidate("b", { evidence: evidence({ buzzScore: 4, debateType: "policy" }) }), 0),
-    ).toBeCloseTo(0.25);
+  it("tweetCountが高い方が上", () => {
+    const hot = weightedPromoteScore(
+      candidate("a", { evidence: evidence({ buzzScore: 3, tweetCount: 5000 }) }),
+      2,
+    );
+    const mild = weightedPromoteScore(
+      candidate("b", { evidence: evidence({ buzzScore: 3, tweetCount: 50 }) }),
+      2,
+    );
+    expect(hot).toBeGreaterThan(mild);
   });
 
-  it("媒体数2以上はoutletsFactor満点（3以上でも頭打ち）", () => {
-    expect(
-      weightedPromoteScore(candidate("a", { evidence: evidence({ buzzScore: 4, debateType: "policy" }) }), 2),
-    ).toBeCloseTo(4.25);
-    expect(
-      weightedPromoteScore(candidate("b", { evidence: evidence({ buzzScore: 4, debateType: "policy" }) }), 5),
-    ).toBeCloseTo(4.25);
+  it("露出だけ強くても熱量が弱いと沈む", () => {
+    const buzzOnly = weightedPromoteScore(
+      candidate("a", { evidence: evidence({ buzzScore: 5, tweetCount: 40 }) }),
+      2,
+    );
+    const balanced = weightedPromoteScore(
+      candidate("b", { evidence: evidence({ buzzScore: 3, tweetCount: 3000 }) }),
+      2,
+    );
+    expect(balanced).toBeGreaterThan(buzzOnly);
   });
 
-  it("声明対立はbuzz2でもbuzz4の一般候補を逆転できる", () => {
-    const declaration = candidate("sato", {
-      title: "事務所が声明を発表、本人は否定",
-      category: "entertainment",
-      evidence: evidence({ buzzScore: 2, debatable: true, news: threeOutlets, debateType: "declaration" }),
-    });
-    const plain = candidate("rate", {
-      title: "日銀の政策金利",
-      category: "finance",
-      evidence: evidence({ buzzScore: 4, debatable: true, news: threeOutlets, debateType: "indicator" }),
-    });
-    expect(weightedPromoteScore(declaration, 3)).toBeGreaterThan(weightedPromoteScore(plain, 3));
+  it("媒体数は Rank に影響しない（Gate側の証拠十分性で見る）", () => {
+    const a = weightedPromoteScore(
+      candidate("a", { evidence: evidence({ buzzScore: 4, tweetCount: 2000 }) }),
+      1,
+    );
+    const b = weightedPromoteScore(
+      candidate("b", { evidence: evidence({ buzzScore: 4, tweetCount: 2000 }) }),
+      5,
+    );
+    expect(a).toBeCloseTo(b);
   });
+});
 
-  it("鮮度減衰: 古い候補ほどスコアが下がる（updatedAt未指定は減衰なし＝後方互換）", () => {
-    const now = new Date("2026-07-10T12:00:00Z");
-    const fresh = candidate("fresh", {
-      evidence: evidence({ buzzScore: 4, debateType: "policy" }),
-      updatedAt: new Date(now.getTime() - 1 * 3_600_000),
-    });
-    const stale = candidate("stale", {
-      evidence: evidence({ buzzScore: 4, debateType: "policy" }),
-      updatedAt: new Date(now.getTime() - 30 * 3_600_000),
-    });
-    const noUpdatedAt = candidate("none", { evidence: evidence({ buzzScore: 4, debateType: "policy" }) });
-
-    expect(weightedPromoteScore(fresh, 2, now)).toBeGreaterThan(weightedPromoteScore(stale, 2, now));
-    expect(weightedPromoteScore(fresh, 2, now)).toBe(weightedPromoteScore(noUpdatedAt, 2, now));
-  });
-
-  it("36時間以上経過しても0にはならない（下限0.5倍で残る）", () => {
-    const now = new Date("2026-07-10T12:00:00Z");
-    const veryStale = candidate("very-stale", {
-      evidence: evidence({ buzzScore: 4, debateType: "policy" }),
-      updatedAt: new Date(now.getTime() - 100 * 3_600_000),
-    });
-    expect(weightedPromoteScore(veryStale, 2, now)).toBeGreaterThan(0);
+describe("selectTopicsForPromotion: RANK_MIN", () => {
+  it("Heatが無く rankScore=0 の候補は選ばない", () => {
+    const candidates: PromotionCandidate[] = [
+      candidate("cold", {
+        evidence: evidence({
+          buzzScore: 5,
+          tweetCount: undefined,
+          news: threeOutlets,
+          debateType: "policy",
+        }),
+      }),
+    ];
+    expect(selectTopicsForPromotion(candidates, 2, 3)).toHaveLength(0);
   });
 });
 
@@ -464,6 +482,197 @@ describe("commentIntensityBonus", () => {
     });
     const steady = candidate("b", { evidence: evidence({ commentCount: 1000 }) });
     expect(commentIntensityBonus(surging)).toBeGreaterThan(commentIntensityBonus(steady));
+  });
+});
+
+describe("divisionScoreBonus", () => {
+  it("externalPoll未一致は0", () => {
+    expect(divisionScoreBonus(candidate("a", { evidence: evidence({}) }))).toBe(0);
+  });
+
+  it("拮抗している設問ほど高い", () => {
+    const split = candidate("a", {
+      evidence: evidence({
+        externalPoll: {
+          question: "q",
+          url: "https://x",
+          choices: [{ choice: "for", count: 51, percent: 51 }, { choice: "against", count: 49, percent: 49 }],
+          divisionScore: 0.98,
+        },
+      }),
+    });
+    const lopsided = candidate("b", {
+      evidence: evidence({
+        externalPoll: {
+          question: "q",
+          url: "https://x",
+          choices: [{ choice: "for", count: 99, percent: 99 }, { choice: "against", count: 1, percent: 1 }],
+          divisionScore: 0.02,
+        },
+      }),
+    });
+    expect(divisionScoreBonus(split)).toBeGreaterThan(divisionScoreBonus(lopsided));
+  });
+
+  it("externalPollが無い場合はcommentStanceSpreadをconfidence込みで使う", () => {
+    const splitByComments = candidate("a", {
+      evidence: evidence({ commentStanceSpread: { split: true, confidence: 0.8 } }),
+    });
+    const notSplit = candidate("b", {
+      evidence: evidence({ commentStanceSpread: { split: false, confidence: 0.9 } }),
+    });
+    expect(divisionScoreBonus(splitByComments)).toBeCloseTo(0.8);
+    expect(divisionScoreBonus(notSplit)).toBe(0);
+  });
+
+  it("externalPollとcommentStanceSpreadの両方があればexternalPollを優先する", () => {
+    const both = candidate("a", {
+      evidence: evidence({
+        externalPoll: {
+          question: "q",
+          url: "https://x",
+          choices: [{ choice: "for", count: 60, percent: 60 }, { choice: "against", count: 40, percent: 40 }],
+          divisionScore: 0.8,
+        },
+        commentStanceSpread: { split: true, confidence: 0.1 },
+      }),
+    });
+    expect(divisionScoreBonus(both)).toBeCloseTo(0.8);
+  });
+});
+
+describe("isLopsidedWithoutHeat", () => {
+  it("externalPollが無ければ判定しない（データ無し≠一方的）", () => {
+    expect(isLopsidedWithoutHeat(evidence({}))).toBe(false);
+  });
+
+  it("拮抗している設問（divisionScoreが高い）は一方的とみなさない", () => {
+    expect(
+      isLopsidedWithoutHeat(
+        evidence({
+          externalPoll: {
+            question: "国葬を実施すべきか",
+            url: "https://x",
+            choices: [{ choice: "for", count: 70, percent: 70 }, { choice: "against", count: 30, percent: 30 }],
+            divisionScore: 0.4,
+          },
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("ほぼ全会一致（divisionScore低）でも白熱の実測（コメント急増）があれば一方的扱いしない", () => {
+    expect(
+      isLopsidedWithoutHeat(
+        evidence({
+          externalPoll: {
+            question: "q",
+            url: "https://x",
+            choices: [{ choice: "for", count: 99, percent: 99 }, { choice: "against", count: 1, percent: 1 }],
+            divisionScore: 0.02,
+          },
+          commentCountSurge: true,
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("ほぼ全会一致かつ白熱の実測も無ければ一方的と判定する", () => {
+    expect(
+      isLopsidedWithoutHeat(
+        evidence({
+          externalPoll: {
+            question: "q",
+            url: "https://x",
+            choices: [{ choice: "for", count: 99, percent: 99 }, { choice: "against", count: 1, percent: 1 }],
+            divisionScore: 0.02,
+          },
+        }),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("isLopsidedByPrediction", () => {
+  it("予測値が無ければ判定しない（LLM判定失敗時はfail-open）", () => {
+    expect(isLopsidedByPrediction(undefined, evidence({}))).toBe(false);
+  });
+
+  it("拮抗する予測（predictedDivisionScoreが高い）は一方的とみなさない", () => {
+    expect(isLopsidedByPrediction(0.4, evidence({}))).toBe(false);
+  });
+
+  it("ほぼ一方的な予測でも白熱の実測（コメント急増）があれば一方的扱いしない", () => {
+    expect(isLopsidedByPrediction(0.02, evidence({ commentCountSurge: true }))).toBe(false);
+  });
+
+  it("ほぼ一方的な予測かつ白熱の実測も無ければ一方的と判定する（例:『殺人は良い？悪い？』型）", () => {
+    expect(isLopsidedByPrediction(0.02, evidence({}))).toBe(true);
+  });
+});
+
+describe("selectTopicsForPromotion: 一方的トピック（2026-07-16: ハードゲート撤去、Heat'floor/DVSソフトランクのみで判定）", () => {
+  it("ほぼ全会一致かつ無白熱の候補は、他条件を満たしても選ばれない（Heat'floor不足で自然に落ちる）", () => {
+    const lopsidedNoHeat: PromotionCandidate = candidate("lopsided", {
+      title: "誰も擁護しない出来事への賛否",
+      category: "politics",
+      evidence: evidence({
+        buzzScore: 5,
+        news: threeOutlets,
+        tweetCount: undefined, // evidence()の既定tweetCount=2000を明示的に外し、本当に無白熱のケースにする
+        externalPoll: {
+          question: "q",
+          url: "https://x",
+          choices: [{ choice: "for", count: 99, percent: 99 }, { choice: "against", count: 1, percent: 1 }],
+          divisionScore: 0.02,
+        },
+      }),
+    });
+    const selected = selectTopicsForPromotion([lopsidedNoHeat], 1, 5);
+    expect(selected).toHaveLength(0);
+  });
+
+  it("同じくほぼ全会一致でも、白熱の実測（コメント急増）があれば選ばれる", () => {
+    const lopsidedButHeated: PromotionCandidate = candidate("heated", {
+      title: "1億円の国葬費用への賛否",
+      category: "politics",
+      evidence: evidence({
+        buzzScore: 5,
+        news: threeOutlets,
+        commentCountSurge: true,
+        externalPoll: {
+          question: "q",
+          url: "https://x",
+          choices: [{ choice: "for", count: 99, percent: 99 }, { choice: "against", count: 1, percent: 1 }],
+          divisionScore: 0.02,
+        },
+      }),
+    });
+    const selected = selectTopicsForPromotion([lopsidedButHeated], 1, 5);
+    expect(selected).toHaveLength(1);
+  });
+
+  it("Yahoo投票はほぼ全会一致でも、tweetCountが大きければ選ばれる（旧ハードゲートの過剰除外を修正）", () => {
+    // 旧isLopsidedWithoutHeatはhasHeatEvidence（Yahooコメント数/急増のみ）しか見ておらず、
+    // X上で猛烈にバズっている（tweetCount大）候補でも一律ハードゲートで弾いていた。
+    // ハードゲート撤去後は、実際に強いHeat'があれば通る（DVSはランクを下げるだけ）。
+    const lopsidedButTweeting: PromotionCandidate = candidate("tweeting", {
+      title: "大規模バズだがYahoo投票は一方的",
+      category: "politics",
+      evidence: evidence({
+        buzzScore: 5,
+        news: threeOutlets,
+        tweetCount: 5000,
+        externalPoll: {
+          question: "q",
+          url: "https://x",
+          choices: [{ choice: "for", count: 99, percent: 99 }, { choice: "against", count: 1, percent: 1 }],
+          divisionScore: 0.02,
+        },
+      }),
+    });
+    const selected = selectTopicsForPromotion([lopsidedButTweeting], 1, 5);
+    expect(selected).toHaveLength(1);
   });
 });
 

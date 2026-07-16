@@ -8,7 +8,7 @@
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { RADAR } from "../../src/lib/constants";
 import { jstDayStart } from "../../src/lib/radar";
-import { generateVerifiedArticle, violatesBan } from "../../src/lib/radar-article";
+import { generateVerifiedArticle, violatesBan, hasFactualClaimIssue } from "../../src/lib/radar-article";
 import { fetchPrimaryExcerpts } from "./lib/primary-text";
 import { fetchReportExcerpts } from "./lib/report-text";
 import { ensureEvidence, evidenceToArticleFacts, internationalNewsSources, pollingNewsSources } from "./lib/enrich";
@@ -102,12 +102,14 @@ async function main() {
 
       // 機械チェック1: 主張の裏取り（Writer=GPT-5とは独立のnano照合）が最終試行後も不合格ならHELD
       if (!verified) {
+        // 2026-07-16: 事実検証失敗とスタイル要件不足を区別する（詳細はpromote.tsの同種修正を参照）
+        const prefix = hasFactualClaimIssue(unresolvedClaims) ? "unverified_claim" : "style_gate";
         const reasons = unresolvedClaims.map((c) => `${c.text}(${c.reason})`).join(" / ");
         console.warn(`  ⚠️ 主張の裏取り不合格「${reasons}」→ 公開せずHELD`);
         if (candidate) {
           await prisma.topicCandidate.update({
             where: { id: candidate.id },
-            data: { status: "HELD", decision: `${candidate.decision} / unverified_claim:${reasons.slice(0, 200)}` },
+            data: { status: "HELD", decision: `${candidate.decision} / ${prefix}:${reasons.slice(0, 200)}` },
           });
         }
         continue;

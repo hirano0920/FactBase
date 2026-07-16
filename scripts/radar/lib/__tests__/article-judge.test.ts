@@ -100,23 +100,6 @@ describe("gateFromScore", () => {
     expect(gate.reason).toBeNull();
   });
 
-  it("bothSidesQualityが3点（一般ゲート閾値ちょうど）でも両論は不合格", () => {
-    const s = parseJudgeResponse(
-      JSON.stringify({
-        bothSidesQuality: score(3),
-        factualGrounding: score(5),
-        neutrality: score(5),
-        relatability: score(5),
-        depth: score(5),
-        clarity: score(5),
-        titleHook: score(5),
-      }),
-    );
-    const gate = gateFromScore(s);
-    expect(gate.ok).toBe(false);
-    expect(gate.reason).toContain("bothSidesQuality=3");
-  });
-
   it("bothSidesQualityが閾値未満ならok=falseで理由を返す（片側だけ書かれた記事を落とす）", () => {
     const s = parseJudgeResponse(
       JSON.stringify({

@@ -19,7 +19,9 @@ export type StructureFailReason =
   | "sides_ungrounded"
   | "sides_asymmetric"
   | "lead_opening_mismatch"
-  | "relatability_missing";
+  | "relatability_missing"
+  | "sentence_too_long"
+  | "sides_axis_mismatch";
 
 export interface StructureIssue {
   reason: StructureFailReason;
@@ -182,7 +184,7 @@ function isSideHeading(h: string | null): boolean {
   );
 }
 
-function sideSectionsPlain(
+export function sideSectionsPlain(
   articleHtml: string,
 ): { heading: string; text: string; items: string[] }[] {
   return splitArticleSections(articleHtml)
@@ -412,6 +414,40 @@ export function checkRelatabilityBridge(
   };
 }
 
+/**
+ * 1文が長すぎないか（読みやすさ）。冒頭・bulletsに複数事実を詰め込んだ結果、
+ * 「〜が報じています」の帰属を1回にまとめようとして長い複文になるケースを想定。
+ * SYSTEM prompt上は「1文60字以内」だが、機械ゲートは明確な悪文（詰め込み複文）だけを
+ * 弾くよう緩めに(90字)設定し、軽微な超過での無駄な差し戻し・再生成コストを避ける。
+ */
+const MAX_SENTENCE_CHARS = 150;
+
+function splitSentences(text: string): string[] {
+  return text
+    .split(/(?<=[。．])/u)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+export function checkSentenceLength(article: {
+  articleHtml: string;
+  bullets?: string[];
+}): StructureIssue | null {
+  const opening = openingSection(article.articleHtml);
+  const texts = [opening?.text ?? "", ...(article.bullets ?? []).map(bulletBody)];
+  for (const text of texts) {
+    for (const sentence of splitSentences(text)) {
+      if (sentence.length > MAX_SENTENCE_CHARS) {
+        return {
+          reason: "sentence_too_long",
+          message: `文が長すぎます（${sentence.length}字）: 「${sentence.slice(0, 40)}…」。1文に複数の事実を詰め込まず、文を分割してください（同じ媒体名の帰属を保ったまま「〜と報じています。また、〜とも伝えています。」のように2文に分けてよい）。1文60字程度を目安にしてください。`,
+        };
+      }
+    }
+  }
+  return null;
+}
+
 export function findStructureIssues(
   article: { articleHtml: string; lead?: string; bullets?: string[] },
   opts?: StructureCheckOptions,
@@ -427,9 +463,25 @@ export function findStructureIssues(
   if (sides) issues.push(sides);
   const leadMatch = checkLeadOpeningMatch(article);
   if (leadMatch) issues.push(leadMatch);
-  const relatability = checkRelatabilityBridge(article.articleHtml, opts?.issueTitle);
-  if (relatability) issues.push(relatability);
+  const sentenceLength = checkSentenceLength(article);
+  if (sentenceLength) issues.push(sentenceLength);
   return issues;
+}
+
+/**
+ * 保存直前の最終ゲート。両側mini修理等、生成後にarticleHtmlを差し替えるリペア処理は
+ * lead/bulletsを再同期せず、findStructureIssuesも再実行しないため、この関数を通さずに
+ * 保存すると「repairで直したはずが別の不整合を持ち込む」バグを再発させる
+ * （2026-07-15、promote.ts/followup.ts両方で実際に発生: lead≠冒頭セクション）。
+ * 呼び出し側は必ずDB保存直前にこれを通し、issuesが空でなければ保存せずHELD/維持すること。
+ */
+export function finalizeArticleForSave(
+  article: { lead: string; bullets: string[]; articleHtml: string },
+  opts?: StructureCheckOptions,
+): { article: { lead: string; bullets: string[]; articleHtml: string }; issues: StructureIssue[] } {
+  const synced = normalizeArticleSurfaces(article);
+  const issues = findStructureIssues(synced, opts);
+  return { article: synced, issues };
 }
 
 /** 文境界で切り詰め（句点があればそこまで） */
@@ -578,12 +630,60 @@ export function autoRepairArticle(
 ): { lead: string; bullets: string[]; articleHtml: string } {
   let articleHtml = injectRelatabilityBridge(article.articleHtml, opts?.issueTitle);
   articleHtml = stripTextbookSideItems(articleHtml);
+  articleHtml = removeEmptySections(articleHtml);        // ★ B1
+  articleHtml = normalizeHeadingHierarchy(articleHtml);   // ★ B2
   const synced = normalizeArticleSurfaces({
     lead: article.lead,
     bullets: article.bullets,
     articleHtml,
   });
   return { lead: synced.lead, bullets: synced.bullets, articleHtml };
+}
+
+// ─── B1: 空セクション自動削除 ──────────────────────────
+
+/**
+ * bodyHtml の中身が空または<li>1個だけのセクションを削除する。
+ * 「まだ分からないこと」が1個の<li>しか無いケースが典型的な除去対象。
+ */
+export function removeEmptySections(articleHtml: string): string {
+  const sections = splitArticleSections(articleHtml);
+  const kept: string[] = [];
+  // Thin sections to potentially remove
+  const thin: { s: (typeof sections)[number]; idx: number }[] = [];
+  for (let idx = 0; idx < sections.length; idx++) {
+    const s = sections[idx];
+    if (s.heading == null && s.bodyHtml.trim().length === 0) { thin.push({ s, idx }); continue; }
+    if (s.heading == null) { kept.push(s.bodyHtml); continue; }
+    const liMatches = s.bodyHtml.match(/<li>/gi);
+    const liCount = liMatches ? liMatches.length : 0;
+    const textItems = (s.bodyHtml.match(/<li>[\s\S]*?<\/li>/gi) || [])
+      .map((li) => li.replace(/<[^>]+>/g, "").trim())
+      .filter((t) => t.length >= 3);
+    if (liCount === 0 && s.bodyHtml.trim().length < 20) { thin.push({ s, idx }); continue; }
+    if (liCount > 0 && textItems.length === 0) { thin.push({ s, idx }); continue; }
+    if (liCount === 1 && s.bodyHtml.trim().length < 40) { thin.push({ s, idx }); continue; }
+    kept.push(`<h2>${s.heading}</h2>${s.bodyHtml}`);
+  }
+  // Thinセクションを全て削除すると空になる場合、削除しない（安全ガード）
+  if (thin.length > 0 && kept.length === 0) {
+    // 全てのthinセクションを維持（空の前文だけ除く）
+    for (const { s } of thin) {
+      if (s.heading == null) continue;
+      kept.push(`<h2>${s.heading}</h2>${s.bodyHtml}`);
+    }
+  }
+  return kept.join("");
+}
+
+// ─── B2: 見出し階層の正規化 ──────────────────────────
+
+/**
+ * articleHtml内のh3をh2に統一する。
+ * 現在のWriterはh2のみを使う設計だが、将来h3が混ざったときに崩れないよう保護する。
+ */
+export function normalizeHeadingHierarchy(articleHtml: string): string {
+  return articleHtml.replace(/<h3>/gi, "<h2>").replace(/<\/h3>/gi, "</h2>");
 }
 
 /**
@@ -644,9 +744,20 @@ export interface ExcerptThicknessResult {
   outletCount: number;
 }
 
-const THIN_MIN_TOTAL_CHARS = 400;
-const THIN_MIN_CONCRETE = 1;
-const THIN_MIN_OUTLETS = 1;
+const THIN_MIN_TOTAL_CHARS = 1500;
+const THIN_MIN_CONCRETE = 3;
+const THIN_MIN_OUTLETS = 2;
+
+/** concreteSignalCountの実測: match()で全一致を得るためglobal regexを作る（元のINCIDENT_SUBSTANCEはtest/search用でg無し） */
+function countUniqueConcreteSignals(text: string): number {
+  const signals = new Set<string>();
+  const re = new RegExp(INCIDENT_SUBSTANCE.source, "g");
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    signals.add(m[0]);
+  }
+  return signals.size;
+}
 
 /**
  * 報道抜粋が「記事を書ける厚さ」があるか。薄い材料で上手く書け、は限界があるため生成前に弾く。
@@ -657,8 +768,7 @@ export function assessReportExcerptThickness(
   const outletCount = new Set(excerpts.map((e) => e.feed || "unknown")).size;
   const totalChars = excerpts.reduce((sum, e) => sum + (e.text?.length ?? 0), 0);
   const blob = excerpts.map((e) => e.text ?? "").join("\n");
-  const concreteMatches = blob.match(INCIDENT_SUBSTANCE) ?? [];
-  const concreteSignalCount = new Set(concreteMatches).size;
+  const concreteSignalCount = countUniqueConcreteSignals(blob);
 
   if (excerpts.length === 0) {
     return {

@@ -4,7 +4,7 @@
  * 政治ヒント必須にはしない（TwoSides: 社会炎上・生活争点も通す）。
  */
 import { isOutOfScopeTopic } from "./radar";
-import { IN_SCOPE_BUZZ_HINTS, YAHOO_RT_NEWS_GENRE } from "./buzz-scope";
+import { DEBATE_FRICTION_HINTS, IN_SCOPE_BUZZ_HINTS, YAHOO_RT_NEWS_GENRE } from "./buzz-scope";
 
 /** 単語だけのノイズ（国名・選手名・チーム名等） */
 const SHORT_NOISE =
@@ -43,7 +43,8 @@ export function isBuzzGarbageTerm(term: string, genre?: string): boolean {
 /**
  * discover ② mini 前の機械判定。
  * - yahoo_news / youtube: ソース由来を信頼 — ゴミ除外のみ
- * - yahoo_rt / trends: ゴミでなければ通す（政治ヒントは必須ではない。あれば加点的に通す）
+ * - yahoo_rt / trends: 政治専用ではない。TwoSides向き（時事・社会・生活争点・炎上）を通し、
+ *   スポーツ・エンタメ・商品名だけの枠は落とす。最終の賛否可否は mini に任せる。
  */
 export function shouldKeepBuzzTerm(input: BuzzTermInput): boolean {
   const t = input.term.trim();
@@ -54,9 +55,16 @@ export function shouldKeepBuzzTerm(input: BuzzTermInput): boolean {
   if (IN_SCOPE_BUZZ_HINTS.test(t)) return true;
 
   if (input.source === "yahoo_rt") {
-    if (input.genre && /スポーツ|エンタメ|ゲーム|アニメ|芸能/i.test(input.genre)) return false;
+    if (input.genre && /スポーツ|エンタメ|ゲーム|アニメ|芸能|グルメ|ライフ|占い|天気|恋愛|美容|ファッション|旅行/i.test(input.genre)) {
+      return false;
+    }
+    // ニュース／社会／経済／ビジネス等 — 政治に限らない
     if (input.genre && YAHOO_RT_NEWS_GENRE.test(input.genre) && t.length >= 4) return true;
-    if (t.length >= 6) return true;
+    // genre空欄: 長さだけでは通さない（TWICE BEST等の誤爆防止）が、
+    // 障害・値上げ・炎上・対立マーカーがあればサイト適合候補として通す
+    if ((!input.genre || !input.genre.trim()) && t.length >= 4 && DEBATE_FRICTION_HINTS.test(t)) {
+      return true;
+    }
   }
 
   // Trends: ゴミでなければ mini に渡す（政治語ヒント必須にしない）

@@ -80,20 +80,37 @@ export async function buildClaimDiff(excerpts: OutletExcerptInput[]): Promise<Cl
 }
 
 /** Writerプロンプトに埋め込む用のテキストブロック。3カテゴリとも空ならnullを返す */
-export function formatClaimDiffBlock(diff: ClaimDiffResult): string {
+export function formatClaimDiffBlock(diff: ClaimDiffResult, excerpts?: OutletExcerptInput[]): string {
   if (diff.agreements.length === 0 && diff.conflicts.length === 0 && diff.outletOnly.length === 0) {
     return "";
   }
+
+  // 媒体ごとの角度サマリ（outletOnly と excerpts から機械的に作成）
+  const outletLines: string[] = [];
+  if (excerpts && excerpts.length > 0) {
+    const seen = new Set<string>();
+    for (const e of excerpts) {
+      const key = e.feed;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const relevantOnly = diff.outletOnly.filter((o) => o.outlet === e.feed);
+      const extra = relevantOnly.length > 0 ? `（独自報道: ${relevantOnly.map((o) => o.claim.slice(0, 60)).join(" / ")}）` : "";
+      outletLines.push(`- ${key}: ${e.title.slice(0, 80)}${extra}`);
+    }
+  }
+
+  const outletBlock = outletLines.length > 0 ? `各媒体の角度:\n${outletLines.join("\n")}\n` : "";
   const agreementsBlock =
-    diff.agreements.length > 0 ? `各社共通:\n${diff.agreements.map((a) => `- ${a}`).join("\n")}` : "";
+    diff.agreements.length > 0 ? `各社共通:\n${diff.agreements.map((a) => `- ${a}`).join("\n")}\n` : "";
   const conflictsBlock =
-    diff.conflicts.length > 0 ? `\n媒体間で食い違い:\n${diff.conflicts.map((c) => `- ${c}`).join("\n")}` : "";
+    diff.conflicts.length > 0 ? `媒体間で食い違い:\n${diff.conflicts.map((c) => `- ${c}`).join("\n")}\n` : "";
   const outletOnlyBlock =
     diff.outletOnly.length > 0
-      ? `\n特定媒体限定の主張（他媒体の裏付けなし。安易に「共通見解」として書かない。無関係な事例の混入に注意）:\n${diff.outletOnly
+      ? `特定媒体限定（他社裏付けなし。安易に共通見解と書かない）:\n${diff.outletOnly
           .map((o) => `- [${o.outlet}] ${o.claim}`)
           .join("\n")}`
       : "";
-  return `\n\n# 媒体横断diff（機械的な事前比較。生の報道抜粋と併せて使うこと）
-${agreementsBlock}${conflictsBlock}${outletOnlyBlock}`;
+
+  return `\n\n# 媒体横断比較（最重要: このブロックを「各社は何を伝えているか」の素材にすること）
+${outletBlock}${agreementsBlock}${conflictsBlock}${outletOnlyBlock}`;
 }

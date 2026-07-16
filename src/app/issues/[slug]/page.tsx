@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { SummaryCard } from "@/components/issue/summary-card";
+import { YahooPollReference } from "@/components/issue/yahoo-poll-reference";
 import { IssueTimelineLive } from "@/components/issue/issue-timeline-live";
 import {
   IssueBookmarkSlot,
@@ -96,11 +97,16 @@ export default async function IssuePage({ params }: IssuePageProps) {
                     公式発表あり
                   </span>
                 )}
+                {issue.confirmation === "reported" && (
+                  <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-amber-200">
+                    報道ベース・真偽は未確認
+                  </span>
+                )}
                 {/* 5媒体前後を毎回自分で見比べなくて済む、というタイパの訴求。記事を開く前の
                     最初のスクリーンで見せることで「このサイトだけ見ればいい」を伝える */}
                 {(issue.summary.sourceCount ?? issue.summary.sources?.length ?? 0) > 0 && (
                   <span className="flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-blue-700 ring-1 ring-blue-200">
-                    🔎 {issue.summary.sourceCount ?? issue.summary.sources.length}件のソースを横断比較済み
+                    🔎 {issue.summary.sourceCount ?? issue.summary.sources.length}件のソースを参照
                   </span>
                 )}
               </div>
@@ -135,6 +141,11 @@ export default async function IssuePage({ params }: IssuePageProps) {
                         争点ごとに具体的に作った設問（例:「国会前デモの抗議、妥当だと思いますか？」）が
                         投票の意思決定点では見えなくなっていた */}
                     <p className="mb-4 text-base font-bold text-ink">{issue.title}</p>
+                    {issue.summary.externalPoll && (
+                      <div className="mx-auto max-w-md text-left">
+                        <YahooPollReference poll={issue.summary.externalPoll} />
+                      </div>
+                    )}
                     <div className="mx-auto max-w-md">
                       <IssueVoteSlot
                         issueId={issue.id}

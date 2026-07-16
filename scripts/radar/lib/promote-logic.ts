@@ -10,6 +10,7 @@ import {
   resolveDebateType,
   type DebateType,
 } from "../../../src/lib/debate-type";
+import { selectionV2RankScore, passesSelectionV2, resolveDivisionScore } from "./selection-v2";
 
 export type SavedEvidence = EvidenceBundle & {
   buzzScore?: number;
@@ -44,6 +45,28 @@ export type SavedEvidence = EvidenceBundle & {
   commentCount?: number;
   /** 前回調査からcommentCountSurgeThreshold以上増えた＝炎上が加速中 */
   commentCountSurge?: boolean;
+  /**
+   * Yahoo!リアルタイム急上昇の tweetCount（X投稿量ベース）。
+   * Selection V2 の Heat' 本命。未配線の旧候補は undefined（副熱量のみで上限0.55）。
+   */
+  tweetCount?: number;
+  /** 突合できたYouTube動画の再生数（「実際に見られている」の実測。videos.listのstatisticsから取得） */
+  youtubeViewCount?: number;
+  /** 突合できたYouTube動画のコメント数（「議論になっている」の実測。Yahooコメント数と同じ役割） */
+  youtubeCommentCount?: number;
+  /** 突合できたYouTube動画のいいね数（「共感を集めている」の実測。viewCountより熱量指標として鋭い） */
+  youtubeLikeCount?: number;
+  /**
+   * 突合できたYouTube動画の上位コメントへの返信数合計。いいね数と違い「賛同されて終わる」のではなく
+   * 実際に応酬（賛否のやり取り）が起きていることの実測シグナル（totalReplyCountの合計）。
+   */
+  youtubeReplyCount?: number;
+  /**
+   * assessDebateLegitimacy（Gate）が抜粋から推定したLLM予測の分断度。実測投票・コメント摩擦度が
+   * どちらも無い場合の最後のフォールバックとしてresolveDivisionScoreが使う（2026-07-16、
+   * isLopsidedByPredictionのハードゲート撤去に伴い、代わりにソフトランクへ組み込んだ）。
+   */
+  predictedDivisionScore?: number;
 };
 
 /** media consensus 経路で公開を許す最低媒体数（通常の証拠十分性2より高く設定し乱発を防ぐ） */
@@ -116,6 +139,17 @@ export function commentIntensityBonus(candidate: PromoteScoreInput): number {
 }
 
 /**
+ * 分断シグナルの実測ボーナス。resolveDivisionScore（selection-v2.ts）が信頼度順
+ * （実測投票 > コメント反応の摩擦度実測 > コメント文面のLLM判定）に解決した1つの値をそのまま使う
+ * （旧: このファイルにexternalPoll/commentStanceSpreadを個別に見る重複ロジックがあったが統合した）。
+ */
+const DIVISION_SCORE_MAX_BONUS = 1;
+
+export function divisionScoreBonus(candidate: PromoteScoreInput): number {
+  return resolveDivisionScore(candidate.evidence) * DIVISION_SCORE_MAX_BONUS;
+}
+
+/**
  * TwoSides 適合ボーナス（eligible 内の並び順のみ）。
  * debateType 本線ボーナス + 声明対立の媒体厚み。
  */
@@ -131,13 +165,21 @@ export function twosidesFitBonus(candidate: PromoteScoreInput, distinctNewsOutle
 }
 
 /**
- * promote選定の重み付きスコア（sort key）。debatable=false は減点、
- * debateType 本線ボーナスで声明対立・社会炎上などを上位へ。
- * 選定の可否（eligible）は buzz×証拠×debateType の別判定。ここは並び順のみ。
- * 鮮度減衰（freshnessFactor）はbase側にのみ掛け、debateTypeボーナスは満額のまま
- * （古くても本線debateTypeへの適合自体は変わらないため）。
+ * promote選定の並び順スコア（Selection V2）。
+ * rankScore = Buzz' × Heat' × DVS'（docs/PIPELINE_SELECTION_V2.md）。
+ * distinctNewsOutlets / now はシグネチャ互換のため残すが Rank には使わない
+ * （媒体厚みは eligible の証拠十分性、鮮度は tweetCount の鮮度で実質カバー）。
  */
 export function weightedPromoteScore(
+  candidate: PromoteScoreInput,
+  _distinctNewsOutlets: number = 0,
+  _now: Date = new Date(),
+): number {
+  return selectionV2RankScore(candidate.evidence).rankScore;
+}
+
+/** @deprecated 旧加算式。比較・回帰用に残す */
+export function weightedPromoteScoreLegacy(
   candidate: PromoteScoreInput,
   distinctNewsOutlets: number,
   now: Date = new Date(),
@@ -147,7 +189,12 @@ export function weightedPromoteScore(
   const outletsFactor = Math.min(1, distinctNewsOutlets / 2);
   const base =
     (evidence.buzzScore ?? 0) * debatableFactor * outletsFactor * freshnessFactor(candidate.updatedAt, now);
-  return base + twosidesFitBonus(candidate, distinctNewsOutlets) + commentIntensityBonus(candidate);
+  return (
+    base +
+    twosidesFitBonus(candidate, distinctNewsOutlets) +
+    commentIntensityBonus(candidate) +
+    divisionScoreBonus(candidate)
+  );
 }
 
 /**
@@ -158,13 +205,62 @@ export function weightedPromoteScore(
  */
 const COMMENT_RANKING_MIN_BUZZ_SCORE = 1;
 
-function isEligibleForPromotion(
+/** コメント急増、または一定数以上のコメント＝「実際に白熱している」実測の有無 */
+export function hasHeatEvidence(evidence: SavedEvidence): boolean {
+  return evidence.commentCountSurge === true || (evidence.commentCount ?? 0) >= 1000;
+}
+
+/**
+ * Yahoo!投票の上位2択の差がこれ以上（≒ほぼ全会一致）なら「実質フォーラム不要」とみなす閾値。
+ * divisionScore <= 0.15 は上位2択の差が85pt以上（例: 92.5/7.5等）に相当する。
+ */
+const LOPSIDED_MAX_DIVISION_SCORE = 0.15;
+
+/**
+ * 「拮抗している」か「（偏っていても）白熱している」のどちらも実測できない候補は、
+ * TwoSidesのスレッドが盛り上がらない一方的トピック（例: 誰も擁護しない出来事への賛否）である
+ * 可能性が高いという判定。
+ *
+ * 2026-07-16: ハードゲート（isEligibleForPromotion）としての利用は撤去した。
+ * 「実際の世論がどうなるか」に関する判定は、実測投票だろうがAI予測（旧isLopsidedByPrediction）
+ * だろうが、母集団・framingのズレという共通の弱点を持つ一種のproxyでしかなく、
+ * 単独のハードゲートで記事の生死を決めるのは判断ミスの実害が大きすぎる
+ * （公開しなかった記事は後から答え合わせができない）。今はresolveDivisionScore経由で
+ * DVS'（独立因子）/ divisionScoreBonusのソフトランクにのみ反映する。この関数自体は
+ * audit-selection-v2.tsの監査表示・回帰確認用に残す。
+ */
+export function isLopsidedWithoutHeat(evidence: SavedEvidence): boolean {
+  if (!evidence.externalPoll) return false;
+  if (evidence.externalPoll.divisionScore > LOPSIDED_MAX_DIVISION_SCORE) return false;
+  return !hasHeatEvidence(evidence);
+}
+
+/**
+ * 実測投票（Yahoo!投票）が無いトピックのための代替判定（predictedDivisionScoreベース）。
+ * 2026-07-16: isLopsidedWithoutHeatと同じ理由でハードゲートとしての利用は撤去。
+ * 監査表示用に残す。
+ */
+export function isLopsidedByPrediction(
+  predictedDivisionScore: number | undefined,
+  evidence: SavedEvidence,
+): boolean {
+  if (predictedDivisionScore == null || !Number.isFinite(predictedDivisionScore)) return false;
+  if (predictedDivisionScore > LOPSIDED_MAX_DIVISION_SCORE) return false;
+  return !hasHeatEvidence(evidence);
+}
+
+export function isEligibleForPromotion(
   c: PromotionCandidate,
   suff: ReturnType<typeof evaluateBuzzPromoteSufficiency>,
   minBuzzScore: number,
 ): boolean {
   if (c.evidence.debatable === false) return false;
   if (!isPromotableDebateType(resolveCandidateDebateType(c))) return false;
+  // isLopsidedWithoutHeatによるハードゲートは撤去（2026-07-16）。
+  // 「実際の世論がどうなるか」に関する判定は実測投票だろうがAI予測だろうが、
+  // resolveDivisionScore経由でDVS'（独立因子）/ divisionScoreBonus（旧加算）のソフトランクに
+  // 一本化する（詳細はisLopsidedWithoutHeatのJSDoc参照）。ハードゲートは
+  // debatable/debateTypeのような論理的に確定できるものだけに限定する。
 
   if ((c.evidence.buzzScore ?? 0) >= minBuzzScore && suff.sufficient) return true;
   if (c.evidence.mediaConsensus && suff.distinctNewsOutlets >= CONSENSUS_MIN_OUTLETS) return true;
@@ -180,7 +276,9 @@ function isEligibleForPromotion(
 
 /**
  * buzzScore と証拠十分性、かつ本線 debateType を満たす候補だけを残し、
- * 重み付きスコア順で並べる。同一カテゴリ偏りは maxPerCategory で抑える。
+ * Selection V2（Buzz'×Heat'×DVS'＋Buzz/Heat下限）順で並べる。
+ * 同一カテゴリ偏りは maxPerCategory で抑える。
+ * 両論Gateは抜粋取得後（promote researchCandidate）で別途必須。
  */
 export function selectTopicsForPromotion(
   candidates: PromotionCandidate[],
@@ -192,6 +290,7 @@ export function selectTopicsForPromotion(
   const eligible = candidates
     .map((c) => ({ c, suff: evaluateBuzzPromoteSufficiency(c.evidence) }))
     .filter(({ c, suff }) => isEligibleForPromotion(c, suff, minBuzzScore))
+    .filter(({ c }) => passesSelectionV2(selectionV2RankScore(c.evidence)))
     .sort((a, b) => {
       const scoreDiff =
         weightedPromoteScore(b.c, b.suff.distinctNewsOutlets, now) -

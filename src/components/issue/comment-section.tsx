@@ -148,6 +148,11 @@ export function CommentSection({
   const [fcPendingId, setFcPendingId] = useState<string | null>(null);
   const [fcRemaining, setFcRemaining] = useState<number | null>(null);
   const [voteCta, setVoteCta] = useState<VoteChoiceId | null>(null);
+  // クロススタンスhelpful確認ダイアログ用
+  const [confirmCrossHelpful, setConfirmCrossHelpful] = useState<{
+    commentId: string;
+    commentBody: string;
+  } | null>(null);
 
   // 親（IssueViewerProvider）から争点ごとのコメントが届いたら同期する
   useEffect(() => {
@@ -463,17 +468,57 @@ export function CommentSection({
   const handleHelpful = useCallback(
     async (id: string) => {
       setActionError(null);
-      try {
-        const res = await fetch(`/api/comments/${id}/helpful`, { method: "POST" });
-        if (!res.ok) return setActionError(await readError(res, "操作に失敗しました"));
-        const data = (await res.json()) as { helpfulCount: number };
-        bumpCount(id, "helpfulCount", data.helpfulCount);
-      } catch {
-        setActionError("通信に失敗しました");
+
+      // クロススタンス確認: ユーザーの投票と異なる立場のコメントにhelpfulを押そうとしているか
+      // スプリットビュー・シングルビュー両方のstateから検索する
+      const findComment = (): SplitComment | null => {
+        for (const col of [splitFor, splitAgainst]) {
+          const found = col.comments.find((c) => c.id === id);
+          if (found) return found;
+        }
+        // シングルリストビュー（layout === "single"）のコメントもチェックする
+        const fromSingle = comments.find((c) => c.id === id);
+        if (fromSingle) {
+          return {
+            ...fromSingle,
+            crossHelpful: 0,
+            neutralHelpful: 0,
+          } as SplitComment;
+        }
+        return null;
+      };
+      const comment = findComment();
+      const isCrossStance =
+        userVote && comment && comment.stance !== userVote && comment.stance !== "undecided";
+
+      if (isCrossStance) {
+        // 確認ダイアログを表示（実際のAPI呼び出しは確認後）
+        setConfirmCrossHelpful({ commentId: id, commentBody: comment.body.slice(0, 120) });
+        return;
       }
+
+      await doHelpful(id);
     },
-    [bumpCount],
+    [userVote, splitFor, splitAgainst, comments],
   );
+
+  const doHelpful = useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`/api/comments/${id}/helpful`, { method: "POST" });
+      if (!res.ok) return setActionError(await readError(res, "操作に失敗しました"));
+      const data = (await res.json()) as { helpfulCount: number };
+      bumpCount(id, "helpfulCount", data.helpfulCount);
+    } catch {
+      setActionError("通信に失敗しました");
+    }
+  }, [bumpCount]);
+
+  const confirmAndDoHelpful = useCallback(async () => {
+    if (!confirmCrossHelpful) return;
+    const id = confirmCrossHelpful.commentId;
+    setConfirmCrossHelpful(null);
+    await doHelpful(id);
+  }, [confirmCrossHelpful, doHelpful]);
 
   const handleFactCheck = useCallback(async (id: string) => {
     setActionError(null);
@@ -515,14 +560,18 @@ export function CommentSection({
       const patch = (c: Comment | null) => (c && c.id === updated.id ? updated : c);
       return { for: patch(prev.for), against: patch(prev.against) };
     });
-    // updatedはcrossHelpfulを持たない通常のCommentなので、既存のcrossHelpful値を保って合成する
+    // updatedはcrossHelpful/neutralHelpfulを持たない通常のCommentなので、既存の値を保って合成する
     setSplitFor((prev) => ({
       ...prev,
-      comments: prev.comments.map((c) => (c.id === updated.id ? { ...updated, crossHelpful: c.crossHelpful } : c)),
+      comments: prev.comments.map((c) =>
+        c.id === updated.id ? { ...updated, crossHelpful: c.crossHelpful, neutralHelpful: c.neutralHelpful } : c,
+      ),
     }));
     setSplitAgainst((prev) => ({
       ...prev,
-      comments: prev.comments.map((c) => (c.id === updated.id ? { ...updated, crossHelpful: c.crossHelpful } : c)),
+      comments: prev.comments.map((c) =>
+        c.id === updated.id ? { ...updated, crossHelpful: c.crossHelpful, neutralHelpful: c.neutralHelpful } : c,
+      ),
     }));
   }, []);
 
@@ -616,6 +665,66 @@ export function CommentSection({
           </div>
         </div>
       )}
+
+      {/* クロススタンスhelpful確認ダイアログ */}
+      {confirmCrossHelpful && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-2xl">
+            <p className="mb-1 text-sm font-bold text-ink">✅ この意見に「参考になった」</p>
+            <p className="mb-3 text-xs leading-relaxed text-ink-secondary">
+              このコメントはあなたとは違う立場のものです。
+              <br />
+              それでも建設的だと思いますか？
+            </p>
+            <p className="mb-4 rounded-lg bg-surface-muted p-3 text-xs italic text-ink-muted">
+              「{confirmCrossHelpful.commentBody}…」
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setConfirmCrossHelpful(null)}>
+                キャンセル
+              </Button>
+              <Button variant="primary" size="sm" onClick={confirmAndDoHelpful}>
+                はい、参考になった
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 投票直後: 相手側のトップコメントをカード表示して返信を促す */}
+      {promptStance && canComment && (() => {
+        const opposite = OPPOSITE_STANCE[promptStance];
+        const oppositeCol = opposite === "for" ? splitFor : splitAgainst;
+        const topOpposing = oppositeCol?.comments.find((c) => !c.isAiSteelman);
+        if (!topOpposing) return null;
+        return (
+          <div className="mb-4 rounded-2xl border border-accent/30 bg-accent/[0.04] p-4">
+            <p className="mb-2 text-xs font-bold text-accent">
+              👀 相手陣営が最も納得している意見
+            </p>
+            <p className="mb-2 text-sm leading-relaxed text-ink-secondary">
+              {topOpposing.body.slice(0, 200)}
+            </p>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-ink-faint">
+                {topOpposing.crossHelpful > 0 && `🔀 反対派+${topOpposing.crossHelpful} `}
+                {topOpposing.neutralHelpful > 0 && `🎯 中立+${topOpposing.neutralHelpful} `}
+                · 参考になった {topOpposing.helpfulCount}
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setVoteCta(null);
+                  document.getElementById("discussion")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+              >
+                議論を見る
+              </Button>
+            </div>
+          </div>
+        );
+      })()}
 
       {canComment && !composerOpen && (
         <button
@@ -881,6 +990,8 @@ export function CommentSection({
                       state.comments.map((comment, i) => {
                         const isTopOpposing = i === 0 && highlightSide === side && !comment.isAiSteelman;
                         const showCrossBadge = i === 0 && comment.crossHelpful > 0 && !comment.isAiSteelman;
+                        const hasCrossHelpful = comment.crossHelpful > 0 && !comment.isAiSteelman;
+                        const hasNeutralHelpful = comment.neutralHelpful > 0 && !comment.isAiSteelman;
                         const showAdAfter =
                           (i + 1) % COMMENTS_PER_AD === 0 && i !== state.comments.length - 1;
                         return (
@@ -906,6 +1017,22 @@ export function CommentSection({
                             {showCrossBadge && (
                               <div className="mx-2 mt-2 inline-flex items-center gap-1 rounded-full border border-transparent bg-gradient-to-r from-accent to-hot px-2.5 py-1 text-[11px] font-semibold text-white shadow-[0_2px_10px_rgb(79_70_229_/_0.25)]">
                                 🔀 越境評価 no.1・{oppositeLabel}派の{comment.crossHelpful}人も支持
+                              </div>
+                            )}
+                            {/* 各コメントのcrossHelpful/neutralHelpfulを小さく表示 */}
+                            {!showCrossBadge && hasCrossHelpful && (
+                              <div className="mx-2 mt-1.5 inline-flex items-center gap-1 text-[11px] text-accent">
+                                🔀 反対派+{comment.crossHelpful}
+                                {hasNeutralHelpful && (
+                                  <span className="ml-1 text-emerald-500">
+                                    中立+{comment.neutralHelpful}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                            {!hasCrossHelpful && hasNeutralHelpful && (
+                              <div className="mx-2 mt-1.5 text-[11px] text-emerald-500">
+                                🎯 中立+{comment.neutralHelpful}
                               </div>
                             )}
                             <CommentCard
