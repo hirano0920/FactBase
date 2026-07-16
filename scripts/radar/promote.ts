@@ -947,6 +947,7 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
     debateType: debateResolved?.debateType ?? ("policy" as const),
     fallbackQuestion: c.evidence.voteQuestion || c.title,
     fallbackChoices,
+    lockedAxis: lockedAxis ?? undefined,
   };
   let { question: voteQuestionTitle, choices } = await composeVoteQuestion(voteQuestionInput);
 
@@ -1021,6 +1022,7 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
       category: c.category ?? "",
       primaryExcerpts,
       debateType: debateResolved?.debateType,
+      lockedAxis: lockedAxis ?? undefined,
     }).catch((e) => {
       console.warn(`  ⚠️ shareTitle生成失敗（titleにフォールバック）: ${e}`);
       return [];
