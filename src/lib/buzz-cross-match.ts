@@ -76,7 +76,11 @@ export function extractBuzzMatchTokens(text: string): string[] {
     if (tok.length >= 2) found.add(tok);
   }
 
-  if (t.length <= 24 && !/[「」『』]/.test(t)) {
+  // 他のパターンで1トークンも抽出できなかった場合のみ、短い全文をそのままトークンとして使う。
+  // これにより「北朝鮮労働者問題」が「北朝鮮」＋「労働」の2トークンとして抽出された場合に
+  // 全文「北朝鮮労働者問題」が別トークンとして追加されるのを防ぎ、
+  // 単一トークン「北朝鮮」との曖昧マッチを抑止する。
+  if (found.size === 0 && t.length <= 24 && !/[「」『』]/.test(t)) {
     found.add(normalizeToken(t));
   }
 
@@ -91,32 +95,49 @@ export function buzzMatchesSearchTerms(topic: string, terms: string[]): boolean 
   return terms.some((term) => {
     const t = term.trim();
     if (!t) return false;
-    // 短い文字列(4文字未満)のサブストリング一致は偽陽性が多すぎるので認めない。
-    // 「北朝鮮」→「ロシアの北朝鮮労働者雇用問題」が誤マッチするのを防ぐ。
-    // 4文字以上の文字列がtopicに含まれる／topicが含まれる場合だけサブストリング一致を認める。
-    if (t.length >= 4 || topicNorm.length >= 4) {
-      if (topicNorm.includes(t) || t.includes(topicNorm)) return true;
-    } else if (t.length < 4 && topicNorm.length < 4) {
-      // 両方短い場合だけ従来のサブストリング一致を認める
-      if (topicNorm.includes(t) || t.includes(topicNorm)) return true;
-    }
 
     const termTokens = extractBuzzMatchTokens(t);
-    if (termTokens.length === 0) {
-      // トークン抽出できなかった場合も短い文字列のサブストリング一致は認めない（同上）
-      if (t.length >= 4) {
-        return topicNorm.includes(t) || t.includes(topicNorm);
+
+    // ① トークンレベルの一致（最も精度が高い）
+    if (termTokens.length > 0 && topicTokens.length > 0) {
+      const matched = topicTokens.filter((a) =>
+        termTokens.some((b) => {
+          if (a === b) return true;
+          if (a.length >= 3 && b.length >= 3 && (a.includes(b) || b.includes(a)))
+            return true;
+          return false;
+        }),
+      );
+      if (matched.length >= 2) return true;
+      // 単一トークンしかない短いトピックなら許容（固有名詞の全文フォールバック）
+      if (matched.length === 1 && topicTokens.length === 1) return true;
+      // 一致したトークンが固有名詞パターン（氏名+役職、NATO等）なら確定的
+      if (matched.length >= 1) {
+        const isEntity = matched.some((a) =>
+          ENTITY_PATTERNS.some((p) => {
+            p.lastIndex = 0;
+            return p.test(a);
+          }),
+        );
+        if (isEntity) return true;
+        // 一致が1トークンだけで固有名詞でもない → サブストリング確認で判断（②へフォールスルー）
       }
-      return false;
     }
 
-    return topicTokens.some((a) =>
-      termTokens.some((b) => {
-        if (a === b) return true;
-        if (a.length >= 3 && b.length >= 3 && (a.includes(b) || b.includes(a))) return true;
-        return false;
-      }),
-    );
+    // ② サブストリング一致（広いトークンの偽陽性リスクを軽減）
+    // トレンド語がトピックの一部分として含まれる場合、トレンド語の長さが
+    // トピック全体の40%以上ある場合のみ真の一致とみなす。
+    // 例: 「国旗損壊」(4文字) in 「国旗損壊罪」(5文字) → 80% → OK
+    // 例: 「北朝鮮」(3文字) in 「北朝鮮労働者問題」(9文字) → 33% → 偽陽性
+    if (topicNorm.includes(t)) {
+      if (t.length >= topicNorm.length * 0.4 || topicNorm.length <= 6) return true;
+      // 40%未満の短いサブストリングは偽陽性リスク大
+      return false;
+    }
+    // トピック自体がトレンド語に含まれている → OK
+    if (t.includes(topicNorm)) return true;
+
+    return false;
   });
 }
 

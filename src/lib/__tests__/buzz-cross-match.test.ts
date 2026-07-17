@@ -24,7 +24,11 @@ describe("buzz-cross-match", () => {
 
   it("表記ゆれでも検索語ソースと一致する", () => {
     expect(buzzMatchesSearchTerms("高市首相のNATO欠席", ["高市首相"])).toBe(true);
-    expect(buzzMatchesSearchTerms("トランプ大統領の関税政策", ["トランプ"])).toBe(true);
+    // 短いトピック（全文フォールバック→単一トークン）ならサブストリング一致を許容
+    expect(buzzMatchesSearchTerms("国旗損壊罪", ["国旗損壊"])).toBe(true);
+    // 複数トークンからなる長いトピックに単一の短いトークンが含まれても
+    // 偽陽性リスク大→厳格化している（「北朝鮮」→「北朝鮮労働者問題」）
+    expect(buzzMatchesSearchTerms("トランプ大統領の関税政策", ["トランプ"])).toBe(false);
   });
 
   it("ニュースとYouTubeをアンカー語で横断一致する", () => {
