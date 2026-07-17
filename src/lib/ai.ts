@@ -1639,6 +1639,8 @@ E) **社会現象/技術革新** → メリットvsデメリット
 - 全記事が同じ角度の批判/非難一色
 - スキャンダル報道のみで政策論争が無い
 - 「確定論点」も「媒体間の食い違い」も無く、設問が単なる賛否の形式だけ整っている
+- **※ただし例外**: 経済ショック・企業ニュース（株価暴落・特許訴訟等）は、「賛否」ではなく「解釈」が両論になりうる。
+  その場合「確定論点」が構造的軸として設定されていれば、Step 2の「両論なし」と判定しない。
 → 該当する場合: problemType="no_opposing_side"
 
 どちらにも当てはまらない → Step 3 へ
@@ -1783,6 +1785,36 @@ export async function assessDebateLegitimacy(params: {
           ? params.commentFrictionScore
           : undefined,
     };
+  }
+
+  // ★ 経済ショック/企業ニュースの解釈対立ショートカット:
+  // 株価暴落・企業訴訟のように「賛成/反対」の形を取らない話題でも、
+  // 「どう解釈するか」で自然な議論が成立する。
+  // このような話題はニュースクラスタ数やbuzzの強さを「話題の重要性」とみなし、
+  // 構造的軸があれば両論性を認める。
+  if (params.lockedAxis) {
+    const t = params.topic;
+    const isEconomicInterpretation =
+      /暴落|急落|下落|時価総額|株価|バブル|特許|賠償|訴訟|倒産|破綻/.test(t);
+    if (isEconomicInterpretation) {
+      // lockedAxisが構造的軸（賛成/反対でない）かチェック
+      const hasInterpretationAxis =
+        params.lockedAxis.axis.includes("捉える") ||
+        params.lockedAxis.axis.includes("解釈") ||
+        params.lockedAxis.axis.includes("評価すべき") ||
+        params.lockedAxis.sideA.includes("ポジティブ") ||
+        params.lockedAxis.sideA.includes("一時的") ||
+        params.lockedAxis.sideA.includes("構造的");
+      if (hasInterpretationAxis) {
+        return {
+          legitimate: true,
+          problemType: "ok",
+          reason: `経済ショックの解釈対立として両論性を確認（軸: ${params.lockedAxis.axis}）`,
+          suggestedFrames: [],
+          predictedDivisionScore: 0.45, // 経済解釈はおおむね拮抗
+        };
+      }
+    }
   }
 
   const usableExcerpts = params.excerpts.filter((e) => (e.text ?? "").trim().length >= 40);

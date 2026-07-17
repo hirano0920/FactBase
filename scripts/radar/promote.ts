@@ -765,6 +765,8 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
   }
 
   // ★★★ 軸ロック: 現実の対立軸を証拠から確定し、Writerの芯ズレを防ぐ。
+  // buildLockedAxis は fail-open: データ不足でも構造的軸を生成する。
+  // （従来はnullが返る可能性があったが、現在は常に軸が生成される）
   let lockedAxis = await buildLockedAxis({
     topic: c.topicTerm || c.evidence.topic || c.title,
     voteQuestion: c.evidence.voteQuestion,
@@ -776,9 +778,8 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
   if (lockedAxis) {
     console.log(`  🔒 軸ロック: 「${lockedAxis.axis}」 (sideA: ${lockedAxis.sideA} / sideB: ${lockedAxis.sideB})`);
   } else {
-    // 真のfail-soft: 軸ロック不能でもフォールバック軸でWriterに進める。
-    // Legitimacy Gate（後続）が両論性を確認済みのトピックを「軸がロックできないから」
-    // HELDするのは過剰排除。voteQuestion→トピック種別に応じた軸の順にフォールバックする。
+    // 真のfail-safe: buildLockedAxisが何らかの理由でnullを返した場合のみのフォールバック
+    // （通常はaxis-lock.tsのstructuralAxisが常に軸を生成するため、ここには来ない）
     if (c.evidence.voteQuestion) {
       lockedAxis = { axis: c.evidence.voteQuestion, sideA: "賛成", sideB: "反対" };
       console.warn(`  ⚠️ 軸ロック不能 → voteQuestionをフォールバック軸に使用: "${lockedAxis.axis}"`);
