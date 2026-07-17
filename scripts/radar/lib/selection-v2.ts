@@ -337,7 +337,34 @@ export function debateHeat(evidence: HeatEvidence): number {
   else if (cluster >= 5) heat += 0.10;
   else if (cluster >= 3) heat += 0.05;
 
+  // --- 海外国内人事キャップ ---
+  // ウクライナ国防相更迭のように「日本に関係ない海外の人事/内政」は
+  // コメント摩擦が高くても「そのトピック固有の議論」ではなく
+  // 国全体への総論的な分断が混入しているため、debateHeatを上限20%までに制限。
+  heat = Math.min(heat, foreignDomesticCap(evidence.topic, evidence.buzzSources));
+
   return Math.min(1, heat);
+}
+
+/**
+ * 海外国内人事トピックのdebateHeat上限。
+ * 「ウクライナ国防相更迭」のような海外の内政人事は、
+ * コメントの分断がトピック固有でなく総論的なので上限を低くする。
+ */
+function foreignDomesticCap(
+  topic: string | null | undefined,
+  sources: string[] | undefined,
+): number {
+  if (!topic) return 1.0;
+
+  // 海外の国名で始まり、日本を含まず、人事/内政/制度変更の単語を含む
+  const isForeignDomestic =
+    /^(ウクライナ|米|米国|アメリカ|中国|韓国|ロシア|英国|フランス|ドイツ|インド|豪州|豪|EU)\S{0,6}/.test(topic) &&
+    !/日本|日米|日韓|日中|日露/.test(topic) &&
+    /更迭|辞任|任命|選出|就任|退任|交代/.test(topic);
+
+  if (isForeignDomestic) return 0.20;
+  return 1.0;
 }
 
 /**
