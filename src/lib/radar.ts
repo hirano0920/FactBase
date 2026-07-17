@@ -538,9 +538,11 @@ export interface BuzzSourceHit {
   inNewsCluster: boolean;
   /** Yahoo!コメントランキング内＝「賛否が割れて議論になっている」の実測シグナル */
   inCommentRanking: boolean;
+  /** YouTube + Yahoo RT の両方にヒット＝テレビニュース＋ツイートのクロス確認 */
+  youtubeYahooVerified: boolean;
   /** 4ソースの素点 0-4 */
   score: number;
-  /** promote/深掘り優先用。score + Newsクラスタ + コメントランキングボーナス（上限5） */
+  /** promote/深掘り優先用。score + Newsクラスタ + コメントランキング + 検証ボーナス（上限5） */
   effectiveScore: number;
   /** クラスタに含まれる見出し数（ログ用） */
   newsClusterCount: number;

@@ -976,14 +976,15 @@ describe("computeBuzzScore", () => {
     youtubeTrendingTitles: ["国旗損壊罪の法案が参院で審議入り"],
   };
 
-  it("4ソースすべて一致すればscore=4、effectiveScore=4", () => {
+  it("4ソースすべて一致すればscore=4、effectiveScore=5（YouTube+YahooRT検証ボーナス+1）", () => {
     const hit = computeBuzzScore("国旗損壊罪", sources);
     expect(hit.inGoogleTrends).toBe(true);
     expect(hit.inYahooRealtime).toBe(true);
     expect(hit.inNewsRanking).toBe(true);
     expect(hit.inYouTubeTrending).toBe(true);
     expect(hit.score).toBe(4);
-    expect(hit.effectiveScore).toBe(4);
+    expect(hit.youtubeYahooVerified).toBe(true);
+    expect(hit.effectiveScore).toBe(5);
   });
 
   it("どのソースにも無ければscore=0", () => {

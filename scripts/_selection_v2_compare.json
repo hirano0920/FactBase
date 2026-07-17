@@ -1,0 +1,977 @@
+{
+  "generatedAt": "2026-07-16T04:44:58.134Z",
+  "byLegacy": [
+    {
+      "title": "中国ダム決壊と三峡ダム安全性",
+      "category": "international",
+      "legacy": 5,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "スマートグラスと試験不正問題（韓国）",
+      "category": "education",
+      "legacy": 5,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "モバイルSuica等の決済障害と企業対応",
+      "category": "society",
+      "legacy": 5,
+      "prod": 0.631613478986421,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0.7895168487330262,
+        "tweetHeat": 0.928843351450619,
+        "secondaryHeat": 0,
+        "rankScore": 0.631613478986421,
+        "hasTweetCount": true,
+        "tweetCount": 2727
+      },
+      "passMin": true,
+      "evidenceTweetCount": 2727
+    },
+    {
+      "title": "中国ダム決壊への当局の情報公開と対応",
+      "category": "international",
+      "legacy": 5,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "ロシアの北朝鮮労働者雇用問題",
+      "category": "international",
+      "legacy": 4.75,
+      "prod": 0.168,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0.21,
+        "tweetHeat": 0,
+        "secondaryHeat": 0.21,
+        "rankScore": 0.168,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": true
+    },
+    {
+      "title": "JTの加熱式たばこ値上げ",
+      "category": "economy",
+      "legacy": 4.7,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.6,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "米下院の対イスラエル軍事支援停止案",
+      "category": "international",
+      "legacy": 4.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "オーストラリアの中国株主権利凍結（レアアース）",
+      "category": "international",
+      "legacy": 4.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "ウクライナのドローン攻撃と前線変化",
+      "category": "international",
+      "legacy": 4.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "豪州のレアアース巡る中国株主権利凍結",
+      "category": "international",
+      "legacy": 4.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "韓国マンション価格高騰と対策論",
+      "category": "economy",
+      "legacy": 4.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "韓国の外貨準備と経済安全性論争",
+      "category": "economy",
+      "legacy": 4.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "ウクライナの長距離ドローン攻撃と戦略",
+      "category": "international",
+      "legacy": 4.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "EUの中国製ドローン部品購入の是非",
+      "category": "international",
+      "legacy": 4.135836777777778,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "加熱式たばこの一律値上げ（JT）",
+      "category": "economy",
+      "legacy": 4,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.6,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "NHK受信料の緊急車両免除検討",
+      "category": "law",
+      "legacy": 3.75,
+      "prod": 0.126,
+      "v2": {
+        "buzzPrime": 0.6,
+        "heatPrime": 0.21,
+        "tweetHeat": 0,
+        "secondaryHeat": 0.21,
+        "rankScore": 0.126,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": true
+    },
+    {
+      "title": "日経平均2000円超の急落",
+      "category": "finance",
+      "legacy": 3.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.6,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "JR西日本の運賃値上げ案",
+      "category": "economy",
+      "legacy": 3.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.6,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "副首都構想と名古屋の立候補",
+      "category": "politics",
+      "legacy": 3.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.6,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "トランプ氏発言の変動と外交影響",
+      "category": "international",
+      "legacy": 3.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.6,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "JR西日本の運賃値上げ計画",
+      "category": "economy",
+      "legacy": 3.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.6,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "米軍の連続的な対イラン攻撃",
+      "category": "international",
+      "legacy": 3.1644094444444444,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.6,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "JR西日本の運賃値上げ",
+      "category": "economy",
+      "legacy": 2.192943148148148,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.4,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "決済代行会社全東信の倒産と決済停止問題",
+      "category": "economy",
+      "legacy": 1,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0,
+        "heatPrime": 0.7895168487330262,
+        "tweetHeat": 0.928843351450619,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": true,
+        "tweetCount": 2727
+      },
+      "passMin": false,
+      "evidenceTweetCount": 2727
+    },
+    {
+      "title": "観光集中と京都の混雑問題",
+      "category": "society",
+      "legacy": 1,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "海の家での未成年性的暴行疑いと責任追及",
+      "category": "society",
+      "legacy": 1,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "決済代行会社全東信の破産（負債1151億円）",
+      "category": "finance",
+      "legacy": 0.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0,
+        "heatPrime": 0.7895168487330262,
+        "tweetHeat": 0.928843351450619,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": true,
+        "tweetCount": 2727
+      },
+      "passMin": false,
+      "evidenceTweetCount": 2727
+    },
+    {
+      "title": "決済代行業者破綻による連鎖倒産リスク（全東信関連）",
+      "category": "finance",
+      "legacy": 0.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0,
+        "heatPrime": 0.7895168487330262,
+        "tweetHeat": 0.928843351450619,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": true,
+        "tweetCount": 2727
+      },
+      "passMin": false,
+      "evidenceTweetCount": 2727
+    },
+    {
+      "title": "全東信破産（決済代行大手の破綻）",
+      "category": "finance",
+      "legacy": 0.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0,
+        "heatPrime": 0.7895168487330262,
+        "tweetHeat": 0.928843351450619,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": true,
+        "tweetCount": 2727
+      },
+      "passMin": false,
+      "evidenceTweetCount": 2727
+    },
+    {
+      "title": "公務員と民間の賞与格差",
+      "category": "economy",
+      "legacy": 0.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    }
+  ],
+  "byV2": [
+    {
+      "title": "モバイルSuica等の決済障害と企業対応",
+      "category": "society",
+      "legacy": 5,
+      "prod": 0.631613478986421,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0.7895168487330262,
+        "tweetHeat": 0.928843351450619,
+        "secondaryHeat": 0,
+        "rankScore": 0.631613478986421,
+        "hasTweetCount": true,
+        "tweetCount": 2727
+      },
+      "passMin": true,
+      "evidenceTweetCount": 2727
+    },
+    {
+      "title": "ロシアの北朝鮮労働者雇用問題",
+      "category": "international",
+      "legacy": 4.75,
+      "prod": 0.168,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0.21,
+        "tweetHeat": 0,
+        "secondaryHeat": 0.21,
+        "rankScore": 0.168,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": true
+    },
+    {
+      "title": "NHK受信料の緊急車両免除検討",
+      "category": "law",
+      "legacy": 3.75,
+      "prod": 0.126,
+      "v2": {
+        "buzzPrime": 0.6,
+        "heatPrime": 0.21,
+        "tweetHeat": 0,
+        "secondaryHeat": 0.21,
+        "rankScore": 0.126,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": true
+    },
+    {
+      "title": "日経平均2000円超の急落",
+      "category": "finance",
+      "legacy": 3.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.6,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "JTの加熱式たばこ値上げ",
+      "category": "economy",
+      "legacy": 4.7,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.6,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "JR西日本の運賃値上げ案",
+      "category": "economy",
+      "legacy": 3.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.6,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "米下院の対イスラエル軍事支援停止案",
+      "category": "international",
+      "legacy": 4.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "中国ダム決壊と三峡ダム安全性",
+      "category": "international",
+      "legacy": 5,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "スマートグラスと試験不正問題（韓国）",
+      "category": "education",
+      "legacy": 5,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "オーストラリアの中国株主権利凍結（レアアース）",
+      "category": "international",
+      "legacy": 4.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "ウクライナのドローン攻撃と前線変化",
+      "category": "international",
+      "legacy": 4.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "決済代行会社全東信の破産（負債1151億円）",
+      "category": "finance",
+      "legacy": 0.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0,
+        "heatPrime": 0.7895168487330262,
+        "tweetHeat": 0.928843351450619,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": true,
+        "tweetCount": 2727
+      },
+      "passMin": false,
+      "evidenceTweetCount": 2727
+    },
+    {
+      "title": "決済代行業者破綻による連鎖倒産リスク（全東信関連）",
+      "category": "finance",
+      "legacy": 0.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0,
+        "heatPrime": 0.7895168487330262,
+        "tweetHeat": 0.928843351450619,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": true,
+        "tweetCount": 2727
+      },
+      "passMin": false,
+      "evidenceTweetCount": 2727
+    },
+    {
+      "title": "全東信破産（決済代行大手の破綻）",
+      "category": "finance",
+      "legacy": 0.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0,
+        "heatPrime": 0.7895168487330262,
+        "tweetHeat": 0.928843351450619,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": true,
+        "tweetCount": 2727
+      },
+      "passMin": false,
+      "evidenceTweetCount": 2727
+    },
+    {
+      "title": "決済代行会社全東信の倒産と決済停止問題",
+      "category": "economy",
+      "legacy": 1,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0,
+        "heatPrime": 0.7895168487330262,
+        "tweetHeat": 0.928843351450619,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": true,
+        "tweetCount": 2727
+      },
+      "passMin": false,
+      "evidenceTweetCount": 2727
+    },
+    {
+      "title": "副首都構想と名古屋の立候補",
+      "category": "politics",
+      "legacy": 3.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.6,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "加熱式たばこの一律値上げ（JT）",
+      "category": "economy",
+      "legacy": 4,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.6,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "トランプ氏発言の変動と外交影響",
+      "category": "international",
+      "legacy": 3.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.6,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "JR西日本の運賃値上げ計画",
+      "category": "economy",
+      "legacy": 3.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.6,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "中国ダム決壊への当局の情報公開と対応",
+      "category": "international",
+      "legacy": 5,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "豪州のレアアース巡る中国株主権利凍結",
+      "category": "international",
+      "legacy": 4.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "韓国マンション価格高騰と対策論",
+      "category": "economy",
+      "legacy": 4.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "韓国の外貨準備と経済安全性論争",
+      "category": "economy",
+      "legacy": 4.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "ウクライナの長距離ドローン攻撃と戦略",
+      "category": "international",
+      "legacy": 4.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "JR西日本の運賃値上げ",
+      "category": "economy",
+      "legacy": 2.192943148148148,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.4,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "米軍の連続的な対イラン攻撃",
+      "category": "international",
+      "legacy": 3.1644094444444444,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.6,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "EUの中国製ドローン部品購入の是非",
+      "category": "international",
+      "legacy": 4.135836777777778,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0.8,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "公務員と民間の賞与格差",
+      "category": "economy",
+      "legacy": 0.25,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "観光集中と京都の混雑問題",
+      "category": "society",
+      "legacy": 1,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    },
+    {
+      "title": "海の家での未成年性的暴行疑いと責任追及",
+      "category": "society",
+      "legacy": 1,
+      "prod": 0,
+      "v2": {
+        "buzzPrime": 0,
+        "heatPrime": 0,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0
+      },
+      "passMin": false
+    }
+  ]
+}

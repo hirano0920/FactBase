@@ -91,11 +91,23 @@ export function buzzMatchesSearchTerms(topic: string, terms: string[]): boolean 
   return terms.some((term) => {
     const t = term.trim();
     if (!t) return false;
-    if (topicNorm.includes(t) || t.includes(topicNorm)) return true;
+    // 短い文字列(4文字未満)のサブストリング一致は偽陽性が多すぎるので認めない。
+    // 「北朝鮮」→「ロシアの北朝鮮労働者雇用問題」が誤マッチするのを防ぐ。
+    // 4文字以上の文字列がtopicに含まれる／topicが含まれる場合だけサブストリング一致を認める。
+    if (t.length >= 4 || topicNorm.length >= 4) {
+      if (topicNorm.includes(t) || t.includes(topicNorm)) return true;
+    } else if (t.length < 4 && topicNorm.length < 4) {
+      // 両方短い場合だけ従来のサブストリング一致を認める
+      if (topicNorm.includes(t) || t.includes(topicNorm)) return true;
+    }
 
     const termTokens = extractBuzzMatchTokens(t);
     if (termTokens.length === 0) {
-      return topicNorm.includes(t) || t.includes(topicNorm);
+      // トークン抽出できなかった場合も短い文字列のサブストリング一致は認めない（同上）
+      if (t.length >= 4) {
+        return topicNorm.includes(t) || t.includes(topicNorm);
+      }
+      return false;
     }
 
     return topicTokens.some((a) =>
@@ -131,6 +143,42 @@ export function buzzMatchesTitleCorpus(topic: string, corpusTitles: string[]): b
   });
 }
 
+/**
+ * buzzMatchesTitleCorpus の厳格版。2トークン以上マッチしないと偽陽性とみなす。
+ * 「北朝鮮」だけで別の話題(北朝鮮ミサイル等)と誤マッチするのを防ぐため、
+ * assembleBuzzScore のソース一致判定でのみ使う。
+ * ニュースクラスタリング(countNewsClusterHeadlines)には使わない（緩いマッチのまま）。
+ */
+function buzzMatchesStrictTitleCorpus(topic: string, corpusTitles: string[]): boolean {
+  if (corpusTitles.length === 0) return false;
+  const tokens = extractBuzzMatchTokens(topic).filter(
+    (tok) =>
+      tok.length >= 3 ||
+      /氏$|大統領|首相|大臣/.test(tok) ||
+      IN_SCOPE_BUZZ_HINTS.test(tok),
+  );
+  if (tokens.length === 0) return false;
+
+  // 有意トークンが1つしかなければ従来挙動（単一トークンマッチでもOK）
+  if (tokens.length === 1) return buzzMatchesTitleCorpus(topic, corpusTitles);
+
+  return corpusTitles.some((title) => {
+    const titleNorm = title.trim();
+    if (!titleNorm) return false;
+    const matched = tokens.filter((tok) => {
+      if (titleNorm.includes(tok)) return true;
+      if (/^[a-z0-9]+$/i.test(tok)) {
+        return titleNorm.toLowerCase().includes(tok.toLowerCase());
+      }
+      return false;
+    });
+    // 最低2トークン一致 または トークンの過半数(50%超)がマッチ
+    if (matched.length >= 2) return true;
+    if (matched.length > tokens.length / 2) return true;
+    return false;
+  });
+}
+
 function titleMatchesBuzzTopic(topic: string, title: string): boolean {
   return (
     buzzTitleMatch([topic], [title]) ||
@@ -150,15 +198,15 @@ export function assembleBuzzScore(topic: string, sources: BuzzSourceInputs): Buz
   const inYahooRealtime = buzzMatchesSearchTerms(topic, sources.yahooRealtimeTerms);
   const inNewsRanking =
     buzzTitleMatch([topic], sources.newsRankingTitles) ||
-    buzzMatchesTitleCorpus(topic, sources.newsRankingTitles);
+    buzzMatchesStrictTitleCorpus(topic, sources.newsRankingTitles);
   const inYouTubeTrending =
     buzzTitleMatch([topic], sources.youtubeTrendingTitles) ||
-    buzzMatchesTitleCorpus(topic, sources.youtubeTrendingTitles);
+    buzzMatchesStrictTitleCorpus(topic, sources.youtubeTrendingTitles);
   const commentRankingTitles = sources.commentRankingTitles ?? [];
   const inCommentRanking =
     commentRankingTitles.length > 0 &&
     (buzzTitleMatch([topic], commentRankingTitles) ||
-      buzzMatchesTitleCorpus(topic, commentRankingTitles));
+      buzzMatchesStrictTitleCorpus(topic, commentRankingTitles));
   const score =
     Number(inGoogleTrends) +
     Number(inYahooRealtime) +
@@ -167,11 +215,15 @@ export function assembleBuzzScore(topic: string, sources: BuzzSourceInputs): Buz
 
   const newsClusterCount = countNewsClusterHeadlines(topic, sources.newsRankingTitles);
   const inNewsCluster = newsClusterCount >= RADAR.minNewsClusterHeadlines;
+  // YouTube + Yahoo RT の両方にヒット = テレビ各社がニュース配信 + 実際にツイートあり
+  // これは「本物のバズ」の最も信頼できる指標（単一ソースだけのヒットは偽陽性の可能性大）
+  const youtubeYahooVerified = inYouTubeTrending && inYahooRealtime;
   // コメントランキング一致は「賛否が割れている」の直接シグナルなので、他4ソースの合算とは
   // 別枠でボーナスを乗せる（読まれただけの record と区別するため newsCluster と同じ+1扱い）。
+  // 検証ボーナス: YouTube+YahooRT同時ヒットは +1（本物のバズの確度が高いため優先）
   const effectiveScore = Math.min(
     5,
-    score + (inNewsCluster ? 1 : 0) + (inCommentRanking ? 1 : 0),
+    score + (inNewsCluster ? 1 : 0) + (inCommentRanking ? 1 : 0) + (youtubeYahooVerified ? 1 : 0),
   );
 
   return {
@@ -181,6 +233,7 @@ export function assembleBuzzScore(topic: string, sources: BuzzSourceInputs): Buz
     inYouTubeTrending,
     inNewsCluster,
     inCommentRanking,
+    youtubeYahooVerified,
     score,
     effectiveScore,
     newsClusterCount,

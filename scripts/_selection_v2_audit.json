@@ -1,0 +1,530 @@
+{
+  "generatedAt": "2026-07-16T14:47:14.304Z",
+  "yahooTop": [
+    {
+      "term": "カナダに",
+      "tweetCount": 689
+    },
+    {
+      "term": "山田五郎",
+      "tweetCount": 82
+    },
+    {
+      "term": "スリランカ国籍",
+      "tweetCount": 15
+    }
+  ],
+  "summary": {
+    "pendingSampled": 5,
+    "eligible": 5,
+    "passBuzzHeat": 3,
+    "selectedForPromote": [
+      "内閣支持率低下と生活実感",
+      "米下院の対イスラエル軍事支援阻止法案",
+      "米の対イラン軍事行動検討"
+    ],
+    "legitimacyPass": 3,
+    "legitimacyFail": 0,
+    "failBuckets": {
+      "notEligible": 0,
+      "buzzLow": 0,
+      "heatLow": 2,
+      "productLow": 0
+    }
+  },
+  "passBoth": [
+    {
+      "id": "cmrnayh1n00082cx3svcyee32",
+      "title": "内閣支持率低下と生活実感",
+      "category": "politics",
+      "voteQuestion": "内閣支持率低下、生活実感が原因ですか？",
+      "debateType": "indicator",
+      "debatable": true,
+      "buzzScore": 3,
+      "buzzSources": [
+        "yahoo_news_ranking",
+        "youtube_trending",
+        "yahoo_comment_ranking"
+      ],
+      "commentCount": 3197,
+      "tweetCount": 0,
+      "tweetSaved": null,
+      "v2": {
+        "buzzPrime": 0.6,
+        "heatPrime": 0.35,
+        "dvsPrime": 1,
+        "conflictPrime": 1,
+        "tweetHeat": 0,
+        "secondaryHeat": 0.35,
+        "rankScore": 0.21,
+        "hasTweetCount": false,
+        "tweetCount": 0,
+        "hasMeasuredDvs": false
+      },
+      "eligible": true,
+      "passRank": true,
+      "reason": "Buzz×Heat通過",
+      "news": [
+        "Yahoo!ニュース: 【世論調査／5月第5週】高市内閣支持率55.0%に大幅下落、「生活実感」の悪化が重しに（大濱崎卓真） - エキスパート",
+        "nippon.com: 【高市内閣の支持率】5社が現政権最低値：物価高対策への不満表面化─報道8社5月世論調査",
+        "選挙ドットコム: 若年層離れが顕著！高支持率維持の影で高市内閣支持層に起きている地殻変動とは？",
+        "BigGo ファイナンス: 名目GDPと賃上げは幻か、「実質可処分所得」が暴く生活苦の構造"
+      ],
+      "newsCount": 9
+    },
+    {
+      "id": "cmrnayhpk000a2cx3li50zrca",
+      "title": "米下院の対イスラエル軍事支援阻止法案",
+      "category": "international",
+      "voteQuestion": "米下院の支援阻止、妥当だと思いますか？",
+      "debateType": "geopolitics",
+      "debatable": true,
+      "buzzScore": 3,
+      "buzzSources": [
+        "yahoo_news_ranking",
+        "news_cluster",
+        "yahoo_comment_ranking"
+      ],
+      "commentCount": 1606,
+      "tweetCount": 0,
+      "tweetSaved": null,
+      "v2": {
+        "buzzPrime": 0.6,
+        "heatPrime": 0.3,
+        "dvsPrime": 1,
+        "conflictPrime": 1,
+        "tweetHeat": 0,
+        "secondaryHeat": 0.3,
+        "rankScore": 0.18,
+        "hasTweetCount": false,
+        "tweetCount": 0,
+        "hasMeasuredDvs": false
+      },
+      "eligible": true,
+      "passRank": true,
+      "reason": "Buzz×Heat通過",
+      "news": [
+        "CNN.co.jp: 米下院民主党、対イスラエル軍事支援阻止の法案に103人が賛成票 初めて反対上回る",
+        "au Webポータル: 米下院民主党、対イスラエル軍事支援阻止の法案に103人が賛成票 初めて反対上回る",
+        "CNN.co.jp: カナダで大規模な山火事 煙による大気汚染、米国1億人に影響",
+        "arabnews.jp: 米下院、対イラン軍事行動停止の戦争権限決議案を承認"
+      ],
+      "newsCount": 8
+    },
+    {
+      "id": "cmrnayhdm00092cx3x9ssuzjz",
+      "title": "米の対イラン軍事行動検討",
+      "category": "international",
+      "voteQuestion": "米の対イラン軍事行動検討、支持しますか？",
+      "debateType": "geopolitics",
+      "debatable": true,
+      "buzzScore": 3,
+      "buzzSources": [
+        "yahoo_news_ranking",
+        "news_cluster",
+        "yahoo_comment_ranking"
+      ],
+      "commentCount": 1255,
+      "tweetCount": 0,
+      "tweetSaved": null,
+      "v2": {
+        "buzzPrime": 0.6,
+        "heatPrime": 0.3,
+        "dvsPrime": 1,
+        "conflictPrime": 1,
+        "tweetHeat": 0,
+        "secondaryHeat": 0.3,
+        "rankScore": 0.18,
+        "hasTweetCount": false,
+        "tweetCount": 0,
+        "hasMeasuredDvs": false
+      },
+      "eligible": true,
+      "passRank": true,
+      "reason": "Buzz×Heat通過",
+      "news": [
+        "読売新聞: トランプ氏、対イラン軍事作戦「まもなく終わる」…交渉進展なければ「新たな攻撃を真剣に検討」",
+        "Reuters: トランプ氏、対イラン作戦で米軍優勢 紛争後の米の役割検討と報道官",
+        "BBC: トランプ氏、イランでの目標達成に近づくと　米軍は地上部隊派遣を検討か",
+        "Bloomberg.com: 米国、イランでの進展を強調－トランプ氏は軍事作戦「縮小」を示唆"
+      ],
+      "newsCount": 8
+    }
+  ],
+  "selected": [
+    {
+      "title": "内閣支持率低下と生活実感",
+      "voteQuestion": "内閣支持率低下、生活実感が原因ですか？",
+      "buzzPrime": 0.6,
+      "heatPrime": 0.35,
+      "dvsPrime": 1,
+      "conflictPrime": 1,
+      "tweetHeat": 0,
+      "secondaryHeat": 0.35,
+      "rankScore": 0.21,
+      "hasTweetCount": false,
+      "tweetCount": 0,
+      "hasMeasuredDvs": false
+    },
+    {
+      "title": "米下院の対イスラエル軍事支援阻止法案",
+      "voteQuestion": "米下院の支援阻止、妥当だと思いますか？",
+      "buzzPrime": 0.6,
+      "heatPrime": 0.3,
+      "dvsPrime": 1,
+      "conflictPrime": 1,
+      "tweetHeat": 0,
+      "secondaryHeat": 0.3,
+      "rankScore": 0.18,
+      "hasTweetCount": false,
+      "tweetCount": 0,
+      "hasMeasuredDvs": false
+    },
+    {
+      "title": "米の対イラン軍事行動検討",
+      "voteQuestion": "米の対イラン軍事行動検討、支持しますか？",
+      "buzzPrime": 0.6,
+      "heatPrime": 0.3,
+      "dvsPrime": 1,
+      "conflictPrime": 1,
+      "tweetHeat": 0,
+      "secondaryHeat": 0.3,
+      "rankScore": 0.18,
+      "hasTweetCount": false,
+      "tweetCount": 0,
+      "hasMeasuredDvs": false
+    }
+  ],
+  "droppedTop": [
+    {
+      "id": "cmrnayidg000c2cx3fchod2h7",
+      "title": "北朝鮮労働者の海外雇用と賃金問題",
+      "category": "international",
+      "voteQuestion": "北朝鮮労働者の海外雇用、容認できますか？",
+      "debateType": "geopolitics",
+      "debatable": true,
+      "buzzScore": 2,
+      "buzzSources": [
+        "yahoo_news_ranking",
+        "yahoo_comment_ranking"
+      ],
+      "commentCount": 337,
+      "tweetCount": 0,
+      "tweetSaved": null,
+      "v2": {
+        "buzzPrime": 0.4,
+        "heatPrime": 0.12,
+        "dvsPrime": 1,
+        "conflictPrime": 1,
+        "tweetHeat": 0,
+        "secondaryHeat": 0.12,
+        "rankScore": 0.048,
+        "hasTweetCount": false,
+        "tweetCount": 0,
+        "hasMeasuredDvs": false
+      },
+      "eligible": true,
+      "passRank": false,
+      "reason": "Heat'不足(0.12<0.15) / 積不足(0.048<0.12)",
+      "news": [
+        "ｄメニューニュース: 「食事代問題」が火種に…HD現代重工の外国人労働者200人が民主労総に加入",
+        "ｄメニューニュース: 【社説】韓国、青年雇用が危機なのに労働界は賃金削減のない定年延長主張",
+        "ScanNetSecurity: Okta Blog 第10回 北朝鮮 IT 労働者、米国の大手テック企業を超えて活動を拡大中",
+        "CNN.co.jp: 北朝鮮、海外への強制労働派遣で資金捻出 国連報告(1/2)"
+      ],
+      "newsCount": 8
+    },
+    {
+      "id": "cmrnayi1i000b2cx358d3334y",
+      "title": "日本車の欧州EV競争力低下",
+      "category": "economy",
+      "voteQuestion": "日本はEV政策転換を急ぐべきですか？",
+      "debateType": "policy",
+      "debatable": true,
+      "buzzScore": 2,
+      "buzzSources": [
+        "yahoo_news_ranking",
+        "yahoo_comment_ranking"
+      ],
+      "commentCount": 93,
+      "tweetCount": 0,
+      "tweetSaved": null,
+      "v2": {
+        "buzzPrime": 0.4,
+        "heatPrime": 0,
+        "dvsPrime": 1,
+        "conflictPrime": 1,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0,
+        "hasMeasuredDvs": false
+      },
+      "eligible": true,
+      "passRank": false,
+      "reason": "Heat'不足(0.00<0.15) / 積不足(0.000<0.12)",
+      "news": [
+        "merkmal-biz.jp: 「マツダも中国で生産するのか」 日系メーカーのEVシフト、もはや“作る場所”が競争力を左右するのか？",
+        "BigGo ファイナンス: 中国EV、欧州で日本勢を初の逆転…BYDの海外販売比率が40%突破",
+        "Record China: 中国車の勢い止まらず、日本車シェアは40年ぶり低水準に落ち込む可能性―中国メディア",
+        "ビジネスジャーナル: 「前年比16%減」BYD失速の裏側…中国EVバブル崩壊ではない、世界EV市場の新局面"
+      ],
+      "newsCount": 4
+    }
+  ],
+  "legitimacy": [
+    {
+      "title": "内閣支持率低下と生活実感",
+      "voteQuestion": "内閣支持率低下、生活実感が原因ですか？",
+      "legitimate": true,
+      "problemType": "ok",
+      "reason": "因果関係の議論として両論が成立",
+      "suggestedFrames": [
+        "内閣支持率低下の主要因は生活実感ですか？",
+        "生活実感以外の要因も影響していますか？"
+      ],
+      "excerptCount": 9,
+      "excerptPreview": [
+        "[Yahoo!ニュース] 【世論調査／5月第5週】高市内閣支持率55.0%に大幅下落、「生活実感」の悪化が重しに（大濱崎卓真） - エキスパート",
+        "[nippon.com] 【高市内閣の支持率】5社が現政権最低値：物価高対策への不満表面化─報道8社5月世論調査",
+        "[選挙ドットコム] 若年層離れが顕著！高支持率維持の影で高市内閣支持層に起きている地殻変動とは？"
+      ],
+      "predictedDivisionScore": 0.88,
+      "lopsidedPredicted": false
+    },
+    {
+      "title": "米下院の対イスラエル軍事支援阻止法案",
+      "voteQuestion": "米下院の支援阻止、妥当だと思いますか？",
+      "legitimate": true,
+      "problemType": "ok",
+      "reason": "設問は賛否両論を引き出す適切な問いで、NG要件なし",
+      "suggestedFrames": [
+        "米下院の対イスラエル軍事支援停止は財政・安全保障の優先順位の問題か？",
+        "対イスラエル軍事支援停止の代替措置としての外交・停戦努力の評価は？"
+      ],
+      "excerptCount": 13,
+      "excerptPreview": [
+        "[CNN.co.jp] 米下院民主党、対イスラエル軍事支援阻止の法案に103人が賛成票 初めて反対上回る",
+        "[au Webポータル] 米下院民主党、対イスラエル軍事支援阻止の法案に103人が賛成票 初めて反対上回る",
+        "[CNN.co.jp] カナダで大規模な山火事 煙による大気汚染、米国1億人に影響"
+      ],
+      "predictedDivisionScore": 0.8,
+      "lopsidedPredicted": false
+    },
+    {
+      "title": "米の対イラン軍事行動検討",
+      "voteQuestion": "米の対イラン軍事行動検討、支持しますか？",
+      "legitimate": true,
+      "problemType": "ok",
+      "reason": "対イラン軍事行動の是非は両論ありだが犯罪容認には該当せず",
+      "suggestedFrames": [
+        "代案1: 米国の対イラン軍事行動を支持/不支持とする際、地域安定と国際法の観点をどう評価しますか？",
+        "代案2: 軍事より外交・経済的手段の優先度をどう判断しますか？"
+      ],
+      "excerptCount": 12,
+      "excerptPreview": [
+        "[読売新聞] トランプ氏、対イラン軍事作戦「まもなく終わる」…交渉進展なければ「新たな攻撃を真剣に検討」",
+        "[Reuters] トランプ氏、対イラン作戦で米軍優勢 紛争後の米の役割検討と報道官",
+        "[BBC] トランプ氏、イランでの目標達成に近づくと　米軍は地上部隊派遣を検討か"
+      ],
+      "predictedDivisionScore": 0.8,
+      "lopsidedPredicted": false
+    }
+  ],
+  "all": [
+    {
+      "id": "cmrnayh1n00082cx3svcyee32",
+      "title": "内閣支持率低下と生活実感",
+      "category": "politics",
+      "voteQuestion": "内閣支持率低下、生活実感が原因ですか？",
+      "debateType": "indicator",
+      "debatable": true,
+      "buzzScore": 3,
+      "buzzSources": [
+        "yahoo_news_ranking",
+        "youtube_trending",
+        "yahoo_comment_ranking"
+      ],
+      "commentCount": 3197,
+      "tweetCount": 0,
+      "tweetSaved": null,
+      "v2": {
+        "buzzPrime": 0.6,
+        "heatPrime": 0.35,
+        "dvsPrime": 1,
+        "conflictPrime": 1,
+        "tweetHeat": 0,
+        "secondaryHeat": 0.35,
+        "rankScore": 0.21,
+        "hasTweetCount": false,
+        "tweetCount": 0,
+        "hasMeasuredDvs": false
+      },
+      "eligible": true,
+      "passRank": true,
+      "reason": "Buzz×Heat通過",
+      "news": [
+        "Yahoo!ニュース: 【世論調査／5月第5週】高市内閣支持率55.0%に大幅下落、「生活実感」の悪化が重しに（大濱崎卓真） - エキスパート",
+        "nippon.com: 【高市内閣の支持率】5社が現政権最低値：物価高対策への不満表面化─報道8社5月世論調査",
+        "選挙ドットコム: 若年層離れが顕著！高支持率維持の影で高市内閣支持層に起きている地殻変動とは？",
+        "BigGo ファイナンス: 名目GDPと賃上げは幻か、「実質可処分所得」が暴く生活苦の構造"
+      ],
+      "newsCount": 9
+    },
+    {
+      "id": "cmrnayhpk000a2cx3li50zrca",
+      "title": "米下院の対イスラエル軍事支援阻止法案",
+      "category": "international",
+      "voteQuestion": "米下院の支援阻止、妥当だと思いますか？",
+      "debateType": "geopolitics",
+      "debatable": true,
+      "buzzScore": 3,
+      "buzzSources": [
+        "yahoo_news_ranking",
+        "news_cluster",
+        "yahoo_comment_ranking"
+      ],
+      "commentCount": 1606,
+      "tweetCount": 0,
+      "tweetSaved": null,
+      "v2": {
+        "buzzPrime": 0.6,
+        "heatPrime": 0.3,
+        "dvsPrime": 1,
+        "conflictPrime": 1,
+        "tweetHeat": 0,
+        "secondaryHeat": 0.3,
+        "rankScore": 0.18,
+        "hasTweetCount": false,
+        "tweetCount": 0,
+        "hasMeasuredDvs": false
+      },
+      "eligible": true,
+      "passRank": true,
+      "reason": "Buzz×Heat通過",
+      "news": [
+        "CNN.co.jp: 米下院民主党、対イスラエル軍事支援阻止の法案に103人が賛成票 初めて反対上回る",
+        "au Webポータル: 米下院民主党、対イスラエル軍事支援阻止の法案に103人が賛成票 初めて反対上回る",
+        "CNN.co.jp: カナダで大規模な山火事 煙による大気汚染、米国1億人に影響",
+        "arabnews.jp: 米下院、対イラン軍事行動停止の戦争権限決議案を承認"
+      ],
+      "newsCount": 8
+    },
+    {
+      "id": "cmrnayhdm00092cx3x9ssuzjz",
+      "title": "米の対イラン軍事行動検討",
+      "category": "international",
+      "voteQuestion": "米の対イラン軍事行動検討、支持しますか？",
+      "debateType": "geopolitics",
+      "debatable": true,
+      "buzzScore": 3,
+      "buzzSources": [
+        "yahoo_news_ranking",
+        "news_cluster",
+        "yahoo_comment_ranking"
+      ],
+      "commentCount": 1255,
+      "tweetCount": 0,
+      "tweetSaved": null,
+      "v2": {
+        "buzzPrime": 0.6,
+        "heatPrime": 0.3,
+        "dvsPrime": 1,
+        "conflictPrime": 1,
+        "tweetHeat": 0,
+        "secondaryHeat": 0.3,
+        "rankScore": 0.18,
+        "hasTweetCount": false,
+        "tweetCount": 0,
+        "hasMeasuredDvs": false
+      },
+      "eligible": true,
+      "passRank": true,
+      "reason": "Buzz×Heat通過",
+      "news": [
+        "読売新聞: トランプ氏、対イラン軍事作戦「まもなく終わる」…交渉進展なければ「新たな攻撃を真剣に検討」",
+        "Reuters: トランプ氏、対イラン作戦で米軍優勢 紛争後の米の役割検討と報道官",
+        "BBC: トランプ氏、イランでの目標達成に近づくと　米軍は地上部隊派遣を検討か",
+        "Bloomberg.com: 米国、イランでの進展を強調－トランプ氏は軍事作戦「縮小」を示唆"
+      ],
+      "newsCount": 8
+    },
+    {
+      "id": "cmrnayidg000c2cx3fchod2h7",
+      "title": "北朝鮮労働者の海外雇用と賃金問題",
+      "category": "international",
+      "voteQuestion": "北朝鮮労働者の海外雇用、容認できますか？",
+      "debateType": "geopolitics",
+      "debatable": true,
+      "buzzScore": 2,
+      "buzzSources": [
+        "yahoo_news_ranking",
+        "yahoo_comment_ranking"
+      ],
+      "commentCount": 337,
+      "tweetCount": 0,
+      "tweetSaved": null,
+      "v2": {
+        "buzzPrime": 0.4,
+        "heatPrime": 0.12,
+        "dvsPrime": 1,
+        "conflictPrime": 1,
+        "tweetHeat": 0,
+        "secondaryHeat": 0.12,
+        "rankScore": 0.048,
+        "hasTweetCount": false,
+        "tweetCount": 0,
+        "hasMeasuredDvs": false
+      },
+      "eligible": true,
+      "passRank": false,
+      "reason": "Heat'不足(0.12<0.15) / 積不足(0.048<0.12)",
+      "news": [
+        "ｄメニューニュース: 「食事代問題」が火種に…HD現代重工の外国人労働者200人が民主労総に加入",
+        "ｄメニューニュース: 【社説】韓国、青年雇用が危機なのに労働界は賃金削減のない定年延長主張",
+        "ScanNetSecurity: Okta Blog 第10回 北朝鮮 IT 労働者、米国の大手テック企業を超えて活動を拡大中",
+        "CNN.co.jp: 北朝鮮、海外への強制労働派遣で資金捻出 国連報告(1/2)"
+      ],
+      "newsCount": 8
+    },
+    {
+      "id": "cmrnayi1i000b2cx358d3334y",
+      "title": "日本車の欧州EV競争力低下",
+      "category": "economy",
+      "voteQuestion": "日本はEV政策転換を急ぐべきですか？",
+      "debateType": "policy",
+      "debatable": true,
+      "buzzScore": 2,
+      "buzzSources": [
+        "yahoo_news_ranking",
+        "yahoo_comment_ranking"
+      ],
+      "commentCount": 93,
+      "tweetCount": 0,
+      "tweetSaved": null,
+      "v2": {
+        "buzzPrime": 0.4,
+        "heatPrime": 0,
+        "dvsPrime": 1,
+        "conflictPrime": 1,
+        "tweetHeat": 0,
+        "secondaryHeat": 0,
+        "rankScore": 0,
+        "hasTweetCount": false,
+        "tweetCount": 0,
+        "hasMeasuredDvs": false
+      },
+      "eligible": true,
+      "passRank": false,
+      "reason": "Heat'不足(0.00<0.15) / 積不足(0.000<0.12)",
+      "news": [
+        "merkmal-biz.jp: 「マツダも中国で生産するのか」 日系メーカーのEVシフト、もはや“作る場所”が競争力を左右するのか？",
+        "BigGo ファイナンス: 中国EV、欧州で日本勢を初の逆転…BYDの海外販売比率が40%突破",
+        "Record China: 中国車の勢い止まらず、日本車シェアは40年ぶり低水準に落ち込む可能性―中国メディア",
+        "ビジネスジャーナル: 「前年比16%減」BYD失速の裏側…中国EVバブル崩壊ではない、世界EV市場の新局面"
+      ],
+      "newsCount": 4
+    }
+  ]
+}
