@@ -74,7 +74,7 @@ import { fetchShugiinBills, fetchSangiinBills } from "./sources/diet";
 import { fetchTVNewsTitles } from "./sources/tv-news";
 import { notifyRadarFailure } from "./notify";
 import { prefilterBuzzInputs, type BuzzTermInput } from "../../src/lib/buzz-prefilter";
-import { buildBuzzAnchorCandidates, assembleBuzzScore, buzzMatchesTitleCorpus } from "../../src/lib/buzz-cross-match";
+import { buildBuzzAnchorCandidates, assembleBuzzScore, buzzMatchesStrictTitleCorpus } from "../../src/lib/buzz-cross-match";
 import { selectResearchTargets } from "./lib/discover-logic";
 import { CONSENSUS_MIN_OUTLETS } from "./lib/promote-logic";
 import { matchBroadcastArticle, mergeBroadcastMatch } from "./lib/match-broadcast";
@@ -94,7 +94,7 @@ function matchCommentRankingEntry(
   topic: string,
   entries: YahooRankingEntry[],
 ): YahooRankingEntry | null {
-  return entries.find((e) => buzzMatchesTitleCorpus(topic, [e.title])) ?? null;
+  return entries.find((e) => buzzMatchesStrictTitleCorpus(topic, [e.title])) ?? null;
 }
 
 interface TopicToResearch {
@@ -245,7 +245,7 @@ async function main() {
         buzzTerms.map((term) => ({
           term,
           sustained: sustainedSet.has(term),
-          discussed: buzzMatchesTitleCorpus(term, commentRankingTitles),
+          discussed: buzzMatchesStrictTitleCorpus(term, commentRankingTitles),
         })),
       );
     } catch (e) {
@@ -270,13 +270,13 @@ async function main() {
 
   // トピック統合（法案優先、続いて継続的話題→通常のバズ）
   const buzzTopics: TopicToResearch[] = relevant.map((r) => {
+    const strictMatch = (topic: string, term: string) =>
+      buzzMatchesStrictTitleCorpus(topic, [term]) || buzzMatchesStrictTitleCorpus(term, [topic]);
     const tweetCount = matchYahooTweetCount(r.topic, yahooBuzz, {
-      matches: (topic, term) =>
-        buzzMatchesTitleCorpus(topic, [term]) || buzzMatchesTitleCorpus(term, [topic]),
+      matches: strictMatch,
     });
     const youtubeEntry = matchYouTubeEntry(r.topic, youtubeTrending.all, {
-      matches: (topic, title) =>
-        buzzMatchesTitleCorpus(topic, [title]) || buzzMatchesTitleCorpus(title, [topic]),
+      matches: strictMatch,
     });
     return {
       topic: r.topic,

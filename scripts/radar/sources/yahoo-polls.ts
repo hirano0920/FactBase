@@ -10,7 +10,7 @@
  * のみ拾える。マッチした設問だけ個別ページ(/polls/{id})を取得し、埋め込みJSON
  * (`"choices":[{"choice","count","percent","value"}]`)から内訳を取る。
  */
-import { buzzMatchesTitleCorpus } from "../../../src/lib/buzz-cross-match";
+import { buzzMatchesStrictTitleCorpus } from "../../../src/lib/buzz-cross-match";
 
 const UA = "Mozilla/5.0 (compatible; FactBaseRadar/1.0; +https://factbase.tokyo)";
 const POLLS_LIST_URL = "https://news.yahoo.co.jp/polls";
@@ -124,5 +124,5 @@ export function computeDivisionScore(choices: YahooPollChoice[]): number {
 
 /** 一覧からトピック語に一致する設問を探す（同一トピックに複数一致時は先頭＝新しい方を採用） */
 export function matchYahooPoll(topic: string, list: YahooPollListEntry[]): YahooPollListEntry | null {
-  return list.find((e) => buzzMatchesTitleCorpus(topic, [e.question])) ?? null;
+  return list.find((e) => buzzMatchesStrictTitleCorpus(topic, [e.question])) ?? null;
 }

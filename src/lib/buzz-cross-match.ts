@@ -149,7 +149,7 @@ export function buzzMatchesTitleCorpus(topic: string, corpusTitles: string[]): b
  * assembleBuzzScore のソース一致判定でのみ使う。
  * ニュースクラスタリング(countNewsClusterHeadlines)には使わない（緩いマッチのまま）。
  */
-function buzzMatchesStrictTitleCorpus(topic: string, corpusTitles: string[]): boolean {
+export function buzzMatchesStrictTitleCorpus(topic: string, corpusTitles: string[]): boolean {
   if (corpusTitles.length === 0) return false;
   const tokens = extractBuzzMatchTokens(topic).filter(
     (tok) =>
@@ -159,7 +159,8 @@ function buzzMatchesStrictTitleCorpus(topic: string, corpusTitles: string[]): bo
   );
   if (tokens.length === 0) return false;
 
-  // 有意トークンが1つしかなければ従来挙動（単一トークンマッチでもOK）
+  // 有意トークンが1つしかなければ従来挙動（単一トークンマッチでもOK）。
+  // 「NATO」のような単一トピックは2トークン照合できないため緩いマッチが正しい。
   if (tokens.length === 1) return buzzMatchesTitleCorpus(topic, corpusTitles);
 
   return corpusTitles.some((title) => {
@@ -180,10 +181,14 @@ function buzzMatchesStrictTitleCorpus(topic: string, corpusTitles: string[]): bo
 }
 
 function titleMatchesBuzzTopic(topic: string, title: string): boolean {
+  // クラスタリングは厳格マッチを優先するが、表記ゆれ対策のフォールバックとして
+  // 緩いマッチも試す。厳格が false でも緩いが true ならカウント（+1ボーナスのみで
+  // スコア決定には使わないため、偽陽性の影響は限定的）。
   return (
     buzzTitleMatch([topic], [title]) ||
-    buzzMatchesTitleCorpus(topic, [title]) ||
-    buzzMatchesTitleCorpus(title, [topic])
+    buzzMatchesStrictTitleCorpus(topic, [title]) ||
+    buzzMatchesStrictTitleCorpus(title, [topic]) ||
+    buzzMatchesTitleCorpus(topic, [title])
   );
 }
 

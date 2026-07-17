@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
 
 import { prisma } from "../../src/lib/prisma";
 import { assessDebateLegitimacy } from "../../src/lib/ai";
-import { buzzMatchesTitleCorpus } from "../../src/lib/buzz-cross-match";
+import { buzzMatchesStrictTitleCorpus } from "../../src/lib/buzz-cross-match";
 import { fetchYahooRealtimeBuzzPolitics } from "./sources/yahoo-realtime";
 import { evaluateBuzzPromoteSufficiency } from "./lib/research";
 import {
@@ -116,7 +116,7 @@ async function main() {
     const evidence = (row.evidenceJson ?? {}) as unknown as SavedEvidence;
     const topic = row.topicTerm || row.title;
     const tweetOverride = matchYahooTweetCount(topic, yahoo, {
-      matches: (t, term) => buzzMatchesTitleCorpus(t, [term]) || buzzMatchesTitleCorpus(term, [t]),
+      matches: (t, term) => buzzMatchesStrictTitleCorpus(t, [term]) || buzzMatchesStrictTitleCorpus(term, [t]),
     });
     return {
       id: row.id,
