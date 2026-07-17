@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buzzPrime,
   heatPrime,
+  clickHeat,
+  debateHeat,
   selectionV2RankScore,
   passesRankMin,
   passesSelectionV2,
@@ -11,10 +13,11 @@ import {
   TWEET_REF,
   RANK_MIN_DEFAULT,
   BUZZ_MIN_DEFAULT,
-  HEAT_MIN_DEFAULT,
   dvsPrime,
   hasMeasuredDivision,
   DVS_SOFT_FLOOR,
+  CLICK_HEAT_MIN,
+  DEBATE_HEAT_MIN,
 } from "../selection-v2";
 
 describe("buzzPrime", () => {
@@ -42,7 +45,7 @@ describe("tweetHeat", () => {
   });
 });
 
-describe("secondaryHeat", () => {
+describe("secondaryHeat（旧互換）", () => {
   it("シグナル無しは0", () => {
     expect(secondaryHeat({})).toBe(0);
   });
@@ -74,9 +77,61 @@ describe("secondaryHeat", () => {
     const youtubeHigher = secondaryHeat({ commentCount: 100, youtubeCommentCount: 3000 });
     expect(youtubeHigher).toBeCloseTo(yahooOnly);
   });
-  it("YouTubeの返信数が多いほど加点される（いいね数ではなく応酬の実測）", () => {
+  it("YouTubeの返信数が多いほど加点される", () => {
     expect(secondaryHeat({ youtubeReplyCount: 300 })).toBeGreaterThan(secondaryHeat({ youtubeReplyCount: 0 }));
     expect(secondaryHeat({ youtubeReplyCount: 300 })).toBeGreaterThan(secondaryHeat({ youtubeReplyCount: 100 }));
+  });
+});
+
+describe("clickHeat", () => {
+  it("tweetCountありなら対数圧縮値", () => {
+    const ch = clickHeat({}, 5000);
+    expect(ch).toBeCloseTo(1);
+  });
+  it("tweetCount無しは0", () => {
+    const ch = clickHeat({});
+    expect(ch).toBe(0);
+  });
+  it("tweetCount 0は0", () => {
+    const ch = clickHeat({ tweetCount: 0 });
+    expect(ch).toBe(0);
+  });
+  it("小さいtweetCountでも段階的に上がる", () => {
+    const low = clickHeat({}, 100);
+    const high = clickHeat({}, 1000);
+    expect(low).toBeLessThan(high);
+    expect(high).toBeLessThan(1);
+  });
+});
+
+describe("debateHeat", () => {
+  it("シグナル無しは0", () => {
+    expect(debateHeat({})).toBe(0);
+  });
+  it("コメント急増+1000で高い", () => {
+    expect(debateHeat({ commentCountSurge: true, commentCount: 1000 })).toBeGreaterThan(0.6);
+  });
+  it("投票分断度が高いと加点される（secondaryHeatとの違い）", () => {
+    const withPoll = debateHeat({
+      externalPoll: { question: "q", url: "https://x", choices: [], divisionScore: 0.8 },
+    });
+    const withoutPoll = debateHeat({});
+    expect(withPoll).toBeGreaterThan(withoutPoll);
+  });
+  it("コメント300〜999でも段階的に加点される", () => {
+    expect(debateHeat({ commentCount: 300 })).toBeGreaterThan(0);
+    expect(debateHeat({ commentCount: 500 })).toBeGreaterThan(debateHeat({ commentCount: 300 }));
+    expect(debateHeat({ commentCount: 1000 })).toBeGreaterThan(debateHeat({ commentCount: 500 }));
+  });
+  it("Yahooコメントが無くてもYouTubeコメント数が多ければ加点される", () => {
+    expect(debateHeat({ youtubeCommentCount: 3000 })).toBeGreaterThan(0);
+  });
+  it("コメント摩擦度が高いと加点される", () => {
+    expect(debateHeat({ commentFrictionScore: 0.5 })).toBeGreaterThan(debateHeat({}));
+    expect(debateHeat({ commentFrictionScore: 0.3 })).toBeGreaterThan(0);
+  });
+  it("YouTubeの返信数が多いほど加点される", () => {
+    expect(debateHeat({ youtubeReplyCount: 300 })).toBeGreaterThan(debateHeat({ youtubeReplyCount: 0 }));
   });
 });
 
@@ -158,45 +213,74 @@ describe("selectionV2RankScore", () => {
   it("積: buzzだけ高くても heat 0 なら score 0", () => {
     const r = selectionV2RankScore({ buzzScore: 5 });
     expect(r.rankScore).toBe(0);
-    expect(r.dvsPrime).toBe(1);
+    expect(r.clickHeat).toBe(0);
+    expect(r.debateHeat).toBe(0);
   });
 
   it("積: 両方高いと上位", () => {
-    const hot = selectionV2RankScore({ buzzScore: 4 }, { tweetCountOverride: 5000 });
-    const mild = selectionV2RankScore({ buzzScore: 4 }, { tweetCountOverride: 50 });
+    const hot = selectionV2RankScore(
+      { buzzScore: 4, commentCount: 2000, commentFrictionScore: 0.5 },
+      { tweetCountOverride: 5000 },
+    );
+    const mild = selectionV2RankScore(
+      { buzzScore: 4, commentCount: 200, commentFrictionScore: 0.1 },
+      { tweetCountOverride: 50 },
+    );
     expect(hot.rankScore).toBeGreaterThan(mild.rankScore);
+    expect(hot.rankScore).toBeGreaterThan(0);
+    expect(mild.rankScore).toBeGreaterThan(0);
   });
 
-  it("露出だけ強い（buzz高・tweet低）より熱量もある方が上", () => {
-    const buzzOnly = selectionV2RankScore({ buzzScore: 5 }, { tweetCountOverride: 20 });
-    const balanced = selectionV2RankScore({ buzzScore: 3 }, { tweetCountOverride: 3000 });
+  it("clickだけ高くdebateが低いとrankScoreは低い", () => {
+    const clickOnly = selectionV2RankScore(
+      { buzzScore: 5, tweetCount: 5000, commentFrictionScore: 0 },
+      { tweetCountOverride: 5000 },
+    );
+    const bothHigh = selectionV2RankScore(
+      { buzzScore: 5, tweetCount: 5000, commentCount: 2000 },
+      { tweetCountOverride: 5000 },
+    );
+    expect(clickOnly.debateHeat).toBe(0);
+    expect(bothHigh.debateHeat).toBeGreaterThan(0);
+    expect(bothHigh.rankScore).toBeGreaterThan(clickOnly.rankScore);
+  });
+
+  it("debateだけ高くclickが低いとrankScoreは低い", () => {
+    const debateOnly = selectionV2RankScore(
+      { buzzScore: 4, commentCount: 5000, commentFrictionScore: 0.8 },
+      { tweetCountOverride: 0 },
+    );
+    const bothHigh = selectionV2RankScore(
+      { buzzScore: 4, tweetCount: 5000, commentCount: 5000 },
+      { tweetCountOverride: 5000 },
+    );
+    expect(debateOnly.clickHeat).toBe(0);
+    expect(debateOnly.rankScore).toBe(0);
+    expect(bothHigh.rankScore).toBeGreaterThan(0);
+  });
+
+  it("露出だけ強い（buzz高・click低）よりバランスが良い方が上", () => {
+    const buzzOnly = selectionV2RankScore(
+      { buzzScore: 5, commentCount: 100, commentFrictionScore: 0.1 },
+      { tweetCountOverride: 20 },
+    );
+    const balanced = selectionV2RankScore(
+      { buzzScore: 3, commentCount: 500, commentFrictionScore: 0.4 },
+      { tweetCountOverride: 3000 },
+    );
+    expect(buzzOnly.rankScore).toBeGreaterThan(0);
+    expect(balanced.rankScore).toBeGreaterThan(0);
     expect(balanced.rankScore).toBeGreaterThan(buzzOnly.rankScore);
   });
 
-  it("熱量なしではDVSが偏っている（低い）と順位が下がる", () => {
-    const base = { buzzScore: 4, youtubeReplyCount: 150 }; // 副熱量だけ確保（heat guard非トリガー）
-    const unknown = selectionV2RankScore(base); // Conflict'=1.0
-    const split = selectionV2RankScore({ ...base, commentFrictionScore: 0.95 }); // Conflict'=0.95
-    const lopsidedCold = selectionV2RankScore({
-      ...base,
-      externalPoll: { question: "q", url: "https://x", choices: [], divisionScore: 0.05 },
-    }); // Conflict'=0.15
-    // DVSが極端に偏っている（lopsided）はunknownより低くなる
-    expect(lopsidedCold.rankScore).toBeLessThan(unknown.rankScore);
-    expect(split.rankScore).toBeGreaterThan(lopsidedCold.rankScore); // 高DVS>低DVS
-    expect(unknown.dvsPrime).toBe(1);
-  });
-
-  it("熱量あり（tweetCount>0）ではDVSに関わらずConflict'は中立", () => {
-    const base = { buzzScore: 4, tweetCount: 2000 };
-    const unknown = selectionV2RankScore(base);
-    const lopsidedWithHeat = selectionV2RankScore({
-      ...base,
-      externalPoll: { question: "q", url: "https://x", choices: [], divisionScore: 0.05 },
-    });
-    // 熱量があるのでDVS偏りでもrankScoreは同じ
-    expect(lopsidedWithHeat.rankScore).toBe(unknown.rankScore);
-    expect(unknown.dvsPrime).toBe(1);
+  it("clickHeatとdebateHeatが breakdown に含まれる", () => {
+    const r = selectionV2RankScore(
+      { buzzScore: 4, tweetCount: 5000, commentCount: 2000, commentFrictionScore: 0.5 },
+      { tweetCountOverride: 5000 },
+    );
+    expect(r.clickHeat).toBeGreaterThan(0);
+    expect(r.debateHeat).toBeGreaterThan(0);
+    expect(r.rankScore).toBe(r.buzzPrime * r.clickHeat * r.debateHeat);
   });
 });
 
@@ -208,23 +292,42 @@ describe("passesRankMin", () => {
 });
 
 describe("passesSelectionV2", () => {
-  it("Buzz・Heat・積のすべてが下限以上でないと通さない", () => {
-    // buzz高・heatゼロ
-    expect(
-      passesSelectionV2({ buzzPrime: 1, heatPrime: 0, rankScore: 0 }),
-    ).toBe(false);
-    // heatだけあるが buzz 不足
+  it("Buzz・Click・Debate・積のすべてが下限以上でないと通さない", () => {
+    // buzzだけ高く他ゼロ
     expect(
       passesSelectionV2({
-        buzzPrime: BUZZ_MIN_DEFAULT - 0.01,
-        heatPrime: 0.5,
-        rankScore: 0.2,
+        buzzPrime: 1,
+        heatPrime: 0,
+        clickHeat: 0,
+        debateHeat: 0,
+        rankScore: 0,
       }),
     ).toBe(false);
-    // 両方十分
-    const ok = selectionV2RankScore({ buzzScore: 3, tweetCount: 2000 });
+    // click高・debateゼロ（議論が無い）
+    expect(
+      passesSelectionV2({
+        buzzPrime: 0.5,
+        heatPrime: 0.5,
+        clickHeat: 0.5,
+        debateHeat: 0,
+        rankScore: 0,
+      }),
+    ).toBe(false);
+    // debate高・clickゼロ（ツイートが無い）
+    expect(
+      passesSelectionV2({
+        buzzPrime: 0.5,
+        heatPrime: 0.3,
+        clickHeat: 0,
+        debateHeat: 0.5,
+        rankScore: 0,
+      }),
+    ).toBe(false);
+    // 全部十分
+    const ok = selectionV2RankScore({ buzzScore: 3, tweetCount: 2000, commentCount: 500 });
     expect(ok.buzzPrime).toBeGreaterThanOrEqual(BUZZ_MIN_DEFAULT);
-    expect(ok.heatPrime).toBeGreaterThanOrEqual(HEAT_MIN_DEFAULT);
+    expect(ok.clickHeat).toBeGreaterThan(0);
+    expect(ok.debateHeat).toBeGreaterThanOrEqual(DEBATE_HEAT_MIN);
     expect(passesSelectionV2(ok)).toBe(true);
   });
 });

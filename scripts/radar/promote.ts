@@ -639,10 +639,12 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
   // 抜粋上、賛成/反対の両論が成立する話題だけを Writer 候補に残す。
   // fail-closed: 判定失敗・抜粋不足は通さない（熱量だけでカスが上がるのを防ぐ）。
   // 設問は lockedAxis.axis を使用（仮設問禁止。discover由来のvoteQuestionは使わない）
+  // 注: 実測データ（externalPoll/commentFriction/claimDiff）が強い場合は
+  // LLM呼び出しをスキップして通過（assessDebateLegitimacy内部でショートカット）
   {
     const legitimacyResult = await assessDebateLegitimacy({
       topic: c.title,
-      voteQuestion: lockedAxis.axis, // ← lockedAxis.axis を使用（仮設問禁止）
+      voteQuestion: lockedAxis.axis,
       excerpts: [
         ...primaryExcerpts,
         ...reportExcerpts,
@@ -651,6 +653,11 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
         ...pollingExcerpts,
       ],
       category: c.category ?? undefined,
+      // ★ 追加情報: 軸ロック結果・投票実測・コメント摩擦・媒体食い違い
+      lockedAxis,
+      externalPollDivision: c.evidence.externalPoll?.divisionScore,
+      commentFrictionScore: c.evidence.commentFrictionScore,
+      claimDiffConflicts: claimDiff.conflicts.length > 0 ? claimDiff.conflicts : undefined,
     });
     // 2026-07-16: predictedDivisionScoreによるハードゲート（lopsided_predicted）は撤去。
     // 実際の世論に関する判定（実測でもAI予測でも）は単独のハードゲートにせず、
@@ -686,6 +693,10 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
             ...pollingExcerpts,
           ],
           category: c.category ?? undefined,
+          lockedAxis,
+          externalPollDivision: c.evidence.externalPoll?.divisionScore,
+          commentFrictionScore: c.evidence.commentFrictionScore,
+          claimDiffConflicts: claimDiff.conflicts.length > 0 ? claimDiff.conflicts : undefined,
         });
         if (salvageResult.legitimate) {
           console.log(`  ✅ 代案設問でサルベージ成功: "${legitimacyResult.suggestedFrames[0]}"`);
@@ -722,6 +733,10 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
             ...pollingExcerpts,
           ],
           category: c.category ?? undefined,
+          lockedAxis,
+          externalPollDivision: c.evidence.externalPoll?.divisionScore,
+          commentFrictionScore: c.evidence.commentFrictionScore,
+          claimDiffConflicts: claimDiff.conflicts.length > 0 ? claimDiff.conflicts : undefined,
         });
         if (salvageResult.legitimate) {
           console.log(`  ✅ 両論フォーカス設問でサルベージ成功`);
@@ -755,6 +770,10 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
               ...pollingExcerpts,
             ],
             category: c.category ?? undefined,
+            lockedAxis,
+            externalPollDivision: c.evidence.externalPoll?.divisionScore,
+            commentFrictionScore: c.evidence.commentFrictionScore,
+            claimDiffConflicts: claimDiff.conflicts.length > 0 ? claimDiff.conflicts : undefined,
           });
           if (salvageResult.legitimate) {
             console.log(`  ✅ 中立化設問でサルベージ成功`);
@@ -800,12 +819,12 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
 
   const suff = evaluateBuzzPromoteSufficiency(c.evidence);
   const baseBreakdown = selectionV2RankScore(c.evidence);
-  const combinedCp = combineConflictPrime(
-    baseBreakdown.conflictPrime,
-    claimDiff.conflicts.length,
-  );
-  // 事後的な議論熱（claimDiffの食い違い数）を反映したプロモートスコア
-  const promoteScore = baseBreakdown.rankScore * (combinedCp / baseBreakdown.conflictPrime);
+  // claimDiff.conflicts（媒体の食い違い）をDebateHeat'に上乗せ（最大+0.15）
+  const claimDiffBonus = Math.min(0.15, claimDiff.conflicts.length * 0.05);
+  const debateWithDiff = Math.min(1, baseBreakdown.debateHeat + claimDiffBonus);
+  const promoteScore = baseBreakdown.buzzPrime * baseBreakdown.clickHeat * debateWithDiff;
+  // 旧互換: combinedConflictPrimeを保存（audit用）
+  const combinedCp = combineConflictPrime(baseBreakdown.conflictPrime, claimDiff.conflicts.length);
   const selectionBreakdown = { ...baseBreakdown, combinedConflictPrime: combinedCp, claimDiffConflicts: claimDiff.conflicts.length };
 
   return {

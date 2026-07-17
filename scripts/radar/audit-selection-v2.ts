@@ -37,7 +37,6 @@ import {
   selectionV2RankScore,
   passesSelectionV2,
   BUZZ_MIN_DEFAULT,
-  HEAT_MIN_DEFAULT,
   RANK_MIN_DEFAULT,
 } from "./lib/selection-v2";
 import { matchYahooTweetCount } from "./lib/match-tweet-count";
@@ -71,9 +70,9 @@ function failReason(v2: ReturnType<typeof selectionV2RankScore>, eligible: boole
   if (!eligible) return "eligible外（buzz/証拠/debateType等）";
   const parts: string[] = [];
   if (v2.buzzPrime < BUZZ_MIN_DEFAULT) parts.push(`Buzz'不足(${v2.buzzPrime.toFixed(2)}<${BUZZ_MIN_DEFAULT})`);
-  if (v2.heatPrime < HEAT_MIN_DEFAULT) parts.push(`Heat'不足(${v2.heatPrime.toFixed(2)}<${HEAT_MIN_DEFAULT})`);
+  if (v2.clickHeat <= 0 && v2.debateHeat <= 0) parts.push("click/debate両方ゼロ");
   if (v2.rankScore < RANK_MIN_DEFAULT) parts.push(`積不足(${v2.rankScore.toFixed(3)}<${RANK_MIN_DEFAULT})`);
-  if (parts.length === 0) return "Buzz×Heat通過";
+  if (parts.length === 0) return "Buzz×Click×Debate通過";
   return parts.join(" / ");
 }
 
@@ -172,7 +171,7 @@ async function main() {
         `${i + 1}. [${r.v2.rankScore.toFixed(3)}] ${r.title}\n` +
           `   設問: ${r.voteQuestion ?? "（なし）"}\n` +
           `   type=${r.debateType} cat=${r.category} buzz=${r.buzzScore} tweets=${r.tweetCount} comments=${r.commentCount ?? "-"}\n` +
-          `   buzz'=${r.v2.buzzPrime.toFixed(2)} heat'=${r.v2.heatPrime.toFixed(2)} sources=${(r.buzzSources ?? []).join(",") || "-"}\n` +
+          `   buzz'=${r.v2.buzzPrime.toFixed(2)} click'=${r.v2.clickHeat.toFixed(2)} debate'=${r.v2.debateHeat.toFixed(2)} sources=${(r.buzzSources ?? []).join(",") || "-"}\n` +
           `   報道例:\n` +
           (r.news.length ? r.news.map((n) => `     - ${n}`).join("\n") : "     （newsなし）"),
       );
@@ -192,7 +191,7 @@ async function main() {
     .forEach((r, i) => {
       console.log(
         `${i + 1}. [${r.v2.rankScore.toFixed(3)}] ${r.title}\n` +
-          `   → ${r.reason}  buzz=${r.buzzScore} tweets=${r.tweetCount} heat'=${r.v2.heatPrime.toFixed(2)}`,
+          `   → ${r.reason}  buzz=${r.buzzScore} tweets=${r.tweetCount} click'=${r.v2.clickHeat.toFixed(2)} debate'=${r.v2.debateHeat.toFixed(2)}`,
       );
     });
 
@@ -273,19 +272,19 @@ async function main() {
   const summary = {
     pendingSampled: audited.length,
     eligible: audited.filter((a) => a.eligible).length,
-    passBuzzHeat: passBoth.length,
+    passBuzzClickDebate: passBoth.length,
     selectedForPromote: selected.map((c) => c.title),
     legitimacyPass: legitRows.filter((r) => r.legitimate).length,
     legitimacyFail: legitRows.filter((r) => !r.legitimate).length,
     failBuckets: {
       notEligible: audited.filter((a) => !a.eligible).length,
       buzzLow: audited.filter((a) => a.eligible && a.v2.buzzPrime < BUZZ_MIN_DEFAULT).length,
-      heatLow: audited.filter((a) => a.eligible && a.v2.heatPrime < HEAT_MIN_DEFAULT).length,
+      clickDebateZero: audited.filter((a) => a.eligible && a.v2.clickHeat <= 0 && a.v2.debateHeat <= 0).length,
       productLow: audited.filter(
         (a) =>
           a.eligible &&
           a.v2.buzzPrime >= BUZZ_MIN_DEFAULT &&
-          a.v2.heatPrime >= HEAT_MIN_DEFAULT &&
+          (a.v2.clickHeat > 0 || a.v2.debateHeat > 0) &&
           a.v2.rankScore < RANK_MIN_DEFAULT,
       ).length,
     },

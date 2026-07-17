@@ -1,63 +1,78 @@
 /**
- * Selection V2 — Rank スコア（Buzz' × Heat' × DVS'）と公開可否。
- * docs/PIPELINE_SELECTION_V2.md 準拠。
+ * Selection V2.1 — Rank スコア（Buzz' × ClickHeat' × DebateHeat'）。
  *
- * 公開には Buzz'/Heat' 下限 + 積下限 + 両論Gate（抜粋後）が必要。
- * DVS' は並び用の独立因子（不明は×1＝ペナルティなし。測れたときだけ効く）。
+ * 2026-07-17 全面改訂:
+ * - Heat'（主85%+副15%混在）を ClickHeat'（ツイート量）と
+ *   DebateHeat'（コメント摩擦・投票分断）に分離。
+ * - これにより「ツイートは多いが議論ゼロのゴシップ」と
+ *   「ツイート少ないがコメントで大荒れの政治争点」を正しく区別する。
+ * - rankScore = Buzz' × ClickHeat' × DebateHeat'
+ * - Freshness は呼び出し側 (weightedPromoteScore) で乗算。
+ * - Conflict'（旧DVS因子）は削除。DebateHeat' がその機能を包含する。
  */
 import type { SavedEvidence } from "./promote-logic";
 
-/** 「特大」SNS熱の目安。実分布で校正する */
+/** 「特大」SNSクリック熱の目安。実分布で校正する */
 export const TWEET_REF = 5000;
 
-/** 積スコアの下限（両方そこそこ必要） */
-export const RANK_MIN_DEFAULT = 0.12;
+/** 積スコアの下限（3因子積） */
+export const RANK_MIN_DEFAULT = 0.04;
 
 /**
  * Buzz' 下限。0.4 ≒ effectiveScore>=2（クロスソース最低ライン）。
- * 片方だけ高くても、露出が無ければ出さない。
+ * 露出が無ければ出さない。
  */
 export const BUZZ_MIN_DEFAULT = 0.4;
 
 /**
- * Heat' 下限。コメント副熱量だけでも届く程度だが、完全ゼロ熱は出さない。
- * （tweetCount無しの副熱量キャップ0.55のうち、300コメント程度で約0.084、1000で約0.21）
+ * ClickHeat' 下限。tweetCount無しでもコメント・摩擦がある話題を通すため 0。
+ * （clickHeat=0 でも debateHeat>0 なら rankScore=0 なので実質debateだけでは通らない）
  */
-export const HEAT_MIN_DEFAULT = 0.15;
+export const CLICK_HEAT_MIN = 0;
 
 /**
- * 実測DVSが極端に低いときのソフト下限。
- * 0にすると積が死ぬが、ハードゲートにはせず順位だけ沈める。
+ * DebateHeat' 下限。コメント100程度で届く最低ライン。
+ * 全く議論がない話題は clickHeat が高くても弾く。
+ */
+export const DEBATE_HEAT_MIN = 0.05;
+
+/**
+ * 実測DVSが極端に低いときのソフト下限（旧互換）。
+ * 現在は DebateHeat' に包含されるが、audit用に残す。
+ * @deprecated DebateHeat' が代替
  */
 export const DVS_SOFT_FLOOR = 0.15;
 
 export interface SelectionV2Breakdown {
   buzzPrime: number;
+  /**
+   * @deprecated ClickHeat' + DebateHeat' に分離。互換性のため残す。
+   * rankScore計算には使わない。
+   */
   heatPrime: number;
   /**
-   * @deprecated Conflict'に統合。rankScore計算には使わない。audit/テスト互換性のために残す。
+   * 「いま人がそれを見たいと思ってる」度。
+   * tweetCountを対数圧縮（log1p）した値。tweetCount無しは0。
+   */
+  clickHeat: number;
+  /**
+   * 「人がそれについて議論したがってる」度。
+   * コメント数 + 摩擦度 + YouTube返信 + 投票拮抗 を総合。
+   */
+  debateHeat: number;
+  /**
+   * @deprecated Conflict'に統合。rankScore計算には使わない。互換性のために残す。
    */
   dvsPrime: number;
   /**
-   * Conflict'（対立因子）: DVS信号（poll division, comment friction）から算出する係数。
-   * DVS未測定 → 1.0（中立。データ不足を一方的と決めつけない）
-   * DVS測定済み → 分断度をそのまま系数に（0〜1、極端な偏りはDVS_SOFT_FLOORで下限保護）
-   * ただし熱量の実測がある場合はペナルティなし（tweetCount/commentCountで実際に盛り上がっているのを
-   * 分断が低いという理由だけで抑制しない）。
-   * claimDiffの食い違い数など「事後的な実測」は researchCandidate で combineConflictPrime により乗算。
-   *
-   * 2026-07-16: 以前はDVS'を独立因子にしていたが、Grok 4.5改善案の「4掛け算にしない」
-   * 原則に従い Conflict' 1因子に統合。rankScore = Buzz' × Heat' × Conflict'（3因子）。
+   * @deprecated DebateHeat' が包含。互換性のために残す。
    */
   conflictPrime: number;
-  /** claimDiff.conflicts 数から add-on した分（combineConflictPrime適用後）。researchCandidateで設定 */
   combinedConflictPrime?: number;
   claimDiffConflicts?: number;
   rankScore: number;
-  /** tweetCount が evidence / 引数にあるか */
   hasTweetCount: boolean;
   tweetCount: number;
-  /** 分断シグナルが1つでも実測/予測できたか */
   hasMeasuredDvs: boolean;
 }
 
@@ -86,7 +101,7 @@ export type DivisionEvidence = Pick<
  *   2. commentFrictionScore — Yahooコメントの反応数（共感/うーん）から算術だけで求めた実測値
  *   3. commentStanceSpread — コメント文面のLLM判定（confidenceで重み付け）
  *   4. predictedDivisionScore — Gate（assessDebateLegitimacy）が抜粋から推定したLLM予測
- * 上位が無ければ下位へフォールバック。何も無ければ 0（呼び出し側は hasMeasuredDivision で不明と区別）。
+ * 上位が無ければ下位へフォールバック。何も無ければ 0。
  */
 export function resolveDivisionScore(evidence: DivisionEvidence): number {
   if (evidence.externalPoll && Number.isFinite(evidence.externalPoll.divisionScore)) {
@@ -108,7 +123,7 @@ export function resolveDivisionScore(evidence: DivisionEvidence): number {
   return 0;
 }
 
-/** 分断シグナルが1つでもあるか（0点の実測と「不明」を区別する） */
+/** 分断シグナルが1つでもあるか */
 export function hasMeasuredDivision(evidence: DivisionEvidence): boolean {
   if (evidence.externalPoll && Number.isFinite(evidence.externalPoll.divisionScore)) return true;
   if (typeof evidence.commentFrictionScore === "number" && Number.isFinite(evidence.commentFrictionScore)) {
@@ -126,10 +141,8 @@ export function hasMeasuredDivision(evidence: DivisionEvidence): boolean {
 }
 
 /**
- * DVS'（独立因子）- 2026-07-16の実装。
- * 現在は Conflict' への統合により直接の乗算は行わないが、hasMeasuredDvs の
- * 型情報として残す（SelectionV2Breakdown には含まれず、audit用にのみ expose）。
- * @deprecated Conflict' に統合。rankScore 計算で直接使用しない。
+ * DVS'（独立因子）- 互換性のために残す。
+ * @deprecated DebateHeat' が代替。rankScore計算で使用しない。
  */
 export function dvsPrime(evidence: DivisionEvidence): { dvsPrime: number; hasMeasured: boolean } {
   if (!hasMeasuredDivision(evidence)) {
@@ -148,7 +161,9 @@ export function buzzPrime(buzzScore: number | undefined | null): number {
 }
 
 /**
- * 主熱量: log1p(tweetCount) / log1p(TWEET_REF)
+ * クリック熱量: log1p(tweetCount) / log1p(TWEET_REF)
+ * 「いま人がそれを見たいと思ってる」度の代理指標。
+ * tweetCount無しは0（別途 buzzScore で露出は評価済み）。
  */
 export function tweetHeat(tweetCount: number, tweetRef: number = TWEET_REF): number {
   const n = Math.max(0, tweetCount);
@@ -157,10 +172,83 @@ export function tweetHeat(tweetCount: number, tweetRef: number = TWEET_REF): num
 }
 
 /**
- * 副熱量: コメント実測のみ。0〜1。
- * 分断度は DVS' に独立させた（二重計上しない）。
- * コメント数はYahoo!記事とYouTube動画の高い方を採用する。
- * YouTube返信数は応酬の実測として別枠加点。
+ * ClickHeat': ツイート量ベースのクリック熱量。
+ * tweetCountがあれば対数圧縮値、無ければ0。
+ * （tweetCountが無くてもTV/Yahoo Newsで露出は buzzScore で評価済みのため、
+ *   クリック熱量の追加評価は不要。Yahoo RT無し = 現時点でX上で話題になっていない）
+ */
+export function clickHeat(
+  evidence: HeatEvidence,
+  tweetCountOverride?: number | null,
+  tweetRef: number = TWEET_REF,
+): number {
+  const fromEvidence =
+    typeof evidence.tweetCount === "number" && Number.isFinite(evidence.tweetCount)
+      ? evidence.tweetCount
+      : null;
+  const fromOverride =
+    typeof tweetCountOverride === "number" && Number.isFinite(tweetCountOverride)
+      ? tweetCountOverride
+      : null;
+  const count = fromOverride ?? fromEvidence ?? 0;
+  if (count <= 0) return 0;
+  return tweetHeat(count, tweetRef);
+}
+
+/**
+ * DebateHeat': 議論熱量（0〜1）。
+ * 「人がそれについて議論したがってる」度をコメント・摩擦・投票・YouTube応酬から測定。
+ *
+ * 構成（合計1.0超える場合はclamp）:
+ * - コメント数: Yahoo+YouTubeの高い方（3000超で+0.35、1000超+0.30、500超+0.20、300超+0.12、100超+0.05）
+ * - コメント急増: +0.40（炎上加速）
+ * - YouTube返信（応酬の実測）: 300超+0.30、100超+0.15
+ * - YouTubeいいね（共感）: 1万超+0.15、3000超+0.08
+ * - コメント摩擦度: 0.5超+0.30、0.3超+0.15
+ * - 投票拮抗: divisionScore>=0.2で+0.20
+ */
+export function debateHeat(evidence: HeatEvidence): number {
+  let heat = 0;
+
+  // コメント数（Yahoo + YouTube、高い方）
+  const count = Math.max(evidence.commentCount ?? 0, evidence.youtubeCommentCount ?? 0);
+  if (count >= 3000) heat += 0.35;
+  else if (count >= 1000) heat += 0.30;
+  else if (count >= 500) heat += 0.20;
+  else if (count >= 300) heat += 0.12;
+  else if (count >= 100) heat += 0.05;
+
+  // コメント急増（炎上加速）
+  if (evidence.commentCountSurge) heat += 0.40;
+
+  // YouTube返信（実際の応酬）
+  const replyCount = evidence.youtubeReplyCount ?? 0;
+  if (replyCount >= 300) heat += 0.30;
+  else if (replyCount >= 100) heat += 0.15;
+
+  // YouTubeいいね（共感）
+  const likeCount = evidence.youtubeLikeCount ?? 0;
+  if (likeCount >= 10000) heat += 0.15;
+  else if (likeCount >= 3000) heat += 0.08;
+
+  // コメント摩擦度（議論の激しさ）
+  const friction = evidence.commentFrictionScore ?? 0;
+  if (friction >= 0.5) heat += 0.30;
+  else if (friction >= 0.3) heat += 0.15;
+
+  // 投票拮抗（実際の世論の分断）
+  const pollDiv = evidence.externalPoll?.divisionScore;
+  if (typeof pollDiv === "number" && pollDiv >= 0.2) {
+    heat += 0.20;
+  }
+
+  return Math.min(1, heat);
+}
+
+/**
+ * 副熱量（旧互換用）。debateHeat と同じ計算だが、commentCountSurgeを
+ * 別枠にしないなど厳密な互換が必要な audit 用。
+ * @deprecated debateHeat を使うこと
  */
 export function secondaryHeat(evidence: HeatEvidence): number {
   let commentHeat = 0;
@@ -173,7 +261,6 @@ export function secondaryHeat(evidence: HeatEvidence): number {
   const replyCount = evidence.youtubeReplyCount ?? 0;
   if (replyCount >= 300) commentHeat += 0.3;
   else if (replyCount >= 100) commentHeat += 0.15;
-  // YouTubeいいね: コメントまではしないが共感を集めているシグナル（viewCountより熱量に直結）
   const likeCount = evidence.youtubeLikeCount ?? 0;
   if (likeCount >= 10000) commentHeat += 0.15;
   else if (likeCount >= 3000) commentHeat += 0.08;
@@ -181,7 +268,8 @@ export function secondaryHeat(evidence: HeatEvidence): number {
 }
 
 /**
- * Heat': tweetCount があれば主85%+副15%。無ければ副のみ・上限0.55。
+ * Heat'（旧 - 主85%+副15%混在モデル）。
+ * @deprecated ClickHeat' + DebateHeat' に分離。互換性のために残す。
  */
 export function heatPrime(
   evidence: HeatEvidence,
@@ -204,10 +292,8 @@ export function heatPrime(
       : null;
   const tweetCount = fromOverride ?? fromEvidence ?? 0;
   const hasTweetCount = (fromOverride ?? fromEvidence) !== null && tweetCount > 0;
-
   const th = tweetHeat(tweetCount, tweetRef);
   const sh = secondaryHeat(evidence);
-
   if (hasTweetCount) {
     return {
       heatPrime: Math.min(1, 0.85 * th + 0.15 * sh),
@@ -227,62 +313,59 @@ export function heatPrime(
 }
 
 /**
- * Conflict'（対立因子）: DVSの実測値をそのまま係数にする（0〜1）。
- * - 熱量の実測がある（tweetCount/commentCount/surge）→ 1.0（中立。実際に盛り上がっているのを抑制しない）
- * - 熱量なし、DVS測定済み → clamp(DVS実測値, SOFT_FLOOR, 1.0)。偏りが強いと低くなり順位が沈む
- * - 熱量なし、DVS不明 → 1.0（中立。データ不足を一方的と決めつけない）
- *
- * rankScore = Buzz' × Heat' × Conflict'（3因子積）。
+ * Conflict'（対立因子）- 互換性のために残す。
+ * @deprecated DebateHeat' が包含。rankScore計算で使用しない。
  */
 export function conflictPrime(
   evidence: DivisionEvidence & Pick<HeatEvidence, "tweetCount" | "commentCount" | "commentCountSurge">,
 ): number {
-  // 熱量の実測がある → 中立。実際に盛り上がっているトピックを抑制しない
   const hasHeatEvidence =
     (typeof evidence.tweetCount === "number" && evidence.tweetCount > 0) ||
     (typeof evidence.commentCount === "number" && evidence.commentCount >= 300) ||
     evidence.commentCountSurge === true;
   if (hasHeatEvidence) return 1.0;
-
-  // 熱量なし → DVSで判断（偏りが強いと順位が沈む）
   if (!hasMeasuredDivision(evidence)) return 1.0;
   return Math.max(DVS_SOFT_FLOOR, Math.min(1, resolveDivisionScore(evidence)));
 }
 
 /**
- * combineConflictPrime: researchCandidate（抜粋後）で呼ぶ。
- * 証拠ベースの conflictPrime に加え、claimDiff.conflicts の数に応じた上乗せを行う。
- * 複数媒体が実際に食い違っている＝議論熱が確実にある証拠なので、追加で最大0.15上乗せする。
+ * combineConflictPrime: 互換性のために残す。
+ * @deprecated debateHeat が claimDiff を包含する形で代替。
  */
 export function combineConflictPrime(
   baseConflictPrime: number,
   claimDiffConflicts: number,
 ): number {
   if (claimDiffConflicts <= 0) return baseConflictPrime;
-  // conflicts 1件あたり+0.05、最大+0.15
   const mediaBonus = Math.min(0.15, claimDiffConflicts * 0.05);
   return Math.min(1.0, baseConflictPrime + mediaBonus);
 }
 
 /**
- * rankScore = Buzz' × Heat' × Conflict'（3因子。2026-07-16: DVS'別乗は廃止、Conflict'に統合）
+ * rankScore = Buzz' × ClickHeat' × DebateHeat'（3因子）。
+ * Freshness は呼び出し側で乗算。
  */
 export function selectionV2RankScore(
   evidence: Pick<SavedEvidence, "buzzScore"> & HeatEvidence,
   opts?: { tweetCountOverride?: number | null; tweetRef?: number },
 ): SelectionV2Breakdown {
   const bp = buzzPrime(evidence.buzzScore);
+  const ch = clickHeat(evidence, opts?.tweetCountOverride, opts?.tweetRef);
+  const dh = debateHeat(evidence);
+  // 旧互換
   const heat = heatPrime(evidence, opts?.tweetCountOverride, opts?.tweetRef);
   const dvs = dvsPrime(evidence);
   const cp = conflictPrime(evidence);
   return {
     buzzPrime: bp,
     heatPrime: heat.heatPrime,
+    clickHeat: ch,
+    debateHeat: dh,
     dvsPrime: dvs.dvsPrime,
     conflictPrime: cp,
     tweetHeat: heat.tweetHeat,
     secondaryHeat: heat.secondaryHeat,
-    rankScore: bp * heat.heatPrime * cp,
+    rankScore: bp * ch * dh,
     hasTweetCount: heat.hasTweetCount,
     tweetCount: heat.tweetCount,
     hasMeasuredDvs: dvs.hasMeasured,
@@ -295,20 +378,21 @@ export function passesRankMin(rankScore: number, rankMin: number = RANK_MIN_DEFA
 }
 
 /**
- * 公開してよい Rank か（Buzz・Heat・積の下限）。
- * DVSは不明時ペナルティなしのため下限に入れない（測れたときだけ並びで効く）。
- * 両論Gateは呼び出し側（抜粋後の assessDebateLegitimacy）で別途必須。
+ * 公開してよい Rank か（Buzz・ClickHeat・DebateHeat・積の下限）。
+ * 両論Gateは呼び出し側（assessDebateLegitimacy）で別途必須。
  */
 export function passesSelectionV2(
-  breakdown: Pick<SelectionV2Breakdown, "buzzPrime" | "heatPrime" | "rankScore">,
-  opts?: { rankMin?: number; buzzMin?: number; heatMin?: number },
+  breakdown: Pick<SelectionV2Breakdown, "buzzPrime" | "clickHeat" | "debateHeat" | "heatPrime" | "rankScore">,
+  opts?: { rankMin?: number; buzzMin?: number; clickMin?: number; debateMin?: number },
 ): boolean {
   const rankMin = opts?.rankMin ?? RANK_MIN_DEFAULT;
   const buzzMin = opts?.buzzMin ?? BUZZ_MIN_DEFAULT;
-  const heatMin = opts?.heatMin ?? HEAT_MIN_DEFAULT;
+  const clickMin = opts?.clickMin ?? CLICK_HEAT_MIN;
+  const debateMin = opts?.debateMin ?? DEBATE_HEAT_MIN;
   return (
     breakdown.rankScore >= rankMin &&
     breakdown.buzzPrime >= buzzMin &&
-    breakdown.heatPrime >= heatMin
+    breakdown.clickHeat >= clickMin &&
+    breakdown.debateHeat >= debateMin
   );
 }

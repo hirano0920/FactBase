@@ -27,8 +27,9 @@ function evidence(overrides: Partial<SavedEvidence> = {}) {
     officialEvents: [],
     gatheredAt: "",
     buzzScore: 3,
-    /** Selection V2: Heat' が無いと RANK_MIN で全滅するためテスト既定で熱量を付与 */
+    /** Selection V2: Click' と Debate' の両方が無いと RANK_MIN で全滅するためテスト既定で付与 */
     tweetCount: 2000,
+    commentCount: 500,
     debateType: "policy",
     debatable: true,
   };
