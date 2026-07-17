@@ -154,6 +154,76 @@ function logHeldSummary() {
   console.log("  各HELD理由は記事生成パイプライン改善の優先度判断に使ってください。\n");
 }
 
+/**
+ * 軸ロック不能時のフォールバック: トピックの種別に応じた対立軸を生成する。
+ * 政治/法律 → 賛成/反対。経済ショック → 解釈軸。スキャンダル → 擁護/批判。
+ * LLM呼び出し不要の簡易ルールベース。
+ */
+function fallbackAxisByTopic(title: string): { axis: string; sideA: string; sideB: string } {
+  const t = title;
+
+  // 株価暴落/経済ショック系
+  if (/暴落|急落|下落|時価総額|株価|バブル|景気|不況/.test(t)) {
+    return {
+      axis: `${t}、この経済ショックをどう捉えるべきか：一時的な調整か、構造的な下落か`,
+      sideA: "一時的な調整・買い場として捉えるべき",
+      sideB: "構造的な下落・警戒すべきシグナル",
+    };
+  }
+
+  // 企業ニュース（特許訴訟/賠償命令/提携/買収）
+  if (/特許|賠償|訴訟|提携|買収|投資|倒産|破綻/.test(t)) {
+    return {
+      axis: `${t}、この出来事の影響をどう評価すべきか：企業にとってのチャンスかリスクか`,
+      sideA: "ポジティブに評価・長期的な成長につながる",
+      sideB: "ネガティブに評価・リスクが顕在化した",
+    };
+  }
+
+  // 法律/制度/法案系
+  if (/法案|改正|可決|成立|制定|制度|法|罰則|規制/.test(t)) {
+    return {
+      axis: `${t}、この制度変更に賛成か反対か`,
+      sideA: "賛成・制度変更を支持する",
+      sideB: "反対・制度変更に慎重であるべき",
+    };
+  }
+
+  // 外交/安全保障/国際関係
+  if (/イラン|ウクライナ|ロシア|中国|北朝鮮|安保|防衛|制裁|軍事/.test(t)) {
+    return {
+      axis: `${t}、日本の立場としてどう対応すべきか`,
+      sideA: "積極的に関与・対応すべき",
+      sideB: "慎重に対応・巻き込まれるべきでない",
+    };
+  }
+
+  // スキャンダル/疑惑
+  if (/疑惑|問題|批判|謝罪|不祥事|隠蔽|不正/.test(t)) {
+    return {
+      axis: `${t}、この問題の責任はどこにあるのか`,
+      sideA: "当事者の責任が重い",
+      sideB: "制度や環境に問題がある",
+    };
+  }
+
+  // 政治/選挙/人事
+  if (/選挙|内閣|総理|大臣|知事|市長|辞任|更迭/.test(t)) {
+    return {
+      axis: `${t}、この判断を支持するか不支持か`,
+      sideA: "支持する・適切な判断だ",
+      sideB: "不支持・問題のある判断だ",
+    };
+  }
+
+  // その他: 汎用フォールバック
+  return {
+    axis: `${t}について、現状をどう評価すべきか`,
+    sideA: "肯定的に評価する",
+    sideB: "批判的に評価する",
+  };
+}
+
 async function main() {
   heldReasons.clear(); // ★ C: HELD集計リセット
   console.log(`📰 Radar promote 開始${DRY_RUN ? "（--dry-run: DB書き込みなし）" : ""}`);
@@ -708,13 +778,14 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
   } else {
     // 真のfail-soft: 軸ロック不能でもフォールバック軸でWriterに進める。
     // Legitimacy Gate（後続）が両論性を確認済みのトピックを「軸がロックできないから」
-    // HELDするのは過剰排除。voteQuestion→generic軸の順にフォールバックする。
+    // HELDするのは過剰排除。voteQuestion→トピック種別に応じた軸の順にフォールバックする。
     if (c.evidence.voteQuestion) {
       lockedAxis = { axis: c.evidence.voteQuestion, sideA: "賛成", sideB: "反対" };
       console.warn(`  ⚠️ 軸ロック不能 → voteQuestionをフォールバック軸に使用: "${lockedAxis.axis}"`);
     } else {
-      lockedAxis = { axis: `${c.title}について、賛成か反対か`, sideA: "賛成", sideB: "反対" };
-      console.warn(`  ⚠️ 軸ロック不能 → トピックから仮軸を生成: "${lockedAxis.axis}"`);
+      // トピック種別に応じたフォールバック軸
+      lockedAxis = fallbackAxisByTopic(c.title);
+      console.warn(`  ⚠️ 軸ロック不能 → トピック種別からフォールバック軸を生成: "${lockedAxis.axis}"`);
     }
   }
 
