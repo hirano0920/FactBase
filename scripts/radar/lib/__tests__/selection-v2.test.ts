@@ -130,7 +130,8 @@ describe("debateHeat", () => {
     expect(debateHeat({})).toBe(0);
   });
   it("コメント急増+1000で高い", () => {
-    expect(debateHeat({ commentCountSurge: true, commentCount: 1000 })).toBeGreaterThan(0.6);
+    // frictionWeight: min(1, 0.3×3)=0.9 → countHeat(0.30)×0.9+surge(0.40)=0.67 > 0.6
+    expect(debateHeat({ commentCountSurge: true, commentCount: 1000, commentFrictionScore: 0.3 })).toBeGreaterThan(0.6);
   });
   it("投票分断度が高いと加点される（secondaryHeatとの違い）", () => {
     const withPoll = debateHeat({
@@ -140,16 +141,20 @@ describe("debateHeat", () => {
     expect(withPoll).toBeGreaterThan(withoutPoll);
   });
   it("コメント300〜999でも段階的に加点される", () => {
-    expect(debateHeat({ commentCount: 300 })).toBeGreaterThan(0);
-    expect(debateHeat({ commentCount: 500 })).toBeGreaterThan(debateHeat({ commentCount: 300 }));
-    expect(debateHeat({ commentCount: 1000 })).toBeGreaterThan(debateHeat({ commentCount: 500 }));
+    expect(debateHeat({ commentCount: 300, commentFrictionScore: 0.3 })).toBeGreaterThan(0);
+    expect(debateHeat({ commentCount: 500, commentFrictionScore: 0.3 })).toBeGreaterThan(debateHeat({ commentCount: 300, commentFrictionScore: 0.3 }));
+    expect(debateHeat({ commentCount: 1000, commentFrictionScore: 0.3 })).toBeGreaterThan(debateHeat({ commentCount: 500, commentFrictionScore: 0.3 }));
   });
   it("Yahooコメントが無くてもYouTubeコメント数が多ければ加点される", () => {
-    expect(debateHeat({ youtubeCommentCount: 3000 })).toBeGreaterThan(0);
+    // youtubeCommentCount=3000 → count=3000, countHeat=0.35, frictionWeight=min(1,0.3×3)=0.9
+    expect(debateHeat({ youtubeCommentCount: 3000, commentFrictionScore: 0.3 })).toBeGreaterThan(0);
   });
-  it("コメント摩擦度が高いと加点される", () => {
-    expect(debateHeat({ commentFrictionScore: 0.5 })).toBeGreaterThan(debateHeat({}));
-    expect(debateHeat({ commentFrictionScore: 0.3 })).toBeGreaterThan(0);
+  it("コメント摩擦度が高いと加点（コメント熱量の重みとして間接的に）", () => {
+    // friction=0.5 → weight=1.0、countHeat(0.20)×1.0=0.20
+    // friction=0 (default) → weight=0、countHeat=0
+    expect(debateHeat({ commentCount: 500, commentFrictionScore: 0.5 })).toBeGreaterThan(debateHeat({ commentCount: 500 }));
+    // friction=0.3 → weight=0.9 → countHeat=0.20×0.9=0.18 > 0
+    expect(debateHeat({ commentCount: 500, commentFrictionScore: 0.3 })).toBeGreaterThan(0);
   });
   it("YouTubeの返信数が多いほど加点される", () => {
     expect(debateHeat({ youtubeReplyCount: 300 })).toBeGreaterThan(debateHeat({ youtubeReplyCount: 0 }));
@@ -258,7 +263,7 @@ describe("selectionV2RankScore", () => {
       { tweetCountOverride: 5000 },
     );
     const bothHigh = selectionV2RankScore(
-      { buzzScore: 5, tweetCount: 5000, commentCount: 2000 },
+      { buzzScore: 5, tweetCount: 5000, commentCount: 2000, commentFrictionScore: 0.3 },
       { tweetCountOverride: 5000 },
     );
     expect(clickOnly.debateHeat).toBe(0);
@@ -272,7 +277,7 @@ describe("selectionV2RankScore", () => {
       { tweetCountOverride: 0 },
     );
     const bothHigh = selectionV2RankScore(
-      { buzzScore: 4, tweetCount: 5000, commentCount: 5000 },
+      { buzzScore: 4, tweetCount: 5000, commentCount: 5000, commentFrictionScore: 0.3 },
       { tweetCountOverride: 5000 },
     );
     expect(debateOnly.clickHeat).toBe(0);
@@ -345,7 +350,7 @@ describe("passesSelectionV2", () => {
       }),
     ).toBe(false);
     // 全部十分
-    const ok = selectionV2RankScore({ buzzScore: 3, tweetCount: 2000, commentCount: 500 });
+    const ok = selectionV2RankScore({ buzzScore: 3, tweetCount: 2000, commentCount: 500, commentFrictionScore: 0.3 });
     expect(ok.buzzPrime).toBeGreaterThanOrEqual(BUZZ_MIN_DEFAULT);
     expect(ok.clickHeat).toBeGreaterThan(0);
     expect(ok.debateHeat).toBeGreaterThanOrEqual(DEBATE_HEAT_MIN);

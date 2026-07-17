@@ -186,6 +186,10 @@ export function tweetHeat(tweetCount: number, tweetRef: number = TWEET_REF): num
  *
  * tweetCount無しでも Google Trends で急上昇 + Yahoo News で複数記事 → 関心は高い。
  * 逆に tweetCount だけ高いゴシップは newsHeat/trendHeat が低く clickHeat 全体も低め。
+ *
+ * ClickHeat' 単独でのハード下限は設けていない（CLICK_HEAT_MIN=0）。
+ * 最終的な rankScore = Buzz'×Click'×Debate' の積で自然にフィルタリングされる。
+ * clickHeat=0 → rank=0 → 自動的に弾かれる（ゴシップはdebateも0なので死ぬ）。
  */
 export function clickHeat(
   evidence: HeatEvidence,
@@ -235,11 +239,21 @@ export function debateHeat(evidence: HeatEvidence): number {
 
   // コメント数（Yahoo + YouTube、高い方）
   const count = Math.max(evidence.commentCount ?? 0, evidence.youtubeCommentCount ?? 0);
-  if (count >= 3000) heat += 0.35;
-  else if (count >= 1000) heat += 0.30;
-  else if (count >= 500) heat += 0.20;
-  else if (count >= 300) heat += 0.12;
-  else if (count >= 100) heat += 0.05;
+  const friction = evidence.commentFrictionScore ?? 0;
+
+  // 摩擦度(friction)でコメント熱量を重み付け。
+  // スポーツ(大谷「すごい!」) = コメントは多いが摩擦ゼロ → 議論熱量は低い。
+  // 政治(賛成vs反対) = 摩擦が高い → コメント数×摩擦ペナルティが小さい。
+  // 係数3: friction=0 → heat 0%、friction=0.33 → heat 100%
+  const frictionWeight = Math.min(1, friction * 3);
+
+  let countHeat = 0;
+  if (count >= 3000) countHeat = 0.35;
+  else if (count >= 1000) countHeat = 0.30;
+  else if (count >= 500) countHeat = 0.20;
+  else if (count >= 300) countHeat = 0.12;
+  else if (count >= 100) countHeat = 0.05;
+  heat += countHeat * frictionWeight;
 
   // コメント急増（炎上加速）
   if (evidence.commentCountSurge) heat += 0.40;
@@ -253,11 +267,6 @@ export function debateHeat(evidence: HeatEvidence): number {
   const likeCount = evidence.youtubeLikeCount ?? 0;
   if (likeCount >= 10000) heat += 0.15;
   else if (likeCount >= 3000) heat += 0.08;
-
-  // コメント摩擦度（議論の激しさ）
-  const friction = evidence.commentFrictionScore ?? 0;
-  if (friction >= 0.5) heat += 0.30;
-  else if (friction >= 0.3) heat += 0.15;
 
   // 投票拮抗（実際の世論の分断）
   const pollDiv = evidence.externalPoll?.divisionScore;
