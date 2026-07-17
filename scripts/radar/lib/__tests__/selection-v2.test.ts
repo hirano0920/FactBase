@@ -88,7 +88,7 @@ describe("clickHeat", () => {
     const ch = clickHeat({}, 5000);
     expect(ch).toBeCloseTo(1);
   });
-  it("tweetCount無しは0", () => {
+  it("tweetCount無しは0（他のシグナルも無し）", () => {
     const ch = clickHeat({});
     expect(ch).toBe(0);
   });
@@ -101,6 +101,27 @@ describe("clickHeat", () => {
     const high = clickHeat({}, 1000);
     expect(low).toBeLessThan(high);
     expect(high).toBeLessThan(1);
+  });
+  it("Google Trends 検索トラフィックで加点（10万超で+0.30）", () => {
+    const base = clickHeat({ tweetCount: 0 });
+    const withTraffic = clickHeat({ tweetCount: 0, googleTrendTraffic: 200_000 });
+    expect(withTraffic).toBeGreaterThan(base);
+    expect(withTraffic).toBeCloseTo(0.30, 1);
+  });
+  it("Yahooニュースクラスタで加点（5件超で+0.20）", () => {
+    const base = clickHeat({ tweetCount: 0 });
+    const withCluster = clickHeat({ tweetCount: 0, newsClusterCount: 5 });
+    expect(withCluster).toBeGreaterThan(base);
+    expect(withCluster).toBeCloseTo(0.20, 1);
+  });
+  it("tweetCount + トレンド + クラスタは上限1.0でclamp", () => {
+    const maxed = clickHeat({ tweetCount: 100000, googleTrendTraffic: 500_000, newsClusterCount: 10 }, 100000);
+    expect(maxed).toBeLessThanOrEqual(1);
+  });
+  it("3要素とも無ければ0", () => {
+    expect(clickHeat({})).toBe(0);
+    expect(clickHeat({ tweetCount: 0 })).toBe(0);
+    expect(clickHeat({ tweetCount: null as unknown as number })).toBe(0);
   });
 });
 

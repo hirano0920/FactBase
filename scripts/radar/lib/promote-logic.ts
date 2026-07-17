@@ -67,6 +67,19 @@ export type SavedEvidence = EvidenceBundle & {
    * isLopsidedByPredictionのハードゲート撤去に伴い、代わりにソフトランクへ組み込んだ）。
    */
   predictedDivisionScore?: number;
+  /**
+   * Google Trends の最大検索トラフィック量（「急上昇ワード」の approx_traffic 値）。
+   * 「いま人が積極的に検索している」の実測。ClickHeat' で Twitter とは別の関心軸として使う。
+   * discover.ts の BuzzSourceHit.maxTrendTraffic からコピー。
+   */
+  googleTrendTraffic?: number;
+  /**
+   * Yahoo!ニュースランキング内で同一争点とみなせる見出し数。
+   * 同じトピックを複数のニュース記事が報じている＝編集部が「今、読者が知るべき」と判断した証拠。
+   * ClickHeat' で tweetCount とは別の重みとして使う。
+   * discover.ts の BuzzSourceHit.newsClusterCount からコピー。
+   */
+  newsClusterCount?: number;
 };
 
 /** media consensus 経路で公開を許す最低媒体数（通常の証拠十分性2より高く設定し乱発を防ぐ） */

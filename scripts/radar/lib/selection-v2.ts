@@ -88,6 +88,8 @@ export type HeatEvidence = Pick<
   | "commentStanceSpread"
   | "commentFrictionScore"
   | "predictedDivisionScore"
+  | "googleTrendTraffic"
+  | "newsClusterCount"
 >;
 
 export type DivisionEvidence = Pick<
@@ -172,16 +174,25 @@ export function tweetHeat(tweetCount: number, tweetRef: number = TWEET_REF): num
 }
 
 /**
- * ClickHeat': ツイート量ベースのクリック熱量。
- * tweetCountがあれば対数圧縮値、無ければ0。
- * （tweetCountが無くてもTV/Yahoo Newsで露出は buzzScore で評価済みのため、
- *   クリック熱量の追加評価は不要。Yahoo RT無し = 現時点でX上で話題になっていない）
+ * ClickHeat': クリック熱量（0〜1）。
+ * 「いま人がそれを見たいと思ってる」度を3つの独立シグナルから測定。
+ *
+ * 構成:
+ * ① tweetHeat（対数圧縮）: X上の言及量。tweetCountが無い=0。
+ * ② trendHeat: Google Trends 検索ボリューム。急上昇ワードとして実際に
+ *    人が検索している量（Yahoo RTに載らない関心も拾う）。
+ * ③ newsHeat: Yahoo!ニュースランキングのクラスタ数。編集部が「今、読者が
+ *    知るべき」と判断した複数記事の掲載。
+ *
+ * tweetCount無しでも Google Trends で急上昇 + Yahoo News で複数記事 → 関心は高い。
+ * 逆に tweetCount だけ高いゴシップは newsHeat/trendHeat が低く clickHeat 全体も低め。
  */
 export function clickHeat(
   evidence: HeatEvidence,
   tweetCountOverride?: number | null,
   tweetRef: number = TWEET_REF,
 ): number {
+  // ① tweetHeat
   const fromEvidence =
     typeof evidence.tweetCount === "number" && Number.isFinite(evidence.tweetCount)
       ? evidence.tweetCount
@@ -191,8 +202,20 @@ export function clickHeat(
       ? tweetCountOverride
       : null;
   const count = fromOverride ?? fromEvidence ?? 0;
-  if (count <= 0) return 0;
-  return tweetHeat(count, tweetRef);
+  const th = count > 0 ? tweetHeat(count, tweetRef) : 0;
+
+  // ② trendHeat: Google Trends 検索トラフィック
+  // 10万超=大規模トレンド(+0.30), 1万超=小規模トレンド(+0.15)
+  const traffic = evidence.googleTrendTraffic ?? 0;
+  const trendH = traffic >= 100_000 ? 0.30 : traffic >= 10_000 ? 0.15 : 0;
+
+  // ③ newsHeat: Yahoo!ニュースクラスタ数（同一争点の見出し数）
+  // 5記事以上=大規模(+0.20), 3記事以上=中規模(+0.10), 2記事=小規模(+0.05)
+  const cluster = evidence.newsClusterCount ?? 0;
+  const newsH = cluster >= 5 ? 0.20 : cluster >= 3 ? 0.10 : cluster >= 2 ? 0.05 : 0;
+
+  const total = th + trendH + newsH;
+  return Math.min(1, total);
 }
 
 /**

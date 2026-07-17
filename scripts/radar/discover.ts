@@ -549,6 +549,9 @@ async function upsertCandidate(
     youtubeLikeCount: t.youtubeEntry?.likeCount,
     youtubeCommentCount: t.youtubeEntry?.commentCount,
     youtubeReplyCount,
+    // ClickHeat' 用: Google Trends 検索トラフィック + ニュースクラスタ数
+    googleTrendTraffic: t.buzz?.maxTrendTraffic,
+    newsClusterCount: t.buzz?.newsClusterCount,
   };
 
   const data = {
