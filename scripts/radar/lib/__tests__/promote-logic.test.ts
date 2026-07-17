@@ -393,13 +393,19 @@ describe("twosidesFitBonus", () => {
 });
 
 describe("weightedPromoteScore (Selection V2)", () => {
-  it("Buzz'×Heat' の積（tweet無だと0）", () => {
-    expect(
-      weightedPromoteScore(
-        candidate("a", { evidence: ev({ buzzScore: 5, tweetCount: undefined }) }),
-        2,
-      ),
-    ).toBe(0);
+  it("Buzz'×Click'×Debate' の積（tweet無でもコメント実測があれば非ゼロ）", () => {
+    // コメント500+friction0.3でcommentHeat(0.08)×debateHeat>0 → rank>0
+    const withComments = weightedPromoteScore(
+      candidate("a", { evidence: ev({ buzzScore: 5, tweetCount: undefined }) }),
+      2,
+    );
+    expect(withComments).toBeGreaterThan(0);
+    // tweetCountがある方が上（tweetHeat寄与分）
+    const withTweet = weightedPromoteScore(
+      candidate("b", { evidence: ev({ buzzScore: 5, tweetCount: 5000 }) }),
+      2,
+    );
+    expect(withTweet).toBeGreaterThan(withComments);
   });
 
   it("tweetCountが高い方が上", () => {
@@ -440,12 +446,14 @@ describe("weightedPromoteScore (Selection V2)", () => {
 });
 
 describe("selectTopicsForPromotion: RANK_MIN", () => {
-  it("Heatが無く rankScore=0 の候補は選ばない", () => {
+  it("コメント・摩擦・tweetCountすべて無い候補は選ばない", () => {
     const candidates: PromotionCandidate[] = [
       candidate("cold", {
         evidence: ev({
           buzzScore: 5,
           tweetCount: undefined,
+          commentCount: 0, // ev()既定値(500)を0に
+          commentFrictionScore: undefined, // 摩擦データも無し
           news: threeOutlets,
           debateType: "policy",
         }),
@@ -618,14 +626,16 @@ describe("isLopsidedByPrediction", () => {
 });
 
 describe("selectTopicsForPromotion: 一方的トピック（2026-07-16: ハードゲート撤去、Heat'floor/DVSソフトランクのみで判定）", () => {
-  it("ほぼ全会一致かつ無白熱の候補は、他条件を満たしても選ばれない（Heat'floor不足で自然に落ちる）", () => {
+  it("ほぼ全会一致かつ無白熱（コメント・摩擦・tweetCountすべて無）の候補は選ばれない", () => {
     const lopsidedNoHeat: PromotionCandidate = candidate("lopsided", {
       title: "誰も擁護しない出来事への賛否",
       category: "politics",
       evidence: ev({
         buzzScore: 5,
         news: threeOutlets,
-        tweetCount: undefined, // ev()の既定tweetCount=2000を明示的に外し、本当に無白熱のケースにする
+        tweetCount: undefined,
+        commentCount: 0, // ev()既定値(500)を0に
+        commentFrictionScore: undefined, // 摩擦データも無し
         externalPoll: {
           question: "q",
           url: "https://x",

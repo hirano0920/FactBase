@@ -483,6 +483,8 @@ async function refreshBuzzScoreOnly(t: TopicToResearch): Promise<void> {
     youtubeViewCount: t.youtubeEntry?.viewCount ?? prevEvidence.youtubeViewCount,
     youtubeLikeCount: t.youtubeEntry?.likeCount ?? prevEvidence.youtubeLikeCount,
     youtubeCommentCount: t.youtubeEntry?.commentCount ?? prevEvidence.youtubeCommentCount,
+    googleTrendTraffic: t.buzz?.maxTrendTraffic ?? prevEvidence.googleTrendTraffic,
+    newsClusterCount: t.buzz?.newsClusterCount ?? prevEvidence.newsClusterCount,
   };
   await prisma.topicCandidate.update({
     where: { id: existing.id },

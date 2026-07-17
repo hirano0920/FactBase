@@ -28,6 +28,8 @@ import { checkArticleQualityGateWithRepair } from "./lib/article-judge";
 import { collectSourceHintsForRepair } from "../../src/lib/article-repair";
 import { buildClaimDiff, formatClaimDiffBlock, type ClaimDiffResult } from "./lib/claim-diff";
 import { fetchArticleThumbnail } from "./lib/og-image";
+import { fetchYahooRealtimeBuzzPolitics, type YahooBuzzTerm } from "./sources/yahoo-realtime";
+import { matchYahooTweetCount, extractContentTokens } from "./lib/match-tweet-count";
 import {
   composeIssueTitle,
   composeVoteQuestion,
@@ -256,8 +258,89 @@ async function main() {
     updatedAt: r.updatedAt,
   }));
 
+  // Yahoo RTからtweetCountをリフレッシュ（DISCOVER時から新たなマッチがあった場合に備える）
+  const yahooBuzz = await fetchYahooRealtimeBuzzPolitics().catch(() => [] as YahooBuzzTerm[]);
+  if (yahooBuzz.length > 0) {
+    let matchedCount = 0;
+    for (const c of candidates) {
+      const matched = matchYahooTweetCount(c.title, yahooBuzz);
+      if (matched && (!c.evidence.tweetCount || matched > c.evidence.tweetCount)) {
+        c.evidence.tweetCount = matched;
+        matchedCount++;
+      }
+    }
+    if (matchedCount > 0) {
+      console.log(`  📡 Yahoo RT tweetCount更新: ${matchedCount}件`);
+    }
+  }
+
+  // 内容語トークンベースの因果マージ:
+  const FINANCE_CAUSE_ALIASES: [string, string][] = [
+    ["キオクシア", "日経平均"],
+    ["キオクシア", "株価"],
+    ["キオクシア", "半導体"],
+    ["半導体", "日経平均"],
+    ["日経平均", "暴落"],
+    ["円安", "日経平均"],
+  ];
+  const mergedKeys = new Set<string>();
+  for (let i = 0; i < candidates.length; i++) {
+    if (mergedKeys.has(candidates[i].id)) continue;
+    for (let j = i + 1; j < candidates.length; j++) {
+      if (mergedKeys.has(candidates[j].id)) continue;
+      const titleA = candidates[i].title;
+      const titleB = candidates[j].title;
+      // 共通トークンチェック
+      const tokensA = extractContentTokens(titleA);
+      const tokensB = extractContentTokens(titleB);
+      const sharedInBoth = tokensA.filter((t) => titleB.includes(t) && titleA.includes(t));
+
+      // 因果エイリアスチェック（金融イベントの因果関係）
+      const causalHit = FINANCE_CAUSE_ALIASES.some(
+        ([a, b]) => titleA.includes(a) && titleB.includes(b),
+      ) || FINANCE_CAUSE_ALIASES.some(
+        ([a, b]) => titleA.includes(b) && titleB.includes(a),
+      );
+
+      if (
+        (sharedInBoth.length >= 1 && sharedInBoth.some((t) => t.length >= 3)) ||
+        causalHit
+      ) {
+        // 統合: evidenceをマージ（ニュース配列を結合、スコアは最大値を採用）
+        const a = candidates[i];
+        const b = candidates[j];
+        const merged: SavedEvidence = {
+          ...a.evidence,
+          news: [...(a.evidence.news ?? []), ...(b.evidence.news ?? [])].filter(
+            (n, idx, self) => self.findIndex((x) => x.url === n.url) === idx,
+          ),
+          buzzScore: Math.max(a.evidence.buzzScore ?? 0, b.evidence.buzzScore ?? 0),
+          tweetCount: Math.max(a.evidence.tweetCount ?? 0, b.evidence.tweetCount ?? 0),
+          commentCount: Math.max(a.evidence.commentCount ?? 0, b.evidence.commentCount ?? 0),
+          commentFrictionScore: a.evidence.commentFrictionScore ?? b.evidence.commentFrictionScore,
+          newsClusterCount: Math.max(a.evidence.newsClusterCount ?? 0, b.evidence.newsClusterCount ?? 0),
+          youtubeCommentCount: Math.max(a.evidence.youtubeCommentCount ?? 0, b.evidence.youtubeCommentCount ?? 0),
+          youtubeReplyCount: Math.max(a.evidence.youtubeReplyCount ?? 0, b.evidence.youtubeReplyCount ?? 0),
+          youtubeLikeCount: Math.max(a.evidence.youtubeLikeCount ?? 0, b.evidence.youtubeLikeCount ?? 0),
+          // バズソースを結合（重複除去）
+          buzzSources: [...new Set([...(a.evidence.buzzSources ?? []), ...(b.evidence.buzzSources ?? [])])],
+        };
+        // 統合後のタイトルは、元の2つのタイトルを"＆"でつなぐ（短い方を補足的に）
+        const combinedTitle = a.title.length >= b.title.length
+          ? a.title
+          : b.title;
+        a.evidence = merged;
+        a.title = combinedTitle;
+        mergedKeys.add(b.id);
+        console.log(`  🔗 [因果マージ] "${b.title}" を "${a.title}" に統合（共有トークン: ${sharedInBoth.join(", ")}）`);
+      }
+    }
+  }
+  // マージされた候補を除去
+  const filteredCandidates = candidates.filter((c) => !mergedKeys.has(c.id));
+
   const selected = selectTopicsForPromotion(
-    candidates,
+    filteredCandidates,
     RADAR.minBuzzScoreForPromotion,
     RESEARCH_POOL_SIZE,
     RADAR.maxSameCategoryPerPromoteWindow,

@@ -272,6 +272,7 @@ describe("selectionV2RankScore", () => {
   });
 
   it("debateだけ高くclickが低いとrankScoreは低い", () => {
+    // コメントだけでclickHeatは生まれるが、tweetCountがある方が高い
     const debateOnly = selectionV2RankScore(
       { buzzScore: 4, commentCount: 5000, commentFrictionScore: 0.8 },
       { tweetCountOverride: 0 },
@@ -280,9 +281,9 @@ describe("selectionV2RankScore", () => {
       { buzzScore: 4, tweetCount: 5000, commentCount: 5000, commentFrictionScore: 0.3 },
       { tweetCountOverride: 5000 },
     );
-    expect(debateOnly.clickHeat).toBe(0);
-    expect(debateOnly.rankScore).toBe(0);
-    expect(bothHigh.rankScore).toBeGreaterThan(0);
+    // commentHeat+debateでclickHeat>0になる（コメント＝関心の実測）
+    expect(debateOnly.clickHeat).toBeGreaterThan(0);
+    expect(bothHigh.rankScore).toBeGreaterThan(debateOnly.rankScore);
   });
 
   it("露出だけ強い（buzz高・click低）よりバランスが良い方が上", () => {

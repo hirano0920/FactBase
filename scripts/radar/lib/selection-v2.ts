@@ -16,7 +16,7 @@ import type { SavedEvidence } from "./promote-logic";
 export const TWEET_REF = 5000;
 
 /** 積スコアの下限（3因子積） */
-export const RANK_MIN_DEFAULT = 0.04;
+export const RANK_MIN_DEFAULT = 0.02;
 
 /**
  * Buzz' 下限。0.4 ≒ effectiveScore>=2（クロスソース最低ライン）。
@@ -61,6 +61,12 @@ export interface SelectionV2Breakdown {
    */
   debateHeat: number;
   /**
+   * 「これは国を揺るがす重要問題」度。
+   * 皇室典範改正や憲法改正のような国家的重大イベントのRankを引き上げる。
+   * 通常のBuzz/Click/Debateデータでは捉えきれない社会的重大性を考慮。
+   */
+  nationalImportance: number;
+  /**
    * @deprecated Conflict'に統合。rankScore計算には使わない。互換性のために残す。
    */
   dvsPrime: number;
@@ -90,6 +96,9 @@ export type HeatEvidence = Pick<
   | "predictedDivisionScore"
   | "googleTrendTraffic"
   | "newsClusterCount"
+  | "buzzSources"
+  | "buzzScore"
+  | "topic"
 >;
 
 export type DivisionEvidence = Pick<
@@ -175,7 +184,7 @@ export function tweetHeat(tweetCount: number, tweetRef: number = TWEET_REF): num
 
 /**
  * ClickHeat': クリック熱量（0〜1）。
- * 「いま人がそれを見たいと思ってる」度を3つの独立シグナルから測定。
+ * 「いま人がそれを見たいと思ってる」度を複数の独立シグナルから測定。
  *
  * 構成:
  * ① tweetHeat（対数圧縮）: X上の言及量。tweetCountが無い=0。
@@ -183,6 +192,12 @@ export function tweetHeat(tweetCount: number, tweetRef: number = TWEET_REF): num
  *    人が検索している量（Yahoo RTに載らない関心も拾う）。
  * ③ newsHeat: Yahoo!ニュースランキングのクラスタ数。編集部が「今、読者が
  *    知るべき」と判断した複数記事の掲載。
+ * ④ commentHeat: Yahoo!コメント数。コメントを書く人はまず記事をクリックしている。
+ *    tweetCountが無いトピックでも「人が関心を持っている」実測として使う。
+ *    ただしスポーツ等のclickはdebateHeatのfrictionWeightで除外されるので
+ *    ここでは生の関心量をそのまま測る。
+ * ⑤ buzzBreadth: 横断ソース種別の多様性。同じ話題がニュース・TV・YouTube等
+ *    複数の異なるソース種別で拾われている＝編集部横断の関心の証拠。
  *
  * tweetCount無しでも Google Trends で急上昇 + Yahoo News で複数記事 → 関心は高い。
  * 逆に tweetCount だけ高いゴシップは newsHeat/trendHeat が低く clickHeat 全体も低め。
@@ -209,16 +224,31 @@ export function clickHeat(
   const th = count > 0 ? tweetHeat(count, tweetRef) : 0;
 
   // ② trendHeat: Google Trends 検索トラフィック
-  // 10万超=大規模トレンド(+0.30), 1万超=小規模トレンド(+0.15)
   const traffic = evidence.googleTrendTraffic ?? 0;
   const trendH = traffic >= 100_000 ? 0.30 : traffic >= 10_000 ? 0.15 : 0;
 
   // ③ newsHeat: Yahoo!ニュースクラスタ数（同一争点の見出し数）
-  // 5記事以上=大規模(+0.20), 3記事以上=中規模(+0.10), 2記事=小規模(+0.05)
   const cluster = evidence.newsClusterCount ?? 0;
   const newsH = cluster >= 5 ? 0.20 : cluster >= 3 ? 0.10 : cluster >= 2 ? 0.05 : 0;
 
-  const total = th + trendH + newsH;
+  // ④ commentHeat: コメント数もクリック誘引の実測値
+  //   「コメントした人はクリックした人」＝関心の証明
+  const cc = evidence.commentCount ?? 0;
+  const commentH = cc >= 2000 ? 0.15 : cc >= 500 ? 0.08 : cc >= 100 ? 0.07 : 0;
+
+  // ⑤ buzzBreadth: 横断ソース種別の多様性（独自ソース種の数に応じて）
+  //    buzzSources = ["yahoo_news_ranking","news_cluster","yahoo_comment_ranking","google_trends","tv_news","youtube_trending","yahoo_realtime"]
+  //    異なる種別（prefix）をカウント: yahoo_news_ranking/yahoo_comment_rankingは両方「Yahoo系」だが
+  //    種別としてはnews_clusterとyoutube_trendingとは独立なので区別する
+  const sources = evidence.buzzSources ?? [];
+  let breadth = 0;
+  if (sources.length >= 5) breadth = 0.20;
+  else if (sources.length >= 4) breadth = 0.18;
+  else if (sources.length >= 3) breadth = 0.15;
+  else if (sources.length >= 2) breadth = 0.08;
+  else if (sources.length >= 1) breadth = 0.03;
+
+  const total = th + trendH + newsH + commentH + breadth;
   return Math.min(1, total);
 }
 
@@ -227,11 +257,11 @@ export function clickHeat(
  * 「人がそれについて議論したがってる」度をコメント・摩擦・投票・YouTube応酬から測定。
  *
  * 構成（合計1.0超える場合はclamp）:
- * - コメント数: Yahoo+YouTubeの高い方（3000超で+0.35、1000超+0.30、500超+0.20、300超+0.12、100超+0.05）
+ * - コメント数: Yahoo+YouTubeの高い方（3000超で+0.35、1000超+0.30、500超+0.20、200超+0.10、80超+0.04）
  * - コメント急増: +0.40（炎上加速）
  * - YouTube返信（応酬の実測）: 300超+0.30、100超+0.15
  * - YouTubeいいね（共感）: 1万超+0.15、3000超+0.08
- * - コメント摩擦度: 0.5超+0.30、0.3超+0.15
+ * - コメント摩擦度: 0.5超+0.30、0.3超+0.15（コメント数が少なくても摩擦自体が議論の存在証明）
  * - 投票拮抗: divisionScore>=0.2で+0.20
  */
 export function debateHeat(evidence: HeatEvidence): number {
@@ -239,20 +269,20 @@ export function debateHeat(evidence: HeatEvidence): number {
 
   // コメント数（Yahoo + YouTube、高い方）
   const count = Math.max(evidence.commentCount ?? 0, evidence.youtubeCommentCount ?? 0);
-  const friction = evidence.commentFrictionScore ?? 0;
-
-  // 摩擦度(friction)でコメント熱量を重み付け。
-  // スポーツ(大谷「すごい!」) = コメントは多いが摩擦ゼロ → 議論熱量は低い。
-  // 政治(賛成vs反対) = 摩擦が高い → コメント数×摩擦ペナルティが小さい。
-  // 係数3: friction=0 → heat 0%、friction=0.33 → heat 100%
-  const frictionWeight = Math.min(1, friction * 3);
+  const friction = evidence.commentFrictionScore;
+  // frictionWeight: 実測値があれば weight = max(0.1, min(1, friction*3))
+  //   - 実測0でも最低0.1を確保（コメントそのものの存在が最低限の関心を示す）
+  //   - 未測定(undefined)はデフォルト0.3（過大評価防止）
+  const frictionWeight = friction === undefined
+    ? 0.3
+    : Math.max(0.1, Math.min(1, friction * 3));
 
   let countHeat = 0;
   if (count >= 3000) countHeat = 0.35;
   else if (count >= 1000) countHeat = 0.30;
   else if (count >= 500) countHeat = 0.20;
-  else if (count >= 300) countHeat = 0.12;
-  else if (count >= 100) countHeat = 0.05;
+  else if (count >= 200) countHeat = 0.10;
+  else if (count >= 80) countHeat = 0.04;
   heat += countHeat * frictionWeight;
 
   // コメント急増（炎上加速）
@@ -273,6 +303,39 @@ export function debateHeat(evidence: HeatEvidence): number {
   if (typeof pollDiv === "number" && pollDiv >= 0.2) {
     heat += 0.20;
   }
+
+  // コメント摩擦度自体が議論の存在証明
+  if (friction !== undefined) {
+    if (friction > 0.5) heat += 0.30;
+    else if (friction > 0.3) heat += 0.15;
+    else if (friction > 0.15) heat += 0.08;
+  }
+
+  // テレビ報道ボーナス: 同じ話題がテレビニュースでも報じられている＝社会的に重要な議論
+  // かつYahooニュースランキングとコメントランキングにも載っている＝多方面で注目
+  const sources = evidence.buzzSources ?? [];
+  const hasTv = sources.includes("tv_news");
+  const hasNews = sources.includes("yahoo_news_ranking");
+  const hasComment = sources.includes("yahoo_comment_ranking");
+  if (hasTv && hasNews && hasComment) {
+    heat += 0.15; // テレビ＋ニュース＋コメントの3面同時ヒット＝社会的にホット
+  }
+
+  // 法案通過ボーナス: 「可決」「成立」「改正」を含むトピックは
+  // 実際に制度が変わる瞬間だが、「可決」とtv_bonusが重複しやすいので
+  // 一律0.08に抑える（大きすぎると手続き型法案を過大評価）。
+  if (evidence.topic) {
+    const t = evidence.topic;
+    if (/可決|成立/.test(t)) heat += 0.08;
+    else if (/改正案|改正/.test(t)) heat += 0.08;
+  }
+
+  // ニュースクラスタ数: 多くの媒体が独立に報じている＝社会的注目度の証明。
+  // friction未測定の話題でも、クラスタが多ければ価値ある話題の可能性が高い。
+  const cluster = evidence.newsClusterCount ?? 0;
+  if (cluster >= 10) heat += 0.20;
+  else if (cluster >= 5) heat += 0.10;
+  else if (cluster >= 3) heat += 0.05;
 
   return Math.min(1, heat);
 }
@@ -374,7 +437,31 @@ export function combineConflictPrime(
 }
 
 /**
- * rankScore = Buzz' × ClickHeat' × DebateHeat'（3因子）。
+ * 国家的に重要な話題（皇室典範改正、憲法改正など）のRankを引き上げる。
+ * 通常のBuzz/Click/Debateのデータでは捉えきれない「社会的な重大性」を考慮する。
+ * 具体的には：
+ *   - 皇室典範改正（男系継承問題）→ 3.0x（一代限りの憲法級の改正）
+ *   - 憲法改正関連 → 2.5x
+ *   - 一般の法案可決（可決/成立）→ tv_newsと合わせて1.5x
+ */
+export function nationalImportanceFactor(
+  topic: string | null | undefined,
+  buzzSources?: string[],
+): number {
+  if (!topic) return 1.0;
+  // 皇室典範は最高の重み（国会では事実上の憲法議論）
+  if (/皇室典範/.test(topic)) return 3.0;
+  // 憲法改正関連
+  if (/憲法改正/.test(topic)) return 2.5;
+  // 国旗毀損罪（新しい法律の成立）
+  if (/国旗損壊罪/.test(topic)) return 1.5;
+  // 一般の法案通過: tv_newsでも報じられる法律改正
+  if (buzzSources?.includes("tv_news") && /可決|成立/.test(topic)) return 1.5;
+  return 1.0;
+}
+
+/**
+ * rankScore = Buzz' × ClickHeat' × DebateHeat' × NationalImportance（4因子）。
  * Freshness は呼び出し側で乗算。
  */
 export function selectionV2RankScore(
@@ -384,6 +471,7 @@ export function selectionV2RankScore(
   const bp = buzzPrime(evidence.buzzScore);
   const ch = clickHeat(evidence, opts?.tweetCountOverride, opts?.tweetRef);
   const dh = debateHeat(evidence);
+  const ni = nationalImportanceFactor(evidence.topic, evidence.buzzSources);
   // 旧互換
   const heat = heatPrime(evidence, opts?.tweetCountOverride, opts?.tweetRef);
   const dvs = dvsPrime(evidence);
@@ -393,11 +481,12 @@ export function selectionV2RankScore(
     heatPrime: heat.heatPrime,
     clickHeat: ch,
     debateHeat: dh,
+    nationalImportance: ni,
     dvsPrime: dvs.dvsPrime,
     conflictPrime: cp,
     tweetHeat: heat.tweetHeat,
     secondaryHeat: heat.secondaryHeat,
-    rankScore: bp * ch * dh,
+    rankScore: bp * ch * dh * ni,
     hasTweetCount: heat.hasTweetCount,
     tweetCount: heat.tweetCount,
     hasMeasuredDvs: dvs.hasMeasured,

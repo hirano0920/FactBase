@@ -105,7 +105,7 @@ export function buzzMatchesSearchTerms(topic: string, terms: string[]): boolean 
   const topicTokens = extractBuzzMatchTokens(topicNorm);
 
   return terms.some((term) => {
-    const t = term.trim();
+    const t = term?.trim();
     if (!t) return false;
 
     const termTokens = extractBuzzMatchTokens(t);
