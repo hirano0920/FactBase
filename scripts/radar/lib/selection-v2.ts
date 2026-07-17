@@ -278,11 +278,11 @@ export function debateHeat(evidence: HeatEvidence): number {
     : Math.max(0.1, Math.min(1, friction * 3));
 
   let countHeat = 0;
-  if (count >= 3000) countHeat = 0.35;
-  else if (count >= 1000) countHeat = 0.30;
-  else if (count >= 500) countHeat = 0.20;
-  else if (count >= 200) countHeat = 0.10;
-  else if (count >= 80) countHeat = 0.04;
+  if (count >= 2000) countHeat = 0.35;
+  else if (count >= 800) countHeat = 0.25;
+  else if (count >= 400) countHeat = 0.15;
+  else if (count >= 150) countHeat = 0.08;
+  else if (count >= 50) countHeat = 0.04;
   heat += countHeat * frictionWeight;
 
   // コメント急増（炎上加速）
@@ -333,9 +333,10 @@ export function debateHeat(evidence: HeatEvidence): number {
   // ニュースクラスタ数: 多くの媒体が独立に報じている＝社会的注目度の証明。
   // friction未測定の話題でも、クラスタが多ければ価値ある話題の可能性が高い。
   const cluster = evidence.newsClusterCount ?? 0;
-  if (cluster >= 10) heat += 0.20;
-  else if (cluster >= 5) heat += 0.10;
-  else if (cluster >= 3) heat += 0.05;
+  if (cluster >= 12) heat += 0.35;
+  else if (cluster >= 8) heat += 0.25;
+  else if (cluster >= 5) heat += 0.15;
+  else if (cluster >= 3) heat += 0.08;
 
   // --- 海外国内人事キャップ ---
   // ウクライナ国防相更迭のように「日本に関係ない海外の人事/内政」は
@@ -347,9 +348,11 @@ export function debateHeat(evidence: HeatEvidence): number {
 }
 
 /**
- * 海外国内人事トピックのdebateHeat上限。
- * 「ウクライナ国防相更迭」のような海外の内政人事は、
- * コメントの分断がトピック固有でなく総論的なので上限を低くする。
+ * 海外トピックのdebateHeat上限。
+ * 2種類の対象がある:
+ *   1) 海外国内人事: ウクライナ国防相更迭（既存）
+ *   2) 日本無関係国際問題: 中国のフィリピン侮蔑（新規）
+ * いずれもコメントの分断がトピック固有でなく総論的なので上限を低くする。
  */
 function foreignDomesticCap(
   topic: string | null | undefined,
@@ -357,13 +360,23 @@ function foreignDomesticCap(
 ): number {
   if (!topic) return 1.0;
 
-  // 海外の国名で始まり、日本を含まず、人事/内政/制度変更の単語を含む
-  const isForeignDomestic =
+  // 判定1: 海外国内人事（辞任/更迭/任命）
+  const isForeignPersonnel =
     /^(ウクライナ|米|米国|アメリカ|中国|韓国|ロシア|英国|フランス|ドイツ|インド|豪州|豪|EU)\S{0,6}/.test(topic) &&
     !/日本|日米|日韓|日中|日露/.test(topic) &&
     /更迭|辞任|任命|選出|就任|退任|交代/.test(topic);
 
-  if (isForeignDomestic) return 0.20;
+  if (isForeignPersonnel) return 0.20;
+
+  // 判定2: 日本無関係国際問題
+  // 「中国がフィリピン国民を侮蔑」「米下院が〜決議」のように
+  // 日本が出てこない国際問題。日本人が議論しても当事者意識が薄い。
+  const isUnrelatedInternational =
+    /^(ウクライナ|米|米国|アメリカ|中国|韓国|ロシア|フランス|ドイツ|インド|豪州|豪|EU|イラン|イスラエル|パレスチナ)\S{0,6}/.test(topic) &&
+    !/日本|日米|日韓|日中|日露|安保|同盟|首脳会談|外相/.test(topic);
+
+  if (isUnrelatedInternational) return 0.25;
+
   return 1.0;
 }
 
@@ -528,18 +541,23 @@ export function passesRankMin(rankScore: number, rankMin: number = RANK_MIN_DEFA
 /**
  * 公開してよい Rank か（Buzz・ClickHeat・DebateHeat・積の下限）。
  * 両論Gateは呼び出し側（assessDebateLegitimacy）で別途必須。
+ *
+ * 注意: buzzPrime < buzzMin でも tweetCount が実測100超の場合は通過させる（データ不足の誤排除防止）。
+ * 例: 改正皇室典範（tweet=604）はbuzzScore=1だがtweetCount=604あって確実に話題になっている。
  */
 export function passesSelectionV2(
-  breakdown: Pick<SelectionV2Breakdown, "buzzPrime" | "clickHeat" | "debateHeat" | "heatPrime" | "rankScore">,
+  breakdown: Pick<SelectionV2Breakdown, "buzzPrime" | "clickHeat" | "debateHeat" | "heatPrime" | "rankScore"> & { tweetCount?: number },
   opts?: { rankMin?: number; buzzMin?: number; clickMin?: number; debateMin?: number },
 ): boolean {
   const rankMin = opts?.rankMin ?? RANK_MIN_DEFAULT;
   const buzzMin = opts?.buzzMin ?? BUZZ_MIN_DEFAULT;
   const clickMin = opts?.clickMin ?? CLICK_HEAT_MIN;
   const debateMin = opts?.debateMin ?? DEBATE_HEAT_MIN;
+  // buzzPrimeは下限未満でも、tweetCount実測があれば通す
+  const buzzOk = breakdown.buzzPrime >= buzzMin || (breakdown.tweetCount ?? 0) >= 100;
   return (
     breakdown.rankScore >= rankMin &&
-    breakdown.buzzPrime >= buzzMin &&
+    buzzOk &&
     breakdown.clickHeat >= clickMin &&
     breakdown.debateHeat >= debateMin
   );
