@@ -173,9 +173,11 @@ export function twosidesFitBonus(candidate: PromoteScoreInput, distinctNewsOutle
 export function weightedPromoteScore(
   candidate: PromoteScoreInput,
   _distinctNewsOutlets: number = 0,
-  _now: Date = new Date(),
+  now: Date = new Date(),
 ): number {
-  return selectionV2RankScore(candidate.evidence).rankScore;
+  const base = selectionV2RankScore(candidate.evidence).rankScore;
+  const freshness = freshnessFactor(candidate.updatedAt, now);
+  return base * freshness;
 }
 
 /** @deprecated 旧加算式。比較・回帰用に残す */

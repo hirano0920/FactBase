@@ -46,6 +46,7 @@ import {
   dedupeSelectedCandidates,
   resolveCandidateDebateType,
   weightedPromoteScore,
+  freshnessFactor,
   type SavedEvidence,
   type PromotionCandidate,
   type ActiveIssueForDedup,
@@ -349,7 +350,7 @@ async function main() {
     .filter((item) => {
       const breakdown = selectionV2RankScore(item.r.c.evidence);
       // promoteScore 再計算後も3下限を再確認（分断シグナル更新で Heat が変わりうる）
-      item.r.promoteScore = breakdown.rankScore;
+      item.r.promoteScore = breakdown.rankScore * freshnessFactor(item.r.c.updatedAt, now);
       return passesSelectionV2(breakdown);
     })
     .sort((a, b) => {
@@ -599,20 +600,15 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
     }
   }
 
-  // ★★★ 片側抜粋HELD: media diffで「食い違い（conflicts）」がゼロかつ単独報道しかない場合、
-  // 実質的に一方的な報道しか集まっていないと判断し、LLM正当性Gateを呼ぶ前にHELDする。
-  // （conflictsが無い＝各社同じ主張を並べているだけ＝両論記事が書けない）
-  if (!isOfficial && claimDiff.conflicts.length === 0 && !DRY_RUN) {
-    const reason = claimDiff.outletOnly.length === 0
-      ? "全媒体一致（食い違いゼロ）"
-      : `食い違いゼロ・単独報道のみ${claimDiff.outletOnly.length}件`;
-    const decision = `one_sided_excerpts:${reason}`;
-    trackHeld(decision, c.title);
-    await prisma.topicCandidate.update({
-      where: { id: c.id },
-      data: { status: "HELD", decision },
-    });
-    return null;
+  // ★★★ 媒体食い違いゼロ警告（以前はハードHELDしていたが撤廃）:
+  // 政策提案・法案・判決など「報道は中立だが読者間で分断がある」トピックを
+  // 一律に落としてしまう問題があったため、ハードゲートを撤廃した。
+  // claimDiff.conflicts===0 でも externalPoll/commentFriction/legitimacy Gate
+  // が両論性を担保できる。片側だけの話題は Legitimacy Gate が最終的に落とす。
+  if (!isOfficial && claimDiff.conflicts.length === 0) {
+    console.warn(
+      `  ⚠️ 媒体食い違いゼロ（全媒体一致）。Legitimacy Gateで両論性を再判定: ${c.title}`,
+    );
   }
 
   // ★★★ 軸ロック: 現実の対立軸を証拠から確定し、Writerの芯ズレを防ぐ。
@@ -627,15 +623,16 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
   if (lockedAxis) {
     console.log(`  🔒 軸ロック: 「${lockedAxis.axis}」 (sideA: ${lockedAxis.sideA} / sideB: ${lockedAxis.sideB})`);
   } else {
-    console.warn(`  ⚠️ 軸ロック不能 → HELD: ${c.title}`);
-    trackHeld(`axis_unresolved:軸ロックが全ての情報源から対立軸を確定できなかった (voteQuestion=${c.evidence.voteQuestion ?? "none"})`, c.title);
-    if (!DRY_RUN) {
-      await prisma.topicCandidate.update({
-        where: { id: c.id },
-        data: { status: "HELD", decision: `axis_unresolved:軸ロック不成立` },
-      });
+    // 真のfail-soft: 軸ロック不能でもフォールバック軸でWriterに進める。
+    // Legitimacy Gate（後続）が両論性を確認済みのトピックを「軸がロックできないから」
+    // HELDするのは過剰排除。voteQuestion→generic軸の順にフォールバックする。
+    if (c.evidence.voteQuestion) {
+      lockedAxis = { axis: c.evidence.voteQuestion, sideA: "賛成", sideB: "反対" };
+      console.warn(`  ⚠️ 軸ロック不能 → voteQuestionをフォールバック軸に使用: "${lockedAxis.axis}"`);
+    } else {
+      lockedAxis = { axis: `${c.title}について、賛成か反対か`, sideA: "賛成", sideB: "反対" };
+      console.warn(`  ⚠️ 軸ロック不能 → トピックから仮軸を生成: "${lockedAxis.axis}"`);
     }
-    return null;
   }
 
   // ★★★ 争点正当性フィルタ（両論Gate）★★★
@@ -692,12 +689,10 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
         });
         if (salvageResult.legitimate) {
           console.log(`  ✅ 代案設問でサルベージ成功: "${legitimacyResult.suggestedFrames[0]}"`);
-          // salvage成功: lockedAxisを差し替え、Writer以降は差し替え軸で動作
           lockedAxis.axis = legitimacyResult.suggestedFrames[0];
           if (salvageResult.predictedDivisionScore !== undefined) {
             c.evidence.predictedDivisionScore = salvageResult.predictedDivisionScore;
           }
-          // legitimacy通過扱いにしてWriterに進む（このifブロックを抜ける）
         } else {
           console.warn(`  ❌ 代案設問でも不合格 → HELD`);
           if (!DRY_RUN) {
@@ -708,8 +703,87 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
           }
           return null;
         }
+      } else if (
+        legitimacyResult.problemType === "no_opposing_side" &&
+        // 同じ抜粋で設問を言い換えれば両論が見つかる可能性がある
+        lockedAxis
+      ) {
+        // no_opposing_side salvage: 抜粋は同じだが設問を「両方の立場」にフォーカス
+        // することでLLMがStep2（両論の存在確認）を通過しやすくなるよう誘導する
+        console.log(`  💡 no_opposing_side — 設問を両論フォーカスに言い換えて再判定`);
+        const salvageResult = await assessDebateLegitimacy({
+          topic: c.title,
+          voteQuestion: `${lockedAxis.axis} 支持する立場と批判する立場の両方から検討する`,
+          excerpts: [
+            ...primaryExcerpts,
+            ...reportExcerpts,
+            ...internationalReportExcerpts,
+            ...datedExcerpts,
+            ...pollingExcerpts,
+          ],
+          category: c.category ?? undefined,
+        });
+        if (salvageResult.legitimate) {
+          console.log(`  ✅ 両論フォーカス設問でサルベージ成功`);
+          if (salvageResult.predictedDivisionScore !== undefined) {
+            c.evidence.predictedDivisionScore = salvageResult.predictedDivisionScore;
+          }
+        } else {
+          console.warn(`  ❌ 言い換え設問でも不合格 → HELD`);
+          if (!DRY_RUN) {
+            await prisma.topicCandidate.update({
+              where: { id: c.id },
+              data: { status: "HELD", decision: `debate_legitimacy_rejected:${typeLabel}${reasonSuffix}_salvage_failed` },
+            });
+          }
+          return null;
+        }
+      } else if (legitimacyResult.problemType === "unacceptable_side") {
+        // unacceptable_side salvage: 設問の言語が一方を犯罪者的にラベリングしている場合、
+        // 中立化した設問で再判定を試みる（「擁護するか」→「評価するか」）
+        const neutralized = lockedAxis.axis.replace(/擁護|支持|容認|肯定/gi, "評価");
+        if (neutralized !== lockedAxis.axis) {
+          console.log(`  💡 unacceptable_side — 中立化した設問で再判定: "${neutralized}"`);
+          const salvageResult = await assessDebateLegitimacy({
+            topic: c.title,
+            voteQuestion: neutralized,
+            excerpts: [
+              ...primaryExcerpts,
+              ...reportExcerpts,
+              ...internationalReportExcerpts,
+              ...datedExcerpts,
+              ...pollingExcerpts,
+            ],
+            category: c.category ?? undefined,
+          });
+          if (salvageResult.legitimate) {
+            console.log(`  ✅ 中立化設問でサルベージ成功`);
+            lockedAxis.axis = neutralized;
+            if (salvageResult.predictedDivisionScore !== undefined) {
+              c.evidence.predictedDivisionScore = salvageResult.predictedDivisionScore;
+            }
+          } else {
+            console.warn(`  ❌ 中立化設問でも不合格 → HELD`);
+            if (!DRY_RUN) {
+              await prisma.topicCandidate.update({
+                where: { id: c.id },
+                data: { status: "HELD", decision: `debate_legitimacy_rejected:${typeLabel}${reasonSuffix}_salvage_failed` },
+              });
+            }
+            return null;
+          }
+        } else {
+          // 中立化できない（置換対象の語が無い） → 通常HELD
+          if (!DRY_RUN) {
+            await prisma.topicCandidate.update({
+              where: { id: c.id },
+              data: { status: "HELD", decision: `debate_legitimacy_rejected:${typeLabel}${reasonSuffix}` },
+            });
+          }
+          return null;
+        }
       } else {
-        // bad_frame以外、またはsuggestedFrames無し → 通常HELD
+        // obvious_truth, fact_only, またはsalvage対象外 → 通常HELD
         if (!DRY_RUN) {
           await prisma.topicCandidate.update({
             where: { id: c.id },
