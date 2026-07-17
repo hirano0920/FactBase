@@ -38,6 +38,7 @@ const ENTITY_PATTERNS: RegExp[] = [
   /[一-龥々]{2,8}(?:首相|大臣|大統領|長官|総裁|王国)/g,
   /[一-龥々]{2,5}氏/g,
   /(?:米|中|日|韓|欧|英|露|印|独|仏)国/g,
+  /[ァ-ヶー]{2,12}/g,
   /\b[A-Za-z][A-Za-z0-9]{1,11}\b/g,
 ];
 
@@ -76,12 +77,23 @@ export function extractBuzzMatchTokens(text: string): string[] {
     if (tok.length >= 2) found.add(tok);
   }
 
-  // 他のパターンで1トークンも抽出できなかった場合のみ、短い全文をそのままトークンとして使う。
-  // これにより「北朝鮮労働者問題」が「北朝鮮」＋「労働」の2トークンとして抽出された場合に
-  // 全文「北朝鮮労働者問題」が別トークンとして追加されるのを防ぎ、
-  // 単一トークン「北朝鮮」との曖昧マッチを抑止する。
-  if (found.size === 0 && t.length <= 24 && !/[「」『』]/.test(t)) {
-    found.add(normalizeToken(t));
+  // 他のパターンで1トークンも抽出できなかった場合のフォールバック。
+  // 読点などで分割可能なら分割して個別トークンとして抽出。
+  // これにより「皇室典範改正案、今国会での可決目指す」→「皇室典範改正案」「今国会での可決目指す」
+  // のように分割され、ニュース見出し「皇室典範改正案、今国会で可決へ」との一致が可能になる。
+  if (found.size === 0) {
+    // まず読点・スペースで分割
+    const parts = t.split(/[、。　\s,，]+/).filter(Boolean);
+    const partTokens = parts
+      .map(normalizeToken)
+      .filter((tok) => tok.length >= 2 && isStrongMatchToken(tok));
+    if (partTokens.length > 0) {
+      for (const tok of partTokens) found.add(tok);
+    }
+    // 分割でトークンが取れず、かつ短いテキスト（≦24文字）なら全文をトークンとして使う
+    if (found.size === 0 && t.length <= 24 && !/[「」『』]/.test(t)) {
+      found.add(normalizeToken(t));
+    }
   }
 
   return [...found].filter(isStrongMatchToken);
@@ -124,15 +136,11 @@ export function buzzMatchesSearchTerms(topic: string, terms: string[]): boolean 
       }
     }
 
-    // ② サブストリング一致（広いトークンの偽陽性リスクを軽減）
-    // トレンド語がトピックの一部分として含まれる場合、トレンド語の長さが
-    // トピック全体の40%以上ある場合のみ真の一致とみなす。
-    // 例: 「国旗損壊」(4文字) in 「国旗損壊罪」(5文字) → 80% → OK
-    // 例: 「北朝鮮」(3文字) in 「北朝鮮労働者問題」(9文字) → 33% → 偽陽性
+    // ② サブストリング一致（token抽出できなかったテキスト同士のフォールバック）
+    // 検索語が4文字以上かつトピックに含まれている場合のみ真の一致とみなす。
+    // 3文字以下の短い語は偽陽性リスク大（「北朝鮮」→「北朝鮮労働者問題」）。
     if (topicNorm.includes(t)) {
-      if (t.length >= topicNorm.length * 0.4 || topicNorm.length <= 6) return true;
-      // 40%未満の短いサブストリングは偽陽性リスク大
-      return false;
+      return t.length >= 4;
     }
     // トピック自体がトレンド語に含まれている → OK
     if (t.includes(topicNorm)) return true;

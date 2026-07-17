@@ -24,11 +24,13 @@ describe("buzz-cross-match", () => {
 
   it("表記ゆれでも検索語ソースと一致する", () => {
     expect(buzzMatchesSearchTerms("高市首相のNATO欠席", ["高市首相"])).toBe(true);
-    // 短いトピック（全文フォールバック→単一トークン）ならサブストリング一致を許容
+    // 短いトピックのサブストリング一致（「皇室典範」内の「典範」など）
     expect(buzzMatchesSearchTerms("国旗損壊罪", ["国旗損壊"])).toBe(true);
-    // 複数トークンからなる長いトピックに単一の短いトークンが含まれても
-    // 偽陽性リスク大→厳格化している（「北朝鮮」→「北朝鮮労働者問題」）
-    expect(buzzMatchesSearchTerms("トランプ大統領の関税政策", ["トランプ"])).toBe(false);
+    // カタカナ固有名詞は ENTITY_PATTERNS で抽出されるため正しくマッチ
+    expect(buzzMatchesSearchTerms("トランプ大統領の関税政策", ["トランプ"])).toBe(true);
+    // 3文字以下の短い広義語はサブストリング一致で偽陽性防止
+    // 「北朝鮮」(3文字) → 「北朝鮮労働者問題」のサブストリングだが短すぎて遮断
+    expect(buzzMatchesSearchTerms("北朝鮮労働者問題", ["北朝鮮"])).toBe(false);
   });
 
   it("ニュースとYouTubeをアンカー語で横断一致する", () => {
