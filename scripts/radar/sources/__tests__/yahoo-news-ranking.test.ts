@@ -45,7 +45,7 @@ describe("extractYahooRankingTitles", () => {
 });
 
 describe("fetchYahooNewsRankingTitles", () => {
-  it("国内・経済・国際・エンタメランキングから見出しを抽出する", async () => {
+  it("国内・経済・国際・エンタメ・地域ランキングから見出しを抽出する", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({ ok: true, text: () => Promise.resolve(RANKING_HTML_DIV) }),
@@ -53,9 +53,10 @@ describe("fetchYahooNewsRankingTitles", () => {
     const titles = await fetchYahooNewsRankingTitles();
     expect(titles).toContain("佐藤二朗　ハラスメント騒動で〝豹変〟…業界から心配の声");
     expect(titles).toContain("国会で新法案が審議入り");
-    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(4);
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(5);
     const urls = vi.mocked(fetch).mock.calls.map((c) => String(c[0]));
     expect(urls.some((u) => u.includes("/entertainment"))).toBe(true);
+    expect(urls.some((u) => u.includes("/local"))).toBe(true);
     expect(urls.some((u) => u.includes("/society"))).toBe(false);
   });
 
@@ -79,7 +80,7 @@ describe("fetchYahooNewsRankingTitles", () => {
 });
 
 describe("fetchYahooCommentRankingTitles", () => {
-  it("コメントランキング4カテゴリから見出しを抽出する", async () => {
+  it("コメントランキング5カテゴリから見出しを抽出する", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({ ok: true, text: () => Promise.resolve(RANKING_HTML_DIV) }),
@@ -88,7 +89,7 @@ describe("fetchYahooCommentRankingTitles", () => {
     expect(titles).toContain("佐藤二朗　ハラスメント騒動で〝豹変〟…業界から心配の声");
     const urls = vi.mocked(fetch).mock.calls.map((c) => String(c[0]));
     expect(urls.every((u) => u.includes("/ranking/comment/"))).toBe(true);
-    expect(urls).toHaveLength(4);
+    expect(urls).toHaveLength(5);
   });
 
   it("fetch失敗時は空配列を返す", async () => {
@@ -119,14 +120,14 @@ describe("extractYahooRankingEntries", () => {
 });
 
 describe("fetchYahooCommentRankingEntries", () => {
-  it("4カテゴリ分をtitle/urlペアで集約し重複を除く", async () => {
+  it("5カテゴリ分をtitle/urlペアで集約し重複を除く", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({ ok: true, text: () => Promise.resolve(RANKING_HTML_DIV) }),
     );
     const entries = await fetchYahooCommentRankingEntries();
     expect(entries).toHaveLength(2);
-    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(4);
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(5);
   });
 
   it("fetch失敗時は空配列を返す", async () => {

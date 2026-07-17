@@ -22,8 +22,24 @@ import { extractBuzzMatchTokens } from "../../../src/lib/buzz-cross-match";
 const API_BASE = "https://www.googleapis.com/youtube/v3";
 const UA = "Mozilla/5.0 (compatible; FactBaseRadar/1.0; +https://factbase.tokyo)";
 
-/** News & Politics（YouTube Data API の categoryId） */
-const NEWS_POLITICS_CATEGORY = "25";
+/**
+ * TwoSidesサイトに合うYouTubeカテゴリ一覧。
+ * News & Politics(25) はもちろん、社会議論が起きうる全カテゴリをカバー:
+ *   - 24: Entertainment（エンタメ炎上・声明対立）
+ *   - 27: Education（教育政策・社会問題解説）
+ *   - 28: Science & Technology（テクノロジー規制・AI倫理）
+ *   - 22: People & Blogs（個人の政治的発信・暴露）
+ *   - 35: Documentary（ドキュメンタリー・調査報道）
+ * 除外: Music(10), Sports(17), Gaming(20), Pets(15) 等は政治論争と無関係
+ */
+const BUZZ_CATEGORY_IDS = [
+  "25", // News & Politics
+  "24", // Entertainment
+  "27", // Education
+  "28", // Science & Technology
+  "22", // People & Blogs
+  "35", // Documentary
+] as const;
 
 /** videos.list の id パラメータに一括で渡せる上限（YouTube Data API仕様） */
 const VIDEO_STATS_BATCH_SIZE = 50;
@@ -204,20 +220,29 @@ export async function fetchYouTubeTrendingTitles(newsSeedTitles: string[] = []):
     maxResults: "8",
   });
 
-  const [popularGeneral, popularNews, dateBroad, ...seedResults] = await Promise.all([
+  // BUZZ_CATEGORY_IDS の各カテゴリで mostPopular を取得（各カテゴリのトレンド動画を拾う）
+  const categoryRequests = BUZZ_CATEGORY_IDS.map((catId, i) =>
+    fetchYouTubeApi<{ items?: VideoListItem[] }>(`mostPopularCat${catId}`, "videos", {
+      part: "snippet,statistics",
+      chart: "mostPopular",
+      regionCode: "JP",
+      videoCategoryId: catId,
+      maxResults: "15",
+    }),
+  );
+  // 総合トレンド（カテゴリ無指定）は全カテゴリ混在＝最大枠を広げる
+  const [popularGeneral, ...categoryResults] = await Promise.all([
     fetchYouTubeApi<{ items?: VideoListItem[] }>("mostPopularGeneral", "videos", {
       part: "snippet,statistics",
       chart: "mostPopular",
       regionCode: "JP",
-      maxResults: "25",
+      maxResults: "40",
     }),
-    fetchYouTubeApi<{ items?: VideoListItem[] }>("mostPopularNews", "videos", {
-      part: "snippet,statistics",
-      chart: "mostPopular",
-      regionCode: "JP",
-      videoCategoryId: NEWS_POLITICS_CATEGORY,
-      maxResults: "25",
-    }),
+    ...categoryRequests,
+  ]);
+
+  // 広域検索（時系列）+ ニュースシード検索は従来通り
+  const [dateBroad, ...seedResults] = await Promise.all([
     fetchYouTubeApi<{ items?: SearchListItem[] }>(
       "searchDateBroad",
       "search",
@@ -235,7 +260,7 @@ export async function fetchYouTubeTrendingTitles(newsSeedTitles: string[] = []):
 
   const organicEntries = dedupeByTitle([
     ...collectEntriesFromVideoList(popularGeneral?.items),
-    ...collectEntriesFromVideoList(popularNews?.items),
+    ...categoryResults.flatMap((r) => collectEntriesFromVideoList(r?.items)),
     ...collectEntriesFromSearchList(dateBroad?.items, statsById),
   ]).slice(0, RADAR.youtubeTrendingMaxTitles);
 

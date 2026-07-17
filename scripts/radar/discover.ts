@@ -55,7 +55,7 @@ import {
 } from "./lib/research";
 import type { SavedEvidence } from "./lib/promote-logic";
 import { isWithinPeakWindow, isOverdue } from "./lib/schedule";
-import { fetchTrendingKeywords } from "./sources/trends";
+import { fetchTrendingKeywords, fetchTrendingItems, type GoogleTrendItem } from "./sources/trends";
 import { fetchYahooRealtimeBuzzPolitics } from "./sources/yahoo-realtime";
 import {
   fetchYahooNewsRankingTitles,
@@ -71,6 +71,7 @@ import {
 } from "./sources/youtube-trending";
 import { fetchRecentYahooPolls } from "./sources/yahoo-polls";
 import { fetchShugiinBills, fetchSangiinBills } from "./sources/diet";
+import { fetchTVNewsTitles } from "./sources/tv-news";
 import { notifyRadarFailure } from "./notify";
 import { prefilterBuzzInputs, type BuzzTermInput } from "../../src/lib/buzz-prefilter";
 import { buildBuzzAnchorCandidates, assembleBuzzScore, buzzMatchesTitleCorpus } from "../../src/lib/buzz-cross-match";
@@ -179,17 +180,20 @@ async function main() {
   // Yahoo!「みんなの意見」新着一覧は1実行につき1回だけ取得し、③の調査対象トピック全件で使い回す
   // （researchTopicごとに一覧を叩き直すのは無駄打ち）。
   const yahooPolls = await fetchRecentYahooPolls();
+  // テレビ各局ニュースは独立して取得（BuzzScore第5ソース）
+  const tvNewsTitles = await fetchTVNewsTitles();
 
-  // バズ検知4ソースが同時に全滅＝スクレイピング系の構造変化が疑われる（個々は静かに空配列へ落ちる）。
+  // バズ検知5ソースが同時に全滅＝スクレイピング系の構造変化が疑われる（個々は静かに空配列へ落ちる）。
   if (
     googleTerms.length === 0 &&
     yahooBuzz.length === 0 &&
     newsRankingTitles.length === 0 &&
-    youtubeTrending.organic.length === 0
+    youtubeTrending.organic.length === 0 &&
+    tvNewsTitles.length === 0
   ) {
     await notifyRadarFailure(
       "バズ検知ソース全滅（discover）",
-      "Google Trends / Yahoo!リアルタイム / Yahoo!ニュース / YouTube が同時に0件（スクレイピング構造変化の可能性）",
+      "Google Trends / Yahoo!リアルタイム / Yahoo!ニュース / YouTube / TV各局 が同時に0件（スクレイピング構造変化の可能性）",
     );
   }
 
@@ -211,6 +215,8 @@ async function main() {
     // ことと「YouTubeで独立にバズっている」ことを同じ1ソースで二重カウントしてしまう。
     youtubeTrendingTitles: youtubeTrending.organic.map((e) => e.title),
     commentRankingTitles,
+    // テレビ各局ニュースはBuzzScore第5ソース。独立RSS取得なので他ソースと重複しない。
+    tvNewsTitles,
   };
   const anchorCandidates = buildBuzzAnchorCandidates(filteredInputs, buzzSourceInputs);
   const score2Count = anchorCandidates.filter((c) => c.hit.effectiveScore >= 2).length;
@@ -227,7 +233,7 @@ async function main() {
   });
 
   console.log(
-    `  ① 収集: Trends${googleTerms.length}・Yahoo${yahooBuzz.length}・ニュース${newsRankingTitles.length}・コメント${commentRankingTitles.length}・YouTube${youtubeTitles.length}=生${rawBuzzInputs.length}語 → 政治圏プリフィルタ後${filteredInputs.length}語（nano候補${buzzTerms.length}）・横断アンカー≥2: ${score2Count}件 / 継続${sustainedSet.size} / 法案${shugiin.length + sangiin.length}件`,
+    `  ① 収集: Trends${googleTerms.length}・Yahoo${yahooBuzz.length}・ニュース${newsRankingTitles.length}・コメント${commentRankingTitles.length}・YouTube${youtubeTitles.length}・TV${tvNewsTitles.length}=生${rawBuzzInputs.length}語 → 政治圏プリフィルタ後${filteredInputs.length}語（nano候補${buzzTerms.length}）・横断アンカー≥2: ${score2Count}件 / 継続${sustainedSet.size} / 法案${shugiin.length + sangiin.length}件`,
   );
 
   // ② 関連性判定（バズ語のみnanoに通す。法案は自明に関連なので直行）

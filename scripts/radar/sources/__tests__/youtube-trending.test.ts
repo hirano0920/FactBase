@@ -69,11 +69,11 @@ describe("fetchYouTubeTrendingTitles", () => {
       { videoId: "vid-search", title: "中東情勢と原油相場", channelTitle: "別ch", viewCount: 500, likeCount: 5, commentCount: 3 },
     ]);
     expect(result.all).toEqual(result.organic);
-    // 総合 + News & Politics の2系統
+    // 総合 + BUZZ_CATEGORY_IDS 6系統（News/Ent/Edu/Tech/People/Doc）の7系統
     const videoListCalls = vi
       .mocked(fetch)
       .mock.calls.filter((c) => String(c[0]).includes("chart=mostPopular"));
-    expect(videoListCalls.length).toBe(2);
+    expect(videoListCalls.length).toBe(7);
   });
 
   it("ニュース見出しシードの検索結果はallにのみ含まれ、organicには含まれない（自己参照防止）", async () => {

@@ -24,6 +24,7 @@ const RANKING_PATHS = [
   "/ranking/access/news/business", // 経済・金融
   "/ranking/access/news/world", // 国際
   "/ranking/access/news/entertainment", // エンタメ（声明対立・炎上の本丸）
+  "/ranking/access/news/local", // 地域（地方政治・条例・ローカル問題）
 ] as const;
 
 /**
@@ -35,6 +36,7 @@ const COMMENT_RANKING_PATHS = [
   "/ranking/comment/business",
   "/ranking/comment/world",
   "/ranking/comment/entertainment",
+  "/ranking/comment/local",
 ] as const;
 
 function decodeJsonString(raw: string): string {

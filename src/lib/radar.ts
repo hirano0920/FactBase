@@ -534,18 +534,24 @@ export interface BuzzSourceHit {
   inYahooRealtime: boolean;
   inNewsRanking: boolean;
   inYouTubeTrending: boolean;
+  /** 日本の主要地上波テレビ局（NHK/TBS/フジ/日テレ/テレ朝/テレ東）のニュースRSSに出現 */
+  inTVNews: boolean;
   /** ニュースランキング内で同一争点見出しが閾値以上（速報クラスタ） */
   inNewsCluster: boolean;
   /** Yahoo!コメントランキング内＝「賛否が割れて議論になっている」の実測シグナル */
   inCommentRanking: boolean;
   /** YouTube + Yahoo RT の両方にヒット＝テレビニュース＋ツイートのクロス確認 */
   youtubeYahooVerified: boolean;
-  /** 4ソースの素点 0-4 */
+  /** TVニュース + Yahoo RT の両方にヒット＝放送各社が報じ＋実際にツイートあり（本物のバズ） */
+  tvYahooVerified: boolean;
+  /** 5ソースの素点 0-5 */
   score: number;
-  /** promote/深掘り優先用。score + Newsクラスタ + コメントランキング + 検証ボーナス（上限5） */
+  /** promote/深掘り優先用。score + クラスタ + コメント + 検証ボーナス（上限5） */
   effectiveScore: number;
   /** クラスタに含まれる見出し数（ログ用） */
   newsClusterCount: number;
+  /** Google Trends の最大トラフィック値（ログ用、bigint注意） */
+  maxTrendTraffic?: number;
 }
 
 export interface BuzzSourceInputs {
@@ -555,6 +561,8 @@ export interface BuzzSourceInputs {
   youtubeTrendingTitles: string[];
   /** Yahoo!コメントランキング見出し。省略時は未計測（false扱い） */
   commentRankingTitles?: string[];
+  /** テレビ各局ニュースRSS見出し。省略時は未計測（false扱い） */
+  tvNewsTitles?: string[];
 }
 
 export function computeBuzzScore(topic: string, sources: BuzzSourceInputs): BuzzSourceHit {
@@ -568,6 +576,7 @@ export function buzzSourceLabels(hit: BuzzSourceHit): string[] {
     hit.inYahooRealtime && "yahoo_realtime",
     hit.inNewsRanking && "yahoo_news_ranking",
     hit.inYouTubeTrending && "youtube_trending",
+    hit.inTVNews && "tv_news",
     hit.inNewsCluster && "news_cluster",
     hit.inCommentRanking && "yahoo_comment_ranking",
   ].filter((s): s is string => Boolean(s));

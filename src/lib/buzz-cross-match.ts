@@ -202,28 +202,38 @@ export function assembleBuzzScore(topic: string, sources: BuzzSourceInputs): Buz
   const inYouTubeTrending =
     buzzTitleMatch([topic], sources.youtubeTrendingTitles) ||
     buzzMatchesStrictTitleCorpus(topic, sources.youtubeTrendingTitles);
+  const tvNewsTitles = sources.tvNewsTitles ?? [];
+  const inTVNews =
+    tvNewsTitles.length > 0 &&
+    (buzzTitleMatch([topic], tvNewsTitles) ||
+      buzzMatchesStrictTitleCorpus(topic, tvNewsTitles));
   const commentRankingTitles = sources.commentRankingTitles ?? [];
   const inCommentRanking =
     commentRankingTitles.length > 0 &&
     (buzzTitleMatch([topic], commentRankingTitles) ||
       buzzMatchesStrictTitleCorpus(topic, commentRankingTitles));
+  // 5ソース素点
   const score =
     Number(inGoogleTrends) +
     Number(inYahooRealtime) +
     Number(inNewsRanking) +
-    Number(inYouTubeTrending);
+    Number(inYouTubeTrending) +
+    Number(inTVNews);
 
   const newsClusterCount = countNewsClusterHeadlines(topic, sources.newsRankingTitles);
   const inNewsCluster = newsClusterCount >= RADAR.minNewsClusterHeadlines;
   // YouTube + Yahoo RT の両方にヒット = テレビ各社がニュース配信 + 実際にツイートあり
   // これは「本物のバズ」の最も信頼できる指標（単一ソースだけのヒットは偽陽性の可能性大）
   const youtubeYahooVerified = inYouTubeTrending && inYahooRealtime;
-  // コメントランキング一致は「賛否が割れている」の直接シグナルなので、他4ソースの合算とは
+  // TVニュース + Yahoo RT = 放送各社が報じている ＋ 実際にツイートで話題
+  // テレビニュースは「読まれた」ではなく「放送局が報じる価値ありと判断した」事実のシグナル
+  const tvYahooVerified = inTVNews && inYahooRealtime;
+  // コメントランキング一致は「賛否が割れている」の直接シグナルなので、他5ソースの合算とは
   // 別枠でボーナスを乗せる（読まれただけの record と区別するため newsCluster と同じ+1扱い）。
-  // 検証ボーナス: YouTube+YahooRT同時ヒットは +1（本物のバズの確度が高いため優先）
+  // 検証ボーナス: YouTube+YahooRT同時ヒットは +1、TV+YahooRT同時ヒットも +1。
   const effectiveScore = Math.min(
     5,
-    score + (inNewsCluster ? 1 : 0) + (inCommentRanking ? 1 : 0) + (youtubeYahooVerified ? 1 : 0),
+    score + (inNewsCluster ? 1 : 0) + (inCommentRanking ? 1 : 0) + (youtubeYahooVerified ? 1 : 0) + (tvYahooVerified ? 1 : 0),
   );
 
   return {
@@ -231,11 +241,13 @@ export function assembleBuzzScore(topic: string, sources: BuzzSourceInputs): Buz
     inYahooRealtime,
     inNewsRanking,
     inYouTubeTrending,
+    inTVNews,
     inNewsCluster,
     inCommentRanking,
     youtubeYahooVerified,
+    tvYahooVerified,
     score,
-    effectiveScore,
+    effectiveScore: Math.min(5, effectiveScore),
     newsClusterCount,
   };
 }
