@@ -55,8 +55,9 @@ export function HomeIssueExpand({ issue, guestComments, onBack, scrollToVote = f
             )}
           </div>
           <div className="flex items-start justify-between gap-3">
+            {/* H1相当はshareTitle。投票設問(issue.title)は下部の投票欄のみ。 */}
             <h2 className="text-2xl font-extrabold leading-tight tracking-tight text-ink sm:text-3xl">
-              {issue.title}
+              {issue.shareTitle || issue.title}
             </h2>
             <IssueBookmarkSlot slug={issue.slug} />
           </div>

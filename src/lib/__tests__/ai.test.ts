@@ -529,6 +529,25 @@ describe("syncVoteQuestionWithChoices", () => {
     expect(q.length).toBeLessThanOrEqual(40);
     expect(q.endsWith("支持する？支持しない？")).toBe(true);
   });
+
+  it("「必要か、不要か」のあとに「必要？不要？」を二重付与しない", () => {
+    const q = syncVoteQuestionWithChoices(
+      "国旗損壊罪は国家象徴を守るために必要か、不要か",
+      { for: "必要", against: "不要" },
+    );
+    expect(q).toBe("国旗損壊罪は国家象徴を守るために、必要？不要？");
+    expect(q.match(/必要/g)?.length).toBe(1);
+    expect(q.match(/不要/g)?.length).toBe(1);
+  });
+
+  it("「妥当か不当か」への二重付与を防ぐ", () => {
+    const q = syncVoteQuestionWithChoices(
+      "iPhone国内価格引き上げは妥当か不当か",
+      { for: "妥当", against: "不当" },
+    );
+    expect(q).not.toMatch(/妥当か.*妥当？/);
+    expect(q.endsWith("妥当？不当？")).toBe(true);
+  });
 });
 
 describe("sanitizePolarVoteChoices", () => {

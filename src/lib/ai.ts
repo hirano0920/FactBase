@@ -1208,30 +1208,72 @@ export function syncVoteQuestionWithChoices(
   if (!forC || !againstC) return question.slice(0, maxLen);
 
   const tail = `${forC}？${againstC}？`;
-  // 最終choicesが末尾に既にある場合はその前までを前置きにする（部分一致の indexOf は使わない）。
-  // 「百地章氏賛成」の中の「賛成」に誤マッチして前置きが壊れる事故を防ぐ。
-  const exactTail = new RegExp(`${escapeRegExp(forC)}[？?]${escapeRegExp(againstC)}[？?]?$`);
-  let preamble: string;
-  if (exactTail.test(question)) {
-    preamble = question.replace(exactTail, "").replace(/[、，\s]+$/g, "").trim();
-  } else {
-    preamble = question
-      .replace(/([^、。\s？?]{1,20})[？?]([^、。\s？?]{1,20})[？?]?$/, "")
+  // 選択肢ラベルのコア語（「必要だ」→「必要」、「外的要因か」→「外的要因」）
+  const coreOf = (s: string) =>
+    s
+      .replace(/(する|した|すべき|である|だ|です|か)+$/g, "")
+      .replace(/[？?、，\s]+$/g, "")
+      .trim();
+  const forCore = coreOf(forC);
+  const againstCore = coreOf(againstC);
+
+  // 末尾の極性ペアを剥がす。対応パターン:
+  //   A？B？ / A?B? / Aか、Bか / AかBか / Aか、Bか？
+  // 「必要か、不要か」のあとに「必要？不要？」を重ねる事故を防ぐ（PDCA Day2）。
+  const stripPolarTail = (q: string): string => {
+    let s = q.trim();
+    const patterns: RegExp[] = [];
+    if (forCore && againstCore && forCore.length >= 2 && againstCore.length >= 2) {
+      const a = escapeRegExp(forCore);
+      const b = escapeRegExp(againstCore);
+      patterns.push(
+        new RegExp(`[、，]?${a}[だです]*[？?か][、，]?${b}[だです]*[？?か]?$`),
+        new RegExp(`[、，]?${a}[？?]${b}[？?]?$`),
+      );
+    }
+    // 汎用: 末尾の「短語？短語？」または「短語か、短語か」
+    patterns.push(
+      /[、，]?([^、。\s？?]{1,12})[？?]([^、。\s？?]{1,12})[？?]?$/,
+      /[、，]?([^、。\s？?]{1,12})か[、，]?([^、。\s？?]{1,12})か[？?]?$/,
+    );
+    for (const re of patterns) {
+      if (re.test(s)) {
+        s = s.replace(re, "").replace(/[、，\s]+$/g, "").trim();
+        break;
+      }
+    }
+    return s
       .replace(/[、，]?[^、。？?\s]{0,24}ですか[？?]?$/, "")
       .replace(/[？?\s]+$/g, "")
       .replace(/[、，\s]+$/g, "")
       .trim();
-  }
+  };
 
+  const preamble = stripPolarTail(question);
+
+  // 前置きが既に「Aか、Bか」形式でchoicesと一致するなら、そのまま正規化した1回分だけ返す
   let out = preamble ? `${preamble}、${tail}` : tail;
   out = out.replace(/、+/g, "、").replace(/は、/g, "は");
+  // 二重付与の最終防御: 「必要か、不要か、必要？不要？」→「…、必要？不要？」
+  if (forCore && againstCore) {
+    const dup = new RegExp(
+      `(${escapeRegExp(forCore)}[だです]*[？?か][、，]?${escapeRegExp(againstCore)}[だです]*[？?か]?)[、，]?${escapeRegExp(forC)}[？?]${escapeRegExp(againstC)}[？?]?$`,
+    );
+    if (dup.test(out)) {
+      out = out.replace(dup, tail).replace(/、+/g, "、");
+      // preambleを残す
+      const pre = stripPolarTail(question);
+      out = pre ? `${pre}、${tail}` : tail;
+      out = out.replace(/、+/g, "、").replace(/は、/g, "は");
+    }
+  }
   if (out.length <= maxLen) return out;
 
   const joinerLen = preamble ? 1 : 0;
   const budget = maxLen - tail.length - joinerLen;
   if (budget < 2) return tail.slice(0, maxLen);
-  preamble = preamble.slice(0, budget).replace(/[、，\s]+$/g, "");
-  return preamble ? `${preamble}、${tail}` : tail.slice(0, maxLen);
+  const shortPre = preamble.slice(0, budget).replace(/[、，\s]+$/g, "");
+  return shortPre ? `${shortPre}、${tail}` : tail.slice(0, maxLen);
 }
 
 /**

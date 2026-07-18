@@ -128,14 +128,39 @@ describe("matchYouTubeEntry", () => {
   const entries = [
     { videoId: "a", title: "日銀、追加利上げを検討", channelTitle: "A", viewCount: 100, likeCount: 1, commentCount: 1 },
     { videoId: "b", title: "日銀、追加利上げへ", channelTitle: "B", viewCount: 500, likeCount: 2, commentCount: 2 },
+    {
+      videoId: "c",
+      title: "iOS 27 adds an all-new app to your iPhone's Home Screen",
+      channelTitle: "C",
+      viewCount: 999999,
+      likeCount: 10,
+      commentCount: 10,
+    },
+    {
+      videoId: "d",
+      title: "米アップル iPhoneの日本国内販売価格を引き上げ 円安を反映か",
+      channelTitle: "D",
+      viewCount: 50000,
+      likeCount: 5,
+      commentCount: 5,
+    },
   ];
 
-  it("複数一致時は再生数が最も多いものを採用する", () => {
-    expect(matchYouTubeEntry("日銀", entries)?.viewCount).toBe(500);
+  it("matchesコールバックで複数一致時は再生数が最も多いものを採用する", () => {
+    const matches = (topic: string, title: string) => title.includes(topic);
+    expect(matchYouTubeEntry("日銀", entries, { matches })?.viewCount).toBe(500);
   });
 
   it("一致が無ければundefined", () => {
     expect(matchYouTubeEntry("無関係な話題", entries)).toBeUndefined();
+  });
+
+  it("iPhone値上げトピックにiOS噂動画をマッチさせない（出来事トークン必須）", () => {
+    const matches = (topic: string, title: string) =>
+      /iPhone/i.test(title) || title.includes("価格") || title.includes("値上げ");
+    const hit = matchYouTubeEntry("iPhone日本国内販売価格の引き上げ", entries, { matches });
+    expect(hit?.videoId).toBe("d");
+    expect(hit?.title).toContain("販売価格");
   });
 });
 

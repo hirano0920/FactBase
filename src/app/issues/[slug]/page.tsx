@@ -113,8 +113,10 @@ export default async function IssuePage({ params }: IssuePageProps) {
                 )}
               </div>
               <div className="flex items-start justify-between gap-3">
+                {/* H1はshareTitle（フック見出し）。投票設問のissue.titleは投票欄のみに出す。
+                    voteQuestionが「是認？拒否？」に崩壊しても、ページ見出しは壊さない。 */}
                 <h1 className="text-3xl font-extrabold leading-tight tracking-tight text-ink sm:text-4xl text-balance">
-                  {issue.title}
+                  {issue.shareTitle || issue.title}
                 </h1>
                 <div className="shrink-0 pt-1">
                   <IssueBookmarkSlot slug={issue.slug} />

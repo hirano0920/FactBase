@@ -66,8 +66,8 @@ import { isWithinPeakWindow, minutesToNearestWindow, isOverdue } from "./lib/sch
 import { notifyRadarFailure, notifyRadarSkip } from "./notify";
 import { notifyRevalidate } from "./lib/notify-revalidate";
 import { linkBuzzSourcesToIssue } from "./lib/link-buzz-sources";
-import { buildLockedAxis, classifyTopic } from "./lib/axis-lock";
-import { resolveIssueTrack, trackDbEnum, type IssueTrackId } from "./lib/issue-track";
+import { buildLockedAxis, classifyTopic, structuralAxis } from "./lib/axis-lock";
+import { isNewsishTopicClass, resolveIssueTrack, trackDbEnum, type IssueTrackId } from "./lib/issue-track";
 import {
   fetchHistoricalDatedExcerpts,
   needsHistoricalEnrich,
@@ -161,68 +161,8 @@ function logHeldSummary() {
  * LLM呼び出し不要の簡易ルールベース。
  */
 function fallbackAxisByTopic(title: string): { axis: string; sideA: string; sideB: string } {
-  const t = title;
-
-  // 株価暴落/経済ショック系
-  if (/暴落|急落|下落|時価総額|株価|バブル|景気|不況/.test(t)) {
-    return {
-      axis: `${t}、この経済ショックをどう捉えるべきか：一時的な調整か、構造的な下落か`,
-      sideA: "一時的な調整・買い場として捉えるべき",
-      sideB: "構造的な下落・警戒すべきシグナル",
-    };
-  }
-
-  // 企業ニュース（特許訴訟/賠償命令/提携/買収）
-  if (/特許|賠償|訴訟|提携|買収|投資|倒産|破綻/.test(t)) {
-    return {
-      axis: `${t}、この出来事の影響をどう評価すべきか：企業にとってのチャンスかリスクか`,
-      sideA: "ポジティブに評価・長期的な成長につながる",
-      sideB: "ネガティブに評価・リスクが顕在化した",
-    };
-  }
-
-  // 法律/制度/法案系
-  if (/法案|改正|可決|成立|制定|制度|法|罰則|規制/.test(t)) {
-    return {
-      axis: `${t}、この制度変更に賛成か反対か`,
-      sideA: "賛成・制度変更を支持する",
-      sideB: "反対・制度変更に慎重であるべき",
-    };
-  }
-
-  // 外交/安全保障/国際関係
-  if (/イラン|ウクライナ|ロシア|中国|北朝鮮|安保|防衛|制裁|軍事/.test(t)) {
-    return {
-      axis: `${t}、日本の立場としてどう対応すべきか`,
-      sideA: "積極的に関与・対応すべき",
-      sideB: "慎重に対応・巻き込まれるべきでない",
-    };
-  }
-
-  // スキャンダル/疑惑
-  if (/疑惑|問題|批判|謝罪|不祥事|隠蔽|不正/.test(t)) {
-    return {
-      axis: `${t}、この問題の責任はどこにあるのか`,
-      sideA: "当事者の責任が重い",
-      sideB: "制度や環境に問題がある",
-    };
-  }
-
-  // 政治/選挙/人事
-  if (/選挙|内閣|総理|大臣|知事|市長|辞任|更迭/.test(t)) {
-    return {
-      axis: `${t}、この判断を支持するか不支持か`,
-      sideA: "支持する・適切な判断だ",
-      sideB: "不支持・問題のある判断だ",
-    };
-  }
-
-  // その他: 汎用フォールバック
-  return {
-    axis: `${t}について、現状をどう評価すべきか`,
-    sideA: "肯定的に評価する",
-    sideB: "批判的に評価する",
-  };
+  // axis-lock の structuralAxis と二重定義しない（辞任→党の将来 等の修正を一元化）
+  return structuralAxis(title);
 }
 
 async function main() {
@@ -795,9 +735,13 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
   // ★★★ 軸ロック: 現実の対立軸を証拠から確定し、Writerの芯ズレを防ぐ。
   // buildLockedAxis は fail-open: データ不足でも構造的軸を生成する。
   // （従来はnullが返る可能性があったが、現在は常に軸が生成される）
+  // ★ AI仮設問(evidence.voteQuestion)はYahoo投票ではない。実測pollだけを渡す。
+  //   仮設問を最優先すると「辞任の容認？」のような矮小軸に固定される（PDCA Day2事故）。
+  const topicForClass = c.topicTerm || c.evidence.topic || c.title;
+  const topicClassEarly = classifyTopic(topicForClass);
   let lockedAxis = await buildLockedAxis({
-    topic: c.topicTerm || c.evidence.topic || c.title,
-    voteQuestion: c.evidence.voteQuestion,
+    topic: topicForClass,
+    yahooPollQuestion: c.evidence.externalPoll?.question,
     pollChoices: c.evidence.externalPoll?.choices,
     claimDiffConflicts: claimDiff.conflicts.length > 0 ? claimDiff.conflicts : undefined,
     commentSamples: c.evidence.commentSamples,
@@ -806,16 +750,8 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
   if (lockedAxis) {
     console.log(`  🔒 軸ロック: 「${lockedAxis.axis}」 (sideA: ${lockedAxis.sideA} / sideB: ${lockedAxis.sideB})`);
   } else {
-    // 真のfail-safe: buildLockedAxisが何らかの理由でnullを返した場合のみのフォールバック
-    // （通常はaxis-lock.tsのstructuralAxisが常に軸を生成するため、ここには来ない）
-    if (c.evidence.voteQuestion) {
-      lockedAxis = { axis: c.evidence.voteQuestion, sideA: "賛成", sideB: "反対" };
-      console.warn(`  ⚠️ 軸ロック不能 → voteQuestionをフォールバック軸に使用: "${lockedAxis.axis}"`);
-    } else {
-      // トピック種別に応じたフォールバック軸
-      lockedAxis = fallbackAxisByTopic(c.title);
-      console.warn(`  ⚠️ 軸ロック不能 → トピック種別からフォールバック軸を生成: "${lockedAxis.axis}"`);
-    }
+    lockedAxis = fallbackAxisByTopic(c.title);
+    console.warn(`  ⚠️ 軸ロック不能 → トピック種別からフォールバック軸を生成: "${lockedAxis.axis}"`);
   }
 
   // ★★★ 争点正当性フィルタ（両論Gate） / News直行 ★★★
@@ -862,8 +798,22 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
         : "";
       console.warn(`  ⚠️ Debate不合格 (${typeLabel}${reasonSuffix}) — Newsトラック候補として続行: ${c.title}`);
 
-      // salvage: bad_frame + suggestedFrames → 代案設問で1回だけ再判定
+      // ★ no_opposing_side / fact_only / obvious_truth はサルベージしない。
+      //   「両論フォーカスに言い換えて再判定」は対立がないのにDebateを強制する
+      //   （トランプ利益相反→「擁護？批判？」事故の根因）。Newsで出す。
+      const nonSalvageable = new Set([
+        "no_opposing_side",
+        "fact_only",
+        "obvious_truth",
+        "unacceptable_side",
+      ]);
+      const skipSalvage =
+        isNewsishTopicClass(topicClassEarly) ||
+        nonSalvageable.has(legitimacyResult.problemType || "");
+
+      // salvage: bad_frame + suggestedFrames のみ（フレーミング修正は有効）
       if (
+        !skipSalvage &&
         legitimacyResult.problemType === "bad_frame" &&
         legitimacyResult.suggestedFrames.length > 0
       ) {
@@ -894,65 +844,20 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
             c.evidence.predictedDivisionScore = salvageResult.predictedDivisionScore;
           }
         }
-      } else if (legitimacyResult.problemType === "no_opposing_side" && lockedAxis) {
-        console.log(`  💡 no_opposing_side — 設問を両論フォーカスに言い換えて再判定`);
-        const salvageResult = await assessDebateLegitimacy({
-          topic: c.title,
-          voteQuestion: `${lockedAxis.axis} 支持する立場と批判する立場の両方から検討する`,
-          excerpts: [
-            ...primaryExcerpts,
-            ...reportExcerpts,
-            ...internationalReportExcerpts,
-            ...datedExcerpts,
-            ...pollingExcerpts,
-          ],
-          category: c.category ?? undefined,
-          lockedAxis,
-          externalPollDivision: c.evidence.externalPoll?.divisionScore,
-          commentFrictionScore: c.evidence.commentFrictionScore,
-          claimDiffConflicts: claimDiff.conflicts.length > 0 ? claimDiff.conflicts : undefined,
-        });
-        if (salvageResult.legitimate) {
-          console.log(`  ✅ 両論フォーカス設問でサルベージ成功`);
-          legitimacyOk = true;
-          if (salvageResult.predictedDivisionScore !== undefined) {
-            c.evidence.predictedDivisionScore = salvageResult.predictedDivisionScore;
-          }
-        }
-      } else if (legitimacyResult.problemType === "unacceptable_side") {
-        const neutralized = lockedAxis.axis.replace(/擁護|支持|容認|肯定/gi, "評価");
-        if (neutralized !== lockedAxis.axis) {
-          console.log(`  💡 unacceptable_side — 中立化した設問で再判定: "${neutralized}"`);
-          const salvageResult = await assessDebateLegitimacy({
-            topic: c.title,
-            voteQuestion: neutralized,
-            excerpts: [
-              ...primaryExcerpts,
-              ...reportExcerpts,
-              ...internationalReportExcerpts,
-              ...datedExcerpts,
-              ...pollingExcerpts,
-            ],
-            category: c.category ?? undefined,
-            lockedAxis,
-            externalPollDivision: c.evidence.externalPoll?.divisionScore,
-            commentFrictionScore: c.evidence.commentFrictionScore,
-            claimDiffConflicts: claimDiff.conflicts.length > 0 ? claimDiff.conflicts : undefined,
-          });
-          if (salvageResult.legitimate) {
-            console.log(`  ✅ 中立化設問でサルベージ成功`);
-            lockedAxis.axis = neutralized;
-            legitimacyOk = true;
-            if (salvageResult.predictedDivisionScore !== undefined) {
-              c.evidence.predictedDivisionScore = salvageResult.predictedDivisionScore;
-            }
-          }
-        }
+      } else if (skipSalvage) {
+        console.log(
+          `  📰 ${typeLabel} — 両論強制サルベージをスキップしNewsへ（class=${topicClassEarly}）`,
+        );
       }
       // salvage失敗・対象外でも HELD しない。Newsトラックで公開する。
     }
 
-    const topicClass = classifyTopic(c.topicTerm || c.evidence.topic || c.title);
+    const topicClass = topicClassEarly;
+    const hasRealExternalPoll = Boolean(
+      c.evidence.externalPoll?.question &&
+        Array.isArray(c.evidence.externalPoll?.choices) &&
+        c.evidence.externalPoll.choices.length >= 2,
+    );
     resolvedTrack = resolveIssueTrack({
       legitimate: legitimacyOk,
       debatable: c.evidence.debatable,
@@ -960,10 +865,16 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
       commentFrictionScore: c.evidence.commentFrictionScore,
       claimDiffConflictCount: claimDiff.conflicts.length,
       topicClass,
+      hasRealExternalPoll,
     });
+    // News確定なら evidence.debatable も同期。Rank計算から DebateHeat を外し、
+    // 「コメント摩擦で過大評価→Debate枠を食う」を防ぐ。
+    if (resolvedTrack === "news") {
+      c.evidence.debatable = false;
+    }
     console.log(
       `  🏷️ トラック判定: ${resolvedTrack === "news" ? "News（タイパまとめ）" : "Debate（スプリット議論）"}` +
-        ` / class=${topicClass} / legitimate=${legitimacyOk}`,
+        ` / class=${topicClass} / legitimate=${legitimacyOk} / realPoll=${hasRealExternalPoll}`,
     );
   }
 

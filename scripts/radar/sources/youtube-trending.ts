@@ -281,19 +281,44 @@ export async function fetchYouTubeTrendingTitles(newsSeedTitles: string[] = []):
  * トピックに対応するYouTube動画を探す（あればview/comment数を「実際に見られている・
  * 議論になっている」の実測シグナルとしてevidenceへ合流する）。複数一致時は最も再生数が多いものを採用。
  */
+/** トピックに含まれる「出来事トークン」。動画側にも同じ出来事語がないとマッチさせない */
+const YOUTUBE_EVENT_TOKEN_RE =
+  /値上げ|値下げ|価格改定|販売価格|急落|暴落|下落|賠償|特許|辞任|成立|可決|倒産|攻撃|侵攻|損壊|典範|減税|利益相反/;
+
 export function matchYouTubeEntry(
   topic: string,
   entries: readonly YouTubeVideoEntry[],
   opts?: { matches?: (topic: string, title: string) => boolean },
 ): YouTubeVideoEntry | undefined {
   const matches = opts?.matches;
-  const hits = entries.filter(
-    (e) =>
-      e.title === topic ||
-      topic.includes(e.title) ||
-      e.title.includes(topic) ||
-      (matches?.(topic, e.title) ?? false),
-  );
+  // ★ 緩い includes マッチは禁止（2026-07-18）。
+  //   topic="iPhone値上げ" に対し title="iOS 27...iPhone" が hit し、
+  //   無関係動画の再生数・コメントが DebateHeat を水増しする事故があった。
+  //   matches が渡された場合はそれだけを使い、未指定時のみ完全一致/相互包含
+  //   （ただし短いブランド名だけの包含は除外）。
+  const eventTokensInTopic = topic.match(
+    new RegExp(YOUTUBE_EVENT_TOKEN_RE.source, "g"),
+  ) ?? [];
+
+  const hits = entries.filter((e) => {
+    let ok = false;
+    if (matches) ok = matches(topic, e.title);
+    else if (e.title === topic) ok = true;
+    else {
+      const short = topic.length <= e.title.length ? topic : e.title;
+      const long = topic.length <= e.title.length ? e.title : topic;
+      if (short.length < 8) ok = false;
+      else if (/^[a-z0-9\s]+$/i.test(short) && short.length < 16) ok = false;
+      else ok = long.includes(short);
+    }
+    if (!ok) return false;
+    // 出来事トークンがトピックにあるなら、動画タイトルにも同じ出来事語が必要
+    // （ブランド名「iPhone」だけの一致を排除）
+    if (eventTokensInTopic.length > 0) {
+      return eventTokensInTopic.some((tok) => e.title.includes(tok));
+    }
+    return true;
+  });
   if (hits.length === 0) return undefined;
   return hits.reduce((best, e) => (e.viewCount > best.viewCount ? e : best));
 }
