@@ -148,7 +148,7 @@ async function main() {
       // 初回生成時（summarize.ts）と同じ調査基盤を続報時も維持する。
       // ensureEvidenceは鮮度内ならevidenceJsonを再利用するため、続報のたびに外部APIを叩き直さない。
       const evidence = await ensureEvidence(prisma, issue.title, candidate);
-      const { dietSpeeches, background, laws, estatStats, estatFigures } = evidenceToArticleFacts(evidence);
+      const { dietSpeeches, background, laws, estatStats, estatFigures, dietVote } = evidenceToArticleFacts(evidence);
       const [internationalReportExcerpts, pollingExcerpts] = evidence
         ? await Promise.all([
             fetchReportExcerpts(internationalNewsSources(evidence)),
@@ -190,6 +190,7 @@ async function main() {
         laws,
         estatStats,
         estatFigures,
+        dietVote,
         previousArticle: { lead: summaryJson?.lead ?? "", articleHtml: issue.articleHtml },
       });
       let article = generatedArticle;

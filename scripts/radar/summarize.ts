@@ -78,7 +78,7 @@ async function main() {
       // ここでdiscover.ts相当の調査（国会会議録・関連法令・Wikipedia背景・国内外報道）を後付けする。
       // 検索語はnanoで正規化されていないissue.titleをそのまま使う（ヒットしなくても記事生成は続行）。
       const evidence = await ensureEvidence(prisma, issue.title, candidate);
-      const { dietSpeeches, background, laws, estatStats, estatFigures } = evidenceToArticleFacts(evidence);
+      const { dietSpeeches, background, laws, estatStats, estatFigures, dietVote } = evidenceToArticleFacts(evidence);
       const [internationalReportExcerpts, pollingExcerpts] = evidence
         ? await Promise.all([
             fetchReportExcerpts(internationalNewsSources(evidence)),
@@ -99,6 +99,7 @@ async function main() {
         laws,
         estatStats,
         estatFigures,
+        dietVote,
       });
 
       // 機械チェック1: 主張の裏取り（Writer=GPT-5とは独立のnano照合）が最終試行後も不合格ならHELD

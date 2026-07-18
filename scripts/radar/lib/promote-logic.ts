@@ -21,6 +21,8 @@ export type SavedEvidence = EvidenceBundle & {
   estatStats?: import("../sources/estat").EStatItem[];
   /** e-Stat基幹指標の確定数値（CPI・失業率等）。記事に逐語引用する */
   estatIndicators?: import("../sources/estat-indicators").EStatIndicatorFigure[];
+  /** 参議院本会議の政党別賛否内訳（法案系争点で実測の分断シグナル・記事に逐語引用する） */
+  dietVote?: import("../sources/diet-votes").DietVoteBreakdown;
   /**
    * detect.ts（RSS経路）で「多数の媒体が報じているが一次情報が無く、まだSNSでバズる前」という理由で
    * 公開見送り（no_primary_source / defer_buzz_pipeline）になった候補を discover.ts が引き取り、

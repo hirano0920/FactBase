@@ -68,6 +68,7 @@ for (const cand of pending) {
 
   const rank = selectionV2RankScore({
     buzzScore: buzzHit.effectiveScore,
+    topic: cand.title,
     tweetCount: ev.tweetCount ?? 0,
     googleTrendTraffic: ev.googleTrendTraffic,
     newsClusterCount: Math.max(newsClusterCount, ev.newsClusterCount ?? 0),

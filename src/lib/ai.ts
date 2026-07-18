@@ -1579,7 +1579,7 @@ const WRITEABILITY_SCHEMA = z.object({
  */
 export async function extractKeyFacts(
   excerpts: { url: string; text: string; feed?: string }[],
-): Promise<{ fact: string; sourceUrl: string }[]> {
+): Promise<{ text: string; sourceUrl: string }[]> {
   try {
     const blob = excerpts
       .filter((e) => (e.text ?? "").length >= 20)
@@ -1610,10 +1610,58 @@ export async function extractKeyFacts(
       ],
     });
     const content = res.choices[0]?.message?.content ?? "{}";
-    const parsed = safeParseJson(content, { facts: [] as { text: string; sourceUrl: string }[], exhausted: false });
-    return (parsed.facts ?? []).filter((f: { text: string; sourceUrl: string }) => f.text?.length >= 4 && f.sourceUrl?.length >= 4);
+    const FactExtractSchema = z.object({
+      facts: z.array(z.object({ text: z.string(), sourceUrl: z.string() })).default([]),
+      exhausted: z.boolean().optional().default(false),
+    });
+    const parsed = safeParseJson(content, FactExtractSchema);
+    return (parsed.facts ?? []).filter((f) => f.text?.length >= 4 && f.sourceUrl?.length >= 4);
   } catch {
     return [];
+  }
+}
+
+const DIET_VOTE_MATCH_SCHEMA = z.object({
+  index: z.number().int().optional().default(-1),
+});
+
+/**
+ * トピック語（「国旗損壊罪」等の通称・報道見出し表現）と、参議院投票結果一覧の正式議案名候補群を
+ * 照合し、同一議案を指しているものがあればそのインデックスを返す。
+ *
+ * 議案の正式名称（例:「国旗の損壊等の処罰に関する法律案」）は官庁的な言い回しで、
+ * 報道・SNSでの通称（「国旗損壊罪」）と字面が大きく異なることが多く、
+ * 文字列類似度（bigram等）だけでは同一議案と判定できないためnanoで意味的に照合する。
+ * 候補は呼び出し側で軽くプリフィルタしてから渡すこと（コスト抑制）。
+ */
+export async function matchDietVoteTitle(
+  topic: string,
+  candidateTitles: string[],
+): Promise<number | null> {
+  if (candidateTitles.length === 0) return null;
+  try {
+    const list = candidateTitles.map((t, i) => `${i}: ${t}`).join("\n");
+    const res = await getOpenAIRadar().chat.completions.create({
+      model: process.env.RADAR_CLASSIFY_MODEL || AI_MODELS.utility,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content: `あなたは国会議案の照合係です。トピック語（報道・SNSでの通称）と、
+参議院の議案名候補リスト（正式な法律案名）を照合し、同じ議案を指しているものが
+あればその番号を返してください。正式名称は官庁的な言い回しのため、通称と字面が
+大きく違っても同じ制度・法案を指していれば一致とみなしてよい。
+確信が持てない場合や該当が無い場合は -1 を返す。
+必ずJSONのみ: {"index": 番号 または -1}`,
+        },
+        { role: "user", content: `トピック語: ${topic}\n\n候補:\n${list}` },
+      ],
+    });
+    const parsed = safeParseJson(res.choices[0]?.message?.content ?? "{}", DIET_VOTE_MATCH_SCHEMA);
+    if (parsed.index >= 0 && parsed.index < candidateTitles.length) return parsed.index;
+    return null;
+  } catch {
+    return null;
   }
 }
 

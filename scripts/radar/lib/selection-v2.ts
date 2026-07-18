@@ -76,6 +76,10 @@ export interface SelectionV2Breakdown {
   conflictPrime: number;
   combinedConflictPrime?: number;
   claimDiffConflicts?: number;
+  /** @deprecated use clickHeat */
+  tweetHeat: number;
+  /** @deprecated not used in rankScore */
+  secondaryHeat: number;
   rankScore: number;
   hasTweetCount: boolean;
   tweetCount: number;

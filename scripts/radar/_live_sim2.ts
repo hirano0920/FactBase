@@ -59,6 +59,7 @@ function tryTopic(title: string, tweetCount: number) {
   const buzzHit = assembleBuzzScore(title, inputs);
   const rank = selectionV2RankScore({
     buzzScore: buzzHit.effectiveScore,
+    topic: title,
     tweetCount: tweetCount ?? 0,
     googleTrendTraffic: buzzHit.maxTrendTraffic,
     newsClusterCount: buzzHit.newsClusterCount,

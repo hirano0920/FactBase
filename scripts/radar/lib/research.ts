@@ -26,6 +26,7 @@ import { searchNews, searchInternationalNews, searchCJKNews, type NewsItem } fro
 import { fetchWikipediaBackground, type WikipediaBackground } from "../sources/wikipedia";
 import { searchEStatStats, type EStatItem } from "../sources/estat";
 import { fetchTopicIndicators, type EStatIndicatorFigure } from "../sources/estat-indicators";
+import { fetchDietVoteBreakdown, type DietVoteBreakdown } from "../sources/diet-votes";
 import {
   matchYahooPoll,
   fetchYahooPollDetail,
@@ -59,6 +60,7 @@ export interface EvidenceBundle {
   officialEvents: OfficialEvent[]; // 既存90本RSSの官庁一次情報との一致（既存DBの再利用）
   estatStats?: EStatItem[]; // e-Stat政府統計（経済系トピックの数値一次情報・名称のみ）
   estatIndicators?: EStatIndicatorFigure[]; // e-Stat基幹指標の確定数値（CPI・失業率等・逐語引用用）
+  dietVote?: DietVoteBreakdown; // 参議院本会議の政党別賛否内訳（法案系争点で実測の分断シグナル）
   pollingNews?: NewsItem[]; // 世論調査を報じたニュース（支持率・賛否割合等の具体的数値の裏取り材料）
   /**
    * Yahoo!ニュース「みんなの意見」で一致した設問（あれば）。コメント数（炎上の絶対量）と違い、
@@ -230,7 +232,7 @@ export async function researchTopic(
   const perQueryNews = Math.max(2, Math.ceil(limits.newsRecords / Math.max(queries.length, 1)));
   const perQueryIntl = Math.max(2, Math.ceil(limits.internationalNewsRecords / Math.max(intlQueries.length, 1)));
 
-  const [dietSpeeches, laws, background, officialEvents, cjkNews, estatStats, estatIndicators, pollingNewsRaw, ...newsBatches] =
+  const [dietSpeeches, laws, background, officialEvents, cjkNews, estatStats, estatIndicators, dietVote, pollingNewsRaw, ...newsBatches] =
     await Promise.all([
       searchDietSpeeches(term, limits.kokkaiRecords),
       searchLaws(term, limits.lawRecords),
@@ -240,6 +242,8 @@ export async function researchTopic(
       searchEStatStats(term, 3),
       // 確定指標（CPI・失業率等）はキーワード非該当なら即[]、該当時のみ日次キャッシュ/APIで最新値。
       fetchTopicIndicators(term),
+      // 参議院本会議の政党別賛否。bigramプリフィルタで無関係トピックは即null（nano呼ばない）。
+      fetchDietVoteBreakdown(term),
       searchNews(buildPollingQuery(term), POLLING_NEWS_LIMIT),
       ...queries.map((q) => searchNews(q, perQueryNews)),
       ...intlQueries.map((q) => searchInternationalNews(q, perQueryIntl)),
@@ -304,6 +308,7 @@ export async function researchTopic(
       (estatIndicators as EStatIndicatorFigure[]).length > 0
         ? (estatIndicators as EStatIndicatorFigure[])
         : undefined,
+    dietVote: (dietVote as DietVoteBreakdown | null) ?? undefined,
     pollingNews: pollingNews.length > 0 ? pollingNews : undefined,
     externalPoll,
     commentSamples,

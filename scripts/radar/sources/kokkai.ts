@@ -68,3 +68,44 @@ export async function searchDietSpeeches(term: string, limit = 5): Promise<DietS
     return [];
   }
 }
+
+/**
+ * 指定した氏名の直近の発言記録から speakerPosition（国務大臣等の肩書。API側が実際の会議録に
+ * 記載された肩書として返す一次情報）を取得する。幹事長・政調会長等の党内役職は会議録に
+ * 記載されないため取得できない（憶測で埋めず null を返す）。
+ *
+ * 古い在任時の肩書を「現職」として誤表示しないよう、直近 maxAgeDays 以内の発言のみを見る
+ * （内閣改造で肩書が変わった後も過去の発言記録にはその時点の肩書が残るため）。
+ */
+export async function findRecentSpeakerPosition(
+  name: string,
+  maxAgeDays = 90,
+): Promise<string | null> {
+  if (name.trim().length < 2) return null;
+  try {
+    const params = new URLSearchParams({
+      speaker: name,
+      recordPacking: "json",
+      maximumRecords: "3",
+    });
+    const res = await fetch(`${SPEECH_API}?${params.toString()}`, {
+      headers: { "User-Agent": UA, Accept: "application/json" },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = (await res.json()) as { speechRecord?: Record<string, unknown>[] };
+    const records = Array.isArray(data.speechRecord) ? data.speechRecord : [];
+    const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60_000;
+    for (const r of records) {
+      const date = clean(r.date);
+      const position = clean(r.speakerPosition);
+      if (!date || !position) continue;
+      const t = new Date(date).getTime();
+      if (Number.isFinite(t) && t >= cutoff) return position;
+    }
+    return null;
+  } catch (e) {
+    console.warn(`  ⚠️ kokkai speakerPosition (${name}): 取得失敗 (${e})`);
+    return null;
+  }
+}

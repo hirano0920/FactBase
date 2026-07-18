@@ -17,7 +17,7 @@ import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../src/lib/prisma";
 import { RADAR } from "../../src/lib/constants";
-import { toIssueCategory, jstDateString, jstDayStart, shouldUseInternationalReports } from "../../src/lib/radar";
+import { toIssueCategory, jstDateString, jstDayStart, shouldUseInternationalReports, bigrams, jaccard } from "../../src/lib/radar";
 import { generateVerifiedArticle, violatesBan, hasFactualClaimIssue, hasHardFactualClaimIssue } from "../../src/lib/radar-article";
 import {
   assessReportExcerptThickness,
@@ -526,6 +526,32 @@ async function main() {
         // 既存Issueへの統合は新規公開枠を消費しない（次の候補で本数を埋める）
         continue;
       }
+
+      // 🍎 24時間以内の同一トピック重複チェック:
+      //   iPhone値上げのように異なるnanoタイトルで時間差で何度もPENDINGされるケースを防止。
+      //   bigramJaccard >= 0.3 で表記揺れ吸収。候補タイトル(c.title)とDB上のIssueタイトルで比較する。
+      const recentAllIssues = await prisma.issue.findMany({
+        where: {
+          createdAt: { gte: new Date(Date.now() - 24 * 60 * 60_000) },
+          status: { in: ["ACTIVE", "TRENDING"] },
+        },
+        select: { id: true, title: true, keywords: true },
+        take: 30,
+        orderBy: { createdAt: "desc" },
+      });
+      const cTitleBigrams = bigrams(g.primary.title);
+      const topicDupIn24h = recentAllIssues.find((ri) => {
+        if (ri.id === duplicate?.id) return false;
+        const riBigrams = bigrams(`${ri.title} ${(ri.keywords ?? []).join(" ")}`);
+        return jaccard(cTitleBigrams, riBigrams) >= 0.3;
+      });
+      if (topicDupIn24h) {
+        console.log(
+          `  🔗 [24h重複回避] ${g.primary.title.slice(0, 40)} は既存Issue「${topicDupIn24h.title.slice(0, 30)}」と同一トピック — スキップ（枠消費なし）`,
+        );
+        continue;
+      }
+
       const issueId = await writeAndPublish(r);
       if (issueId) {
         published += 1;
@@ -1056,6 +1082,7 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
     laws: c.evidence.laws,
     estatStats: c.evidence.estatStats,
     estatFigures: c.evidence.estatIndicators?.map((f) => ({ text: f.text, sourceUrl: f.sourceUrl })),
+    dietVote: c.evidence.dietVote,
     debateType: debateResolved?.debateType ?? null,
     reignite,
     datedExcerpts,
@@ -1281,6 +1308,26 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
     );
   }
 
+  // ★ タイトル品質ガード: 極端に短いvoteQuestionはIssueタイトルに使わない。
+  //   「是認？拒否？」「容認できる？容認できない？」のような崩壊タイトルを防ぐ。
+  //   本来の候補タイトル(c.title)はdiscover/nanoが生成した具体的な争点名なので、
+  //   最低限の品質は保証されている。
+  const MIN_TITLE_LENGTH = 12;
+  if (voteQuestionTitle.trim().length < MIN_TITLE_LENGTH) {
+    if (c.title.length >= MIN_TITLE_LENGTH) {
+      console.warn(
+        `  ⚠️ voteQuestionTitleが短すぎるためc.titleに差し替え: "${voteQuestionTitle}" → "${c.title}"`,
+      );
+      voteQuestionTitle = c.title;
+    }
+  }
+  // shareTitleも同様に短すぎる場合はc.titleを使う（ただしvoteQuestionTitleと重複しない場合のみ）
+  if (!shareTitle || shareTitle.trim().length < MIN_TITLE_LENGTH) {
+    if (c.title.length >= MIN_TITLE_LENGTH && c.title !== voteQuestionTitle) {
+      shareTitle = c.title;
+    }
+  }
+
   // 実際に本文を取得して読み比べた媒体数（実際にWriterに渡した抜粋の数。内部追跡用）。
   // sourceCountとは別に、表示用のsourceCountは候補が持つ全ソースの総数（引き出しの大きさ）を表示する。
   const distinctSourceCount =
@@ -1297,6 +1344,8 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
     ...(c.evidence.internationalNews ?? []).map((n) => n.url),
     ...(c.evidence.officialEvents ?? []).map((o) => o.url),
   ]).size;
+
+  // 注: 24時間内同一トピック重複チェックはwriterループ内で実施済み
 
   const issue = await prisma.issue.create({
     data: {

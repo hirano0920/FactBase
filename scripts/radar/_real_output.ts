@@ -15,7 +15,7 @@ const rows = await prisma.topicCandidate.findMany({
 
 console.log("候補:" + rows.length + "件\n");
 
-const results: { title: string; rankScore: number; buzzPrime: number; clickHeat: number; debateHeat: number; commentCount: number; frictionScore: number; tweetCount: number; cluster: number; }[] = [];
+const results: { title: string; rankScore: number; buzzPrime: number; clickHeat: number; debateHeat: number; nationalImportance: number; commentCount: number; frictionScore: number; tweetCount: number; cluster: number; }[] = [];
 
 for (const r of rows) {
   if (!r.evidenceJson) continue;

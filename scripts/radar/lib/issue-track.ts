@@ -46,8 +46,15 @@ export function resolveIssueTrack(signals: TrackSignals): IssueTrackId {
     signals.topicClass === "corporate" ||
     signals.topicClass === "tech_social";
 
-  // 経済ショック等で摩擦が薄いのに無理やり Debate にすると軸が苦しい → News
-  if (newsishClass && friction < 0.25 && conflicts === 0) return "news";
+  // 経済ショック・企業ニュースは強引に2分割すると軸が不自然になる。
+  // コメント摩擦がかなり高い（1/2で意見が割れるレベル）か、
+  // 実測の投票拮抗がある場合のみ Debate にする。
+  if (newsishClass) {
+    const veryStrongDebateSignals =
+      pollDiv >= 0.4 || friction >= 0.5;
+    if (veryStrongDebateSignals) return "debate";
+    return "news";
+  }
 
   if (signals.legitimate) return "debate";
   return "news";
