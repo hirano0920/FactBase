@@ -541,7 +541,6 @@ async function main() {
       });
       const cTitleBigrams = bigrams(g.primary.title);
       const topicDupIn24h = recentAllIssues.find((ri) => {
-        if (ri.id === duplicate?.id) return false;
         const riBigrams = bigrams(`${ri.title} ${(ri.keywords ?? []).join(" ")}`);
         return jaccard(cTitleBigrams, riBigrams) >= 0.3;
       });
