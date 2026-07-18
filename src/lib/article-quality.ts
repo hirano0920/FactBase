@@ -224,6 +224,8 @@ export interface StructureCheckOptions {
   debateType?: DebateType | null;
   /** 争点タイトル（自分ごとフックの検出用） */
   issueTitle?: string;
+  /** news トラックでは両側セクション必須チェックをスキップ */
+  track?: "debate" | "news";
 }
 
 /** メタ立場だけで中身がない bullets 文 */
@@ -459,8 +461,11 @@ export function findStructureIssues(
   if (dup) issues.push(dup);
   const bullets = checkBulletsThickness(article.bullets, { isReported: opts?.isReported });
   if (bullets) issues.push(bullets);
-  const sides = checkSidesGrounding(article.articleHtml);
-  if (sides) issues.push(sides);
+  // Newsトラックは両側セクションを書かないので sides チェックをスキップ
+  if (opts?.track !== "news") {
+    const sides = checkSidesGrounding(article.articleHtml);
+    if (sides) issues.push(sides);
+  }
   const leadMatch = checkLeadOpeningMatch(article);
   if (leadMatch) issues.push(leadMatch);
   const sentenceLength = checkSentenceLength(article);

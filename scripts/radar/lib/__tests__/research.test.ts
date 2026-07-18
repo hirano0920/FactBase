@@ -6,8 +6,6 @@ import {
   evaluateEvidenceSufficiency,
   evaluateBuzzPromoteSufficiency,
   buildResearchSearchTerms,
-  classifyTavilyRegion,
-  tavilyResultsToNewsItems,
   type EvidenceBundle,
 } from "../research";
 import { resetDomainTrustDenylistCache } from "../domain-trust";
@@ -134,110 +132,6 @@ describe("researchTopic", () => {
     ]);
     const bundle = await researchTopic("国旗損壊罪", LIMITS, prisma);
     expect(bundle.officialEvents).toHaveLength(0);
-  });
-
-  it("Google Newsの件数が十分（4件以上）ならTavilyは呼ばない", async () => {
-    vi.stubEnv("TAVILY_API_KEY", "test-key");
-    const tavilyCalls: string[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockImplementation((url: string) => {
-        if (url.includes("tavily")) {
-          tavilyCalls.push(url);
-          return Promise.resolve({ ok: true, json: () => Promise.resolve({ results: [] }) });
-        }
-        if (url.includes("hl=en-US")) {
-          return Promise.resolve({
-            ok: true,
-            text: () =>
-              Promise.resolve(
-                `<rss><channel><item><title>A - X</title><link>https://n/1</link><source url="s">X</source></item><item><title>B - Y</title><link>https://n/2</link><source url="s">Y</source></item></channel></rss>`,
-              ),
-          });
-        }
-        return Promise.resolve({
-          ok: true,
-          text: () =>
-            Promise.resolve(
-              `<rss><channel><item><title>C - Z</title><link>https://n/3</link><source url="s">Z</source></item><item><title>D - W</title><link>https://n/4</link><source url="s">W</source></item></channel></rss>`,
-            ),
-        });
-      }),
-    );
-    await researchTopic("国旗損壊罪", LIMITS, fakePrisma([]));
-    expect(tavilyCalls).toHaveLength(0);
-  });
-
-  it("Google Newsの件数が少ない（4件未満）ならTavilyで補う", async () => {
-    vi.stubEnv("TAVILY_API_KEY", "test-key");
-    const tavilyCalls: string[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockImplementation((url: string) => {
-        if (url.includes("tavily")) {
-          tavilyCalls.push(url);
-          return Promise.resolve({
-            ok: true,
-            json: () =>
-              Promise.resolve({
-                results: [{ title: "Tavily発見記事", url: "https://found.example.com/1", content: "抜粋" }],
-              }),
-          });
-        }
-        return Promise.resolve({ ok: false, status: 500 });
-      }),
-    );
-    const bundle = await researchTopic("国旗損壊罪", LIMITS, fakePrisma([]));
-    expect(tavilyCalls.length).toBeGreaterThan(0);
-    expect(bundle.internationalNews.some((n) => n.url === "https://found.example.com/1")).toBe(true);
-  });
-
-  it("Tavilyが拒否リストのドメインを見つけても採用しない", async () => {
-    vi.stubEnv("TAVILY_API_KEY", "test-key");
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockImplementation((url: string) => {
-        if (url.includes("tavily")) {
-          return Promise.resolve({
-            ok: true,
-            json: () =>
-              Promise.resolve({
-                results: [{ title: "プロパガンダ記事", url: "https://www.rt.com/news/1", content: "抜粋" }],
-              }),
-          });
-        }
-        return Promise.resolve({ ok: false, status: 500 });
-      }),
-    );
-    const bundle = await researchTopic("国旗損壊罪", LIMITS, fakePrisma([]));
-    expect(bundle.internationalNews.some((n) => n.url.includes("rt.com"))).toBe(false);
-    expect(bundle.news.some((n) => n.url.includes("rt.com"))).toBe(false);
-  });
-
-  it("DB管理の追加denylist（DomainTrustRule）に一致するTavily結果も採用しない", async () => {
-    vi.stubEnv("TAVILY_API_KEY", "test-key");
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockImplementation((url: string) => {
-        if (url.includes("tavily")) {
-          return Promise.resolve({
-            ok: true,
-            json: () =>
-              Promise.resolve({
-                results: [{ title: "低品質記事", url: "https://bad-source.example/1", content: "抜粋" }],
-              }),
-          });
-        }
-        return Promise.resolve({ ok: false, status: 500 });
-      }),
-    );
-    const bundle = await researchTopic(
-      "国旗損壊罪",
-      LIMITS,
-      fakePrisma([], ["bad-source.example"]),
-    );
-    expect(bundle.internationalNews.some((n) => n.url.includes("bad-source.example"))).toBe(false);
-    expect(bundle.news.some((n) => n.url.includes("bad-source.example"))).toBe(false);
   });
 });
 
@@ -388,32 +282,5 @@ describe("buildResearchSearchTerms", () => {
     const terms = buildResearchSearchTerms("高市首相、NATO首脳会議を欠席");
     expect(terms[0]).toContain("高市");
     expect(terms.some((t) => /nato/i.test(t))).toBe(true);
-  });
-});
-
-describe("classifyTavilyRegion", () => {
-  it("日本のドメインはdomestic判定", () => {
-    expect(classifyTavilyRegion("https://www.asahi.co.jp/articles/1")).toBe("domestic");
-    expect(classifyTavilyRegion("https://www.mof.go.jp/news")).toBe("domestic");
-  });
-
-  it("海外ドメインはinternational判定", () => {
-    expect(classifyTavilyRegion("https://www.reuters.com/world/1")).toBe("international");
-    expect(classifyTavilyRegion("https://www.bbc.com/news/1")).toBe("international");
-  });
-
-  it("不正なURLはinternational扱いにフォールバックする", () => {
-    expect(classifyTavilyRegion("not-a-url")).toBe("international");
-  });
-});
-
-describe("tavilyResultsToNewsItems", () => {
-  it("ドメインをsourceとして抽出し、region付きNewsItemに変換する", () => {
-    const items = tavilyResultsToNewsItems([
-      { title: "国旗損壊罪の解説", url: "https://www.example.co.jp/a", content: "抜粋" },
-    ]);
-    expect(items).toEqual([
-      { title: "国旗損壊罪の解説", source: "example.co.jp", url: "https://www.example.co.jp/a", pubDate: "", region: "domestic" },
-    ]);
   });
 });

@@ -80,6 +80,11 @@ export interface SelectionV2Breakdown {
   hasTweetCount: boolean;
   tweetCount: number;
   hasMeasuredDvs: boolean;
+  /**
+   * News候補（debatable=false）か。News は「賛否の熱量」ではなく「話題の到達量」で選ぶため、
+   * rankScore から DebateHeat 因子を外し、DebateHeat 下限ゲートも免除する。
+   */
+  isNews: boolean;
 }
 
 export type HeatEvidence = Pick<
@@ -99,6 +104,7 @@ export type HeatEvidence = Pick<
   | "buzzSources"
   | "buzzScore"
   | "topic"
+  | "debatable"
 >;
 
 export type DivisionEvidence = Pick<
@@ -211,7 +217,9 @@ export function clickHeat(
   tweetCountOverride?: number | null,
   tweetRef: number = TWEET_REF,
 ): number {
-  // ① tweetHeat
+  // ① tweetHeat — 実測tweetCountがない場合も、高コメント＋高クラスターのトピックは
+  //    Yahoo RTのカバレッジ不足でtweetCountを拾えていない可能性が高いため、
+  //    緩いプロキシを設定する（最大100tweet相当）。
   const fromEvidence =
     typeof evidence.tweetCount === "number" && Number.isFinite(evidence.tweetCount)
       ? evidence.tweetCount
@@ -220,7 +228,14 @@ export function clickHeat(
     typeof tweetCountOverride === "number" && Number.isFinite(tweetCountOverride)
       ? tweetCountOverride
       : null;
-  const count = fromOverride ?? fromEvidence ?? 0;
+  const fromProxy =
+    !fromOverride &&
+    !fromEvidence &&
+    (evidence.commentCount ?? 0) >= 300 &&
+    (evidence.newsClusterCount ?? 0) >= 5
+      ? Math.min(100, Math.round((evidence.commentCount ?? 0) / 5))
+      : null;
+  const count = fromOverride ?? fromEvidence ?? fromProxy ?? 0;
   const th = count > 0 ? tweetHeat(count, tweetRef) : 0;
 
   // ② trendHeat: Google Trends 検索トラフィック
@@ -229,7 +244,7 @@ export function clickHeat(
 
   // ③ newsHeat: Yahoo!ニュースクラスタ数（同一争点の見出し数）
   const cluster = evidence.newsClusterCount ?? 0;
-  const newsH = cluster >= 5 ? 0.20 : cluster >= 3 ? 0.10 : cluster >= 2 ? 0.05 : 0;
+  const newsH = cluster >= 10 ? 0.20 : cluster >= 8 ? 0.15 : cluster >= 5 ? 0.10 : cluster >= 3 ? 0.05 : cluster >= 2 ? 0.03 : 0;
 
   // ④ commentHeat: コメント数もクリック誘引の実測値
   //   「コメントした人はクリックした人」＝関心の証明
@@ -272,17 +287,18 @@ export function debateHeat(evidence: HeatEvidence): number {
   const friction = evidence.commentFrictionScore;
   // frictionWeight: 実測値があれば weight = max(0.1, min(1, friction*3))
   //   - 実測0でも最低0.1を確保（コメントそのものの存在が最低限の関心を示す）
-  //   - 未測定(undefined)はデフォルト0.3（過大評価防止）
+  //   - 未測定(undefined)かつ高コメント数(1000+) = ノイズの可能性が高いので低weight
+  //   - 未測定かつ低コメント = データ不足として標準weight
   const frictionWeight = friction === undefined
-    ? 0.3
+    ? (count >= 1000 ? 0.15 : 0.3)
     : Math.max(0.1, Math.min(1, friction * 3));
 
   let countHeat = 0;
-  if (count >= 2000) countHeat = 0.35;
-  else if (count >= 800) countHeat = 0.25;
-  else if (count >= 400) countHeat = 0.15;
-  else if (count >= 150) countHeat = 0.08;
-  else if (count >= 50) countHeat = 0.04;
+  if (count >= 2000) countHeat = 0.40;
+  else if (count >= 800) countHeat = 0.30;
+  else if (count >= 400) countHeat = 0.20;
+  else if (count >= 150) countHeat = 0.12;
+  else if (count >= 50) countHeat = 0.06;
   heat += countHeat * frictionWeight;
 
   // コメント急増（炎上加速）
@@ -290,13 +306,28 @@ export function debateHeat(evidence: HeatEvidence): number {
 
   // YouTube返信（実際の応酬）
   const replyCount = evidence.youtubeReplyCount ?? 0;
-  if (replyCount >= 300) heat += 0.30;
-  else if (replyCount >= 100) heat += 0.15;
+  let ytReplyHeat = 0;
+  if (replyCount >= 300) ytReplyHeat = 0.30;
+  else if (replyCount >= 100) ytReplyHeat = 0.15;
+  else if (replyCount >= 30) ytReplyHeat = 0.08;
 
   // YouTubeいいね（共感）
   const likeCount = evidence.youtubeLikeCount ?? 0;
-  if (likeCount >= 10000) heat += 0.15;
-  else if (likeCount >= 3000) heat += 0.08;
+  let ytLikeHeat = 0;
+  if (likeCount >= 10000) ytLikeHeat = 0.15;
+  else if (likeCount >= 3000) ytLikeHeat = 0.08;
+
+  // YouTubeデータは摩擦実測との相互検証がないと「単なる話題性」と「実際の議論」の区別がつかない
+  // （例: ブレインチップ移植のような驚き系トピックではコメントが多くても議論ではない）
+  // 摩擦が未測定の場合はYouTube信号の合計を上限0.06に制限する
+  const yahooCount = evidence.commentCount ?? 0;
+  if (friction !== undefined && friction > 0.05) {
+    // 摩擦実測あり→YouTube信号をそのまま信用
+    heat += ytReplyHeat + ytLikeHeat;
+  } else {
+    // 摩擦未測定→YouTube信号は割り引く（キャップ0.06）
+    heat += Math.min(ytReplyHeat + ytLikeHeat, 0.06);
+  }
 
   // 投票拮抗（実際の世論の分断）
   const pollDiv = evidence.externalPoll?.divisionScore;
@@ -313,30 +344,43 @@ export function debateHeat(evidence: HeatEvidence): number {
 
   // テレビ報道ボーナス: 同じ話題がテレビニュースでも報じられている＝社会的に重要な議論
   // かつYahooニュースランキングとコメントランキングにも載っている＝多方面で注目
+  // ただし、コメント摩擦が未測定でコメント数が多い場合（=ノイズの可能性）、
+  // または摩擦が0.05以下（=実測で議論なしと判定）の場合は適用しない。
   const sources = evidence.buzzSources ?? [];
   const hasTv = sources.includes("tv_news");
   const hasNews = sources.includes("yahoo_news_ranking");
   const hasComment = sources.includes("yahoo_comment_ranking");
-  if (hasTv && hasNews && hasComment) {
+  // 摩擦が実測されていて0.05超(=議論あり)であるか、コメント数少(=未知の話題だが高品質な可能性)
+  const frictionUsable = (friction !== undefined && friction > 0.05) || count < 1000;
+  if (hasTv && hasNews && hasComment && frictionUsable) {
     heat += 0.15; // テレビ＋ニュース＋コメントの3面同時ヒット＝社会的にホット
   }
 
   // 法案通過ボーナス: 「可決」「成立」「改正」を含むトピックは
-  // 実際に制度が変わる瞬間だが、「可決」とtv_bonusが重複しやすいので
-  // 一律0.08に抑える（大きすぎると手続き型法案を過大評価）。
+  // 実際に制度が変わる瞬間だが、これらは「議論の熱量」ではなく「制度変更の事実」。
+  // 大きすぎると手続き型法案を過大評価するので一律0.05に抑える。
   if (evidence.topic) {
     const t = evidence.topic;
-    if (/可決|成立/.test(t)) heat += 0.08;
-    else if (/改正案|改正/.test(t)) heat += 0.08;
+    if (/可決|成立/.test(t)) heat += 0.05;
+    else if (/改正案|改正/.test(t)) heat += 0.05;
   }
 
-  // ニュースクラスタ数: 多くの媒体が独立に報じている＝社会的注目度の証明。
-  // friction未測定の話題でも、クラスタが多ければ価値ある話題の可能性が高い。
+  // ニュースクラスタ数: 多くの媒体が報じている＝露出の広さであり、議論の熱量ではない。
+  // コメント・摩擦・YouTube返信などの直接的な議論シグナルがない場合、
+  // クラスター数だけでは「議論が起きている」とは言えないので寄与を抑える。
   const cluster = evidence.newsClusterCount ?? 0;
-  if (cluster >= 12) heat += 0.35;
-  else if (cluster >= 8) heat += 0.25;
-  else if (cluster >= 5) heat += 0.15;
-  else if (cluster >= 3) heat += 0.08;
+  // 直接的な議論シグナルの有無をチェック（Yahooコメントのみ、YouTubeはノイズの可能性）
+  const hasDirectDebateSignals =
+    yahooCount >= 200 ||
+    (evidence.youtubeReplyCount ?? 0) >= 100 ||
+    (evidence.externalPoll?.divisionScore ?? 0) >= 0.1 ||
+    (friction !== undefined && friction > 0.1);
+  const clusterMultiplier = hasDirectDebateSignals ? 1.0 : 0.3;
+  if (cluster >= 15) heat += 0.15 * clusterMultiplier;
+  else if (cluster >= 10) heat += 0.10 * clusterMultiplier;
+  else if (cluster >= 8) heat += 0.06 * clusterMultiplier;
+  else if (cluster >= 5) heat += 0.04 * clusterMultiplier;
+  else if (cluster >= 3) heat += 0.02 * clusterMultiplier;
 
   // --- 海外国内人事キャップ ---
   // ウクライナ国防相更迭のように「日本に関係ない海外の人事/内政」は
@@ -503,6 +547,12 @@ export function nationalImportanceFactor(
 /**
  * rankScore = Buzz' × ClickHeat' × DebateHeat' × NationalImportance（4因子）。
  * Freshness は呼び出し側で乗算。
+ *
+ * News候補（debatable=false・キオクシア株価急落型）は「賛否の熱量」ではなく
+ * 「話題の到達量」で公開すべきなので、DebateHeat 因子を外して
+ * rankScore = Buzz' × ClickHeat' × NationalImportance で評価する。
+ * DebateHeatを掛けると、賛否が割れない速報は本来の到達量に関わらずrankScoreが潰れてしまう
+ * （②で救ったNews候補が選定段階で再び落ちる問題への対処）。
  */
 export function selectionV2RankScore(
   evidence: Pick<SavedEvidence, "buzzScore"> & HeatEvidence,
@@ -512,6 +562,7 @@ export function selectionV2RankScore(
   const ch = clickHeat(evidence, opts?.tweetCountOverride, opts?.tweetRef);
   const dh = debateHeat(evidence);
   const ni = nationalImportanceFactor(evidence.topic, evidence.buzzSources);
+  const isNews = evidence.debatable === false;
   // 旧互換
   const heat = heatPrime(evidence, opts?.tweetCountOverride, opts?.tweetRef);
   const dvs = dvsPrime(evidence);
@@ -526,10 +577,11 @@ export function selectionV2RankScore(
     conflictPrime: cp,
     tweetHeat: heat.tweetHeat,
     secondaryHeat: heat.secondaryHeat,
-    rankScore: bp * ch * dh * ni,
+    rankScore: isNews ? bp * ch * ni : bp * ch * dh * ni,
     hasTweetCount: heat.hasTweetCount,
     tweetCount: heat.tweetCount,
     hasMeasuredDvs: dvs.hasMeasured,
+    isNews,
   };
 }
 
@@ -544,9 +596,12 @@ export function passesRankMin(rankScore: number, rankMin: number = RANK_MIN_DEFA
  *
  * 注意: buzzPrime < buzzMin でも tweetCount が実測100超の場合は通過させる（データ不足の誤排除防止）。
  * 例: 改正皇室典範（tweet=604）はbuzzScore=1だがtweetCount=604あって確実に話題になっている。
+ *
+ * News候補（isNews=true）は「賛否の熱量」で公開するものではないので DebateHeat 下限を免除する。
+ * rankScore は selectionV2RankScore 側で既に DebateHeat 因子を外して計算されている。
  */
 export function passesSelectionV2(
-  breakdown: Pick<SelectionV2Breakdown, "buzzPrime" | "clickHeat" | "debateHeat" | "heatPrime" | "rankScore"> & { tweetCount?: number },
+  breakdown: Pick<SelectionV2Breakdown, "buzzPrime" | "clickHeat" | "debateHeat" | "heatPrime" | "rankScore"> & { tweetCount?: number; isNews?: boolean },
   opts?: { rankMin?: number; buzzMin?: number; clickMin?: number; debateMin?: number },
 ): boolean {
   const rankMin = opts?.rankMin ?? RANK_MIN_DEFAULT;
@@ -555,10 +610,12 @@ export function passesSelectionV2(
   const debateMin = opts?.debateMin ?? DEBATE_HEAT_MIN;
   // buzzPrimeは下限未満でも、tweetCount実測があれば通す
   const buzzOk = breakdown.buzzPrime >= buzzMin || (breakdown.tweetCount ?? 0) >= 100;
+  // Newsは賛否の熱量で選ばないので DebateHeat 下限を免除
+  const debateOk = breakdown.isNews === true || breakdown.debateHeat >= debateMin;
   return (
     breakdown.rankScore >= rankMin &&
     buzzOk &&
     breakdown.clickHeat >= clickMin &&
-    breakdown.debateHeat >= debateMin
+    debateOk
   );
 }

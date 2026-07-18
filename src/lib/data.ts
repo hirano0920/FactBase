@@ -163,6 +163,7 @@ function mapIssue(issue: DbIssue): Issue {
     voteLabels: (issue.voteLabelsJson as Issue["voteLabels"]) ?? null,
     glossary: (issue.glossaryJson as unknown as Issue["glossary"]) ?? [],
     debateType: parseDebateType(issue.debateType),
+    track: issue.track === "NEWS" ? "news" : "debate",
     underReview: issue.underReview,
     thumbnailUrl: issue.thumbnailUrl,
     thumbnailSourceUrl: issue.thumbnailSourceUrl,

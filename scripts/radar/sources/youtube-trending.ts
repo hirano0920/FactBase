@@ -24,21 +24,26 @@ const UA = "Mozilla/5.0 (compatible; FactBaseRadar/1.0; +https://factbase.tokyo)
 
 /**
  * TwoSidesサイトに合うYouTubeカテゴリ一覧。
- * News & Politics(25) はもちろん、社会議論が起きうる全カテゴリをカバー:
+ * News & Politics(25) はもちろん、社会議論が起きうるカテゴリをカバー:
  *   - 24: Entertainment（エンタメ炎上・声明対立）
- *   - 27: Education（教育政策・社会問題解説）
  *   - 28: Science & Technology（テクノロジー規制・AI倫理）
  *   - 22: People & Blogs（個人の政治的発信・暴露）
- *   - 35: Documentary（ドキュメンタリー・調査報道）
- * 除外: Music(10), Sports(17), Gaming(20), Pets(15) 等は政治論争と無関係
+ *   - 26: Howto & Style（消費・お金・生活まわりの解説）
+ * 除外: Music(10), Sports(17), Gaming(20), Pets(15) 等は政治論争と無関係。
+ *
+ * ★重要（2026-07-18・実APIで検証）: chart=mostPopular はカテゴリごとに
+ * regionCode=JP のトレンドチャートが存在する場合のみ200を返す。
+ * Education(27)=404 / Documentary(35)=400(videoChartNotFound) のように、
+ * 日本でチャート未提供のカテゴリを入れても毎回失敗し1件も拾えない（従来27と35が該当し空振りしていた）。
+ * ここに載せてよいのは JP mostPopular で200が返るカテゴリだけ:
+ *   1,2,10,15,17,20,22,23,24,25,26,28 が確認済み（19,27,29,30,35,36,43 は不可）。
  */
 const BUZZ_CATEGORY_IDS = [
   "25", // News & Politics
   "24", // Entertainment
-  "27", // Education
   "28", // Science & Technology
   "22", // People & Blogs
-  "35", // Documentary
+  "26", // Howto & Style
 ] as const;
 
 /** videos.list の id パラメータに一括で渡せる上限（YouTube Data API仕様） */

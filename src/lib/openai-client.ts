@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { AI_MODELS } from "@/lib/constants";
 
 function normalizeBaseUrl(url: string | undefined): string | undefined {
   if (!url) return undefined;
@@ -71,9 +72,20 @@ export function createArticleClient(options?: {
 
   // Foundry 用に ARTICLE_BASE_URL がある、または XAI が無い場合は Azure 系を使う
   if (articleKey && (process.env.ARTICLE_BASE_URL?.trim() || !process.env.XAI_API_KEY?.trim())) {
+    const rawBase = articleBase?.replace(/\/$/, "");
+    // ★★★ Azure OpenAI（.openai.azure.com）の場合、デプロイメントパスを自動構築。
+    // 正しい形式: https://{resouce}.openai.azure.com/openai/deployments/{deployment}
+    // normalizeBaseUrl は /openai/v1 を付けてしまうので使わない。
+    const isAzureOpenAI = rawBase?.includes(".openai.azure.com");
+    const model = resolveArticleModel(AI_MODELS.article);
+    const azureBaseUrl = isAzureOpenAI
+      ? `${rawBase}/openai/deployments/${model}`
+      : normalizeBaseUrl(rawBase);
     return new OpenAI({
       apiKey: articleKey,
-      baseURL: normalizeBaseUrl(articleBase),
+      baseURL: azureBaseUrl,
+      defaultQuery: isAzureOpenAI ? { "api-version": "2025-01-01-preview" } : undefined,
+      defaultHeaders: isAzureOpenAI ? { "api-key": articleKey } : undefined,
       timeout: options?.timeout,
       maxRetries: options?.maxRetries,
     });

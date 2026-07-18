@@ -10,6 +10,7 @@ import {
   IssueVoteSlot,
 } from "@/components/issue/issue-viewer-context";
 import { CategoryBadge, StatusBadge } from "@/components/ui/badge";
+import { TrackBadge } from "@/components/issue/track-badge";
 import { AdSlotGated } from "@/components/layout/ad-slot-gated";
 import { Section, SectionTitle } from "@/components/layout/page-container";
 import type { Comment, Issue } from "@/types";
@@ -44,6 +45,7 @@ export function HomeIssueExpand({ issue, guestComments, onBack, scrollToVote = f
       <IssueViewerProvider slug={issue.slug} issueId={issue.id} guestComments={guestComments}>
         <header>
           <div className="mb-3 flex flex-wrap items-center gap-2">
+            <TrackBadge track={issue.track} />
             <CategoryBadge category={issue.category} />
             <StatusBadge status={issue.status} />
             {(issue.summary.sourceCount ?? issue.summary.sources?.length ?? 0) > 0 && (

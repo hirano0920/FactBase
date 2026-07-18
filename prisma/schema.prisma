@@ -70,6 +70,12 @@ enum ConfirmationStatus {
   MANUAL // 手動作成（従来の法令争点）
 }
 
+/** TwoSides のプロダクトトラック。debateType（policy等）とは別軸。 */
+enum IssueTrack {
+  DEBATE // スプリットスレッド議論向け（両側論点あり）
+  NEWS // ホット話題のタイパまとめ（両側強制なし）
+}
+
 model User {
   id                     String    @id @default(cuid())
   name                   String?
@@ -162,6 +168,8 @@ model Issue {
   // 生成時（resolveDebateType）は使っていたが、これまでIssueレコードには残しておらず、
   // 公開後にレスバ支援AI等が争点タイプ別の切り口を再利用できなかった。null=旧データ/推定不能
   debateType     String?
+  // プロダクトトラック。DEBATE=両側議論 / NEWS=ホット話題まとめ。旧データはDEBATE扱い。
+  track          IssueTrack @default(DEBATE)
   // カード用サムネイル。自前保存はせず出典URLの画像をリンクプレビューとして直接参照するだけ
   // （転載・再配布はしない）。取得できなかった/拒否された場合は全てnullのままフォールバック表示。
   thumbnailUrl       String?

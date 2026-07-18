@@ -69,6 +69,8 @@ export interface Issue {
   voteLabels: VoteLabels | null;
   /** Radar由来の争点タイプ。両側見出しの色分け（極性の有無）に使う。手動作成/未設定はnull */
   debateType: DebateType | null;
+  /** TwoSides プロダクトトラック。debate=スプリット議論 / news=タイパまとめ。旧データはdebate扱い */
+  track: "debate" | "news";
   /**
    * カードのサムネイル。出典URLの画像をリンクプレビューとして直接参照するだけ（自前保存・再配布なし）。
    * 未取得/拒否時はnull（呼び出し側は静かにフォールバック表示）

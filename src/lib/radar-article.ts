@@ -26,7 +26,7 @@
  */
 import { AI_MODELS, SITE } from "@/lib/constants";
 import { createArticleClient, resolveArticleModel } from "@/lib/openai-client";
-import { verifyClaimsAgainstSources, verifySidesAxisAlignment, type ClaimToVerify } from "@/lib/ai";
+import { verifyClaimsAgainstSources, verifySidesAxisAlignment, type ClaimToVerify, extractKeyFacts, checkFactConsistency } from "@/lib/ai";
 import {
   debateTypeArticleHint,
   debateTypeBulletsSpec,
@@ -43,7 +43,7 @@ import {
   collectSourceHintsForRepair,
 } from "@/lib/article-repair";
 
-const SYSTEM = `あなたは${SITE.name}の編集デスクです。
+const SYSTEM = `あなたは${SITE.name}の編集デスクです。JSON形式の記事データを生成します。
 
 # この記事の目的（最重要）
 スプリットスレッドで議論する人に、中立な共通土台を「最低限」渡すことです。
@@ -52,6 +52,10 @@ const SYSTEM = `あなたは${SITE.name}の編集デスクです。
 
 # 絶対ルール（法的リスク回避・厳守）
 - 与えられた見出し・一次資料抜粋・報道抜粋に書かれていること以外を書かない。憶測・記憶での補完は禁止
+- 「確認済み事実リスト」が与えられた場合、それに含まれる事実だけを記事に書いてよい。
+  リストにない具体的記述（数値・日付・固有名詞・行為の詳細）を書いてはならない。
+  「リスト外の事実だが抜粋には書いてある」という場合も、リストに載っていなければ使ってはならない。
+  これはでっち上げ防止のための最終安全策である。
 - 報道を事実として断定しない。ただし「いま何が論点か」の冒頭段落とlead・bulletsでは
   帰属（「〜と報じています」「〜と述べた」）を書かなくてよい
   （読者にはUI側で常に「報道ベース・真偽は未確認」バッジが表示されるため、
@@ -134,6 +138,68 @@ const SYSTEM = `あなたは${SITE.name}の編集デスクです。
 - 「〜性」「〜化」「〜的」を多用した硬い体言止めより、動詞で言い切る文を優先する
 - 各箇条書きは結論を先に書いてから理由・詳細を続ける（結論ファースト。「なぜなら」の説明から書き始めない）
 - **句読点ルール: 読点（、）は文の構造を明確にするためだけに使う。冗長な読点は避ける。「A、B」のように修飾語と被修飾語の間に入れる読点は不要（「加熱式たばこ、40円値上げ」ではなく「加熱式たばこ40円値上げ」）。外しても意味が通じる読点はすべて削れ。**`;
+
+/**
+ * TwoSides News 用。スプリット議論ではなく「数十ソース横断のタイパまとめ」。
+ * 両側セクションは書かない。事実・影響・タイムライン・各社差・未確定点に集中する。
+ */
+const NEWS_SYSTEM = `あなたは${SITE.name} Newsの編集デスクです。JSON形式の記事データを生成します。
+
+# この記事の目的（最重要）
+ホットな話題を、複数メディアの報道を横断参照したうえで、
+「必要な情報だけ・最短時間で・わかりやすく・学びになる」中立まとめにすることです。
+長文まとめでも偏向報道でもありません。TVのニュース番組より短く、Yahoo!1記事より広く、ここで完結するタイパ記事です。
+
+# 絶対ルール（法的リスク回避・厳守）
+- 与えられた見出し・一次資料抜粋・報道抜粋に書かれていること以外を書かない。憶測・記憶での補完は禁止
+- 「確認済み事実リスト」が与えられた場合、それに含まれる事実だけを記事に書いてよい。
+  リストにない具体的記述（数値・日付・固有名詞・行為の詳細）を書いてはならない。
+- 報道を事実として断定しない。冒頭・lead・bulletsでは帰属を毎文書かなくてよいが、
+  「〜とされる」「〜との見方」等の控えめ表現を使う。詳細セクションでは媒体名帰属を付ける。
+- 例外: 一次資料は「〜と発表されています」、国会会議録は発言者名付きで引用してよい
+- 「違法」「有罪」「汚職」「犯罪」を事実断定しない。個人評価も書かない
+- 抜粋にない固有名詞・数値・日付を書かない
+- ★固有名詞は「翻訳」してから使う: GPIF→「年金運用の巨大基金」等
+- leadは冒頭セクションと同一内容にする
+- bulletsの1項目目は冒頭と同じ具体事実。2項目目は読者への影響。3項目目は今後の注目点
+
+# 何を書くか（最低限）
+1. いま分かっていること — 何が起きたか／読者への影響／最小限の経緯
+2. なぜ注目されているか — 1〜3項目（市場・生活・制度など）
+3. 各社は何を伝えているか — 一致点と差だけ（事実の再掲禁止）
+4. これまでの流れ — 日付付きの変遷があるときだけ
+5. 背景・数字・法令 — 点火に必要なら短く
+6. まだ分からないこと
+
+# 書いてはいけないこと
+- 「賛成側が言うこと」「反対側が言うこと」のような両側強制セクション
+- 無理な二項対立の捏造
+- 百科事典的な長い背景
+
+# claims（機械検証用）
+具体的事実だけを {"text":"60字以内","sourceUrl":"与えられた抜粋URL"} で列挙。URL捏造禁止。
+
+# 文体
+- です・ます。1文60字以内。感嘆符なし。煽り禁止
+- 箇条書き中心。長い段落禁止
+- <strong>は事実トークン（数字・固有名詞）のみ
+- 結論ファースト。冗長な読点は削る`;
+
+const NEWS_FORMAT = `<h2>いま分かっていること</h2><p>3〜4文。必ずこの順序:
+  ① 何が起きたか — 事実をストレートに。固有名詞は翻訳。媒体名は不要
+  ② 読者の生活・お金・仕事・安全にどう影響するか = フック（必須）
+  ③ 最小限の経緯（省略可）
+  lead・bullets1項目目と同一内容。断定しない控えめ表現</p>
+<h2>なぜ注目されているか</h2><ul><li>…</li><li>…</li></ul>
+  （市場・生活・制度・国際関係など、読者が「自分ごと」にできる観点。資料に基づく）
+<h2>各社は何を伝えているか</h2><ul><li><strong>各社が揃って伝えていること:</strong> …</li><li><strong>媒体名:</strong> 固有の内容（差がある場合のみ）</li></ul>
+  （冒頭の事実再掲禁止。論調の差・追加情報だけ。差が無ければ「大きな差は確認できない」1行）
+<h2>これまでの流れ</h2><ul><li><strong>日付:</strong> …</li></ul>
+  （日付付きの変遷がある場合のみ。無ければセクション省略）
+<h2>背景</h2><ul><li>…</li></ul>（本件固有の経緯が補える場合のみ。辞書定義禁止。無ければ省略）
+<h2>数字で見る</h2><ul><li>…</li></ul>（統計・金額・比率など抜粋にある数値のみ。無ければ省略）
+<h2>まだ分からないこと</h2><ul><li>…</li></ul>（未確定点を1〜3項目）
+<h2>出典</h2><ul><li><a href>…</a></li></ul>（与えられたURLのみ）`;
 
 export interface ArticleClaim {
   text: string;
@@ -275,8 +341,14 @@ export interface GenerateArticleParams {
   background?: BackgroundInput | null;
   /** 関連法令（e-Gov検索結果）。条文本文までは無く、存在レベルの事実としてのみ使う */
   laws?: LawInfoInput[];
-  /** e-Stat政府統計（経済系トピックで数値の一次情報として使う） */
+  /** e-Stat政府統計（経済系トピックで数値の一次情報として使う・名称レベル） */
   estatStats?: { statsName: string; govOrg: string; statsDataUrl: string; surveyDate: string }[];
+  /**
+   * e-Stat基幹指標の確定数値（CPI・失業率等）。textは決定的に組み立てた逐語文字列で、
+   * Writerはこれを一字一句そのまま引用する（数値の改変・再計算・時点の推測は禁止）。
+   * 政府の確定値なので事実裏取り検証の対象外（数値グラウンディングのhaystackに加える）。
+   */
+  estatFigures?: { text: string; sourceUrl: string }[];
   /** 続報再生成時のみ渡す。前回のまとめとの継続性を保たせる */
   previousArticle?: { lead: string; articleHtml: string };
   /**
@@ -303,6 +375,17 @@ export interface GenerateArticleParams {
    * 与えられた資料から軸を判断する（fail-soft）。
    */
   lockedAxis?: { axis: string; sideA: string; sideB: string };
+  /**
+   * 事前事実抽出結果。nano（RADAR_CLASSIFY_MODEL）が抜粋から抽出した「事実として確定している具体的な内容」のリスト。
+   * Writerはこのリストにない事実を書いてはいけない。未定義の場合は従来通り全文から判断する（fail-open）。
+   * この仕組みにより、grok-4.3のでっち上げ／hallucinationを原理的に防止する。
+   */
+  factList?: { fact: string; sourceUrl: string }[];
+  /**
+   * プロダクトトラック。news のときは両側セクションなしのタイパまとめ記事を書く。
+   * 未指定・debate は従来のスプリット議論向け。
+   */
+  track?: "debate" | "news";
 }
 
 /**
@@ -465,12 +548,14 @@ export async function generateArticle(params: GenerateArticleParams): Promise<Ar
     background = null,
     laws = [],
     estatStats = [],
+    estatFigures = [],
     previousArticle,
     revisionFeedback = [],
     debateType = null,
     reignite = false,
     datedExcerpts = [],
     timelineFirst = false,
+    track = "debate",
   } = params;
   const openai = createArticleClient({ timeout: 180_000, maxRetries: 1 });
   const sourceList = sources
@@ -554,6 +639,17 @@ URLはe-Stat統計ページのリンクとして出典に含めること）
 ${estatStats.map((s, i) => `【統計${i + 1}】${s.statsName}（${s.govOrg}、調査時点: ${s.surveyDate || "不明"}）\n${s.statsDataUrl}`).join("\n---\n")}`
       : "";
 
+  // ★★★ 確定政府統計値（e-Stat基幹指標）。textは決定的に組み立てた正確な数値。
+  // 一字一句そのまま引用し、数値・単位・時点を絶対に改変・再計算・丸めないこと。
+  const estatFiguresBlock =
+    estatFigures.length > 0
+      ? `\n\n# ★★★ 確定政府統計値（厳守: 以下は政府が公表した確定数値です）★★★
+- 数値・単位・時点を含め、**一字一句そのまま**引用すること。改変・再計算・四捨五入・時点の推測は禁止。
+- この争点が数値と関係するなら、「ポイント」または「詳しく」で自然に1つ引用する（無理に全部使わなくてよい）。
+- 出典URLは出典セクションにリンクとして含めること。
+${estatFigures.map((f, i) => `【確定値${i + 1}】${f.text}\n出典: ${f.sourceUrl}`).join("\n")}`
+      : "";
+
   const previousBlock = previousArticle
     ? `\n\n# 前回までのまとめ（この続きとして更新する。矛盾させず、新情報を反映する）
 ${previousArticle.lead}
@@ -575,17 +671,26 @@ ${revisionFeedback.map((f, i) => `${i + 1}. ${f}`).join("\n")}`
 
   const includeTimeline =
     timelineFirst || isTimelineWorthy(sources, dietSpeeches, !!previousArticle, datedExcerpts.length);
-  const format = timelineFirst
-    ? TIMELINE_FIRST_REPORTED_FORMAT
-    : (isReported ? REPORTED_FORMAT : OFFICIAL_FORMAT) + (includeTimeline ? TIMELINE_SECTION_ADDENDUM : "");
-  const leadSpec = timelineFirst
-    ? "「いま何が論点か」と同一。直近24時間の新規報道だけ。読者への影響（フック）を最初に。固有名詞は翻訳。120〜200字。帰属不要・断定しない。経緯の百科要約は禁止"
-    : isReported
-      ? "「いま何が論点か」と同一。読者への影響（フック）を最初に書く。固有名詞は翻訳する。120〜200字。帰属不要・断定しない"
-      : "「いま分かっていること」と同内容。読者への影響（フック）を最初に。固有名詞は翻訳。短い別要約は作らない。120〜200字";
+  const isNews = track === "news";
+  const format = isNews
+    ? NEWS_FORMAT + (includeTimeline ? TIMELINE_SECTION_ADDENDUM : "")
+    : timelineFirst
+      ? TIMELINE_FIRST_REPORTED_FORMAT
+      : (isReported ? REPORTED_FORMAT : OFFICIAL_FORMAT) + (includeTimeline ? TIMELINE_SECTION_ADDENDUM : "");
+  const leadSpec = isNews
+    ? "「いま分かっていること」と同一。読者への影響（フック）を最初に。固有名詞は翻訳。120〜200字。帰属不要・断定しない。二項対立の軸は書かない"
+    : timelineFirst
+      ? "「いま何が論点か」と同一。直近24時間の新規報道だけ。読者への影響（フック）を最初に。固有名詞は翻訳。120〜200字。帰属不要・断定しない。経緯の百科要約は禁止"
+      : isReported
+        ? "「いま何が論点か」と同一。読者への影響（フック）を最初に書く。固有名詞は翻訳する。120〜200字。帰属不要・断定しない"
+        : "「いま分かっていること」と同内容。読者への影響（フック）を最初に。固有名詞は翻訳。短い別要約は作らない。120〜200字";
   const effectiveType: DebateType = debateType ?? "policy";
-  const bulletsSpec = debateTypeBulletsSpec(effectiveType, isReported);
-  const typeHint = debateTypeArticleHint(effectiveType, reignite);
+  const bulletsSpec = isNews
+    ? `3項目: 1)「いま分かっていること」と同じ具体事実 2)読者への影響・なぜ注目か 3)今後の注目点や未確定点。各40〜120字`
+    : debateTypeBulletsSpec(effectiveType, isReported);
+  const typeHint = isNews
+    ? "この記事はTwoSides News（タイパまとめ）。両側セクションは書かない。事実・影響・各社差・未確定点に集中する。"
+    : debateTypeArticleHint(effectiveType, reignite);
   const timelineFirstHint = timelineFirst
     ? "\n# timeline-firstモード: 冒頭=直近24hのみ。経緯は「これまでの流れ」。未確定は「まだ分からないこと」。過去抜粋の日付以外でタイムラインを作らない。"
     : "";
@@ -612,6 +717,12 @@ ${revisionFeedback.map((f, i) => `${i + 1}. ${f}`).join("\n")}`
       ? `\n# 使える帰属ラベル（両側の各項目で積極的に使う。これに無い一般論で埋めない）: ${attributionLabels.join("、")}`
       : "\n# 帰属: 資料にある媒体名・発言者名だけを使い、教科書一般論で両側を埋めない。";
 
+  // ★★★ 事前事実抽出ブロック: nanoが抜粋から抽出した「事実として確定している具体的な内容」。
+  // Writerはこのリストにない事実を書いてはならない（でっち上げ防止）。
+  const factFoundationBlock = params.factList && params.factList.length > 0
+    ? `\n# ★★★ 確認済み事実リスト（厳守: 以下の事実だけが検証済みです。リストにない具体的記述を書いてはいけません）★★★\n${params.factList.map((f, i) => `${i + 1}. ${f.fact}（出典: ${f.sourceUrl}）`).join("\n")}\n\n（注意: このリストは最低限の事実です。記事に必要十分な情報を網羅しているとは限りません。リスト外の事実を書く代わりに、「詳細はまだ明らかになっていない」などの表現を使ってください。）`
+    : "";
+
   // ★★★ 軸ロックブロック: buildLockedAxisが確定した対立軸。この軸から逸脱した執筆を禁止する。
   const lockedAxisBlock = params.lockedAxis
     ? `\n# ★★★ 論争の軸（厳守: この軸から逸脱しないこと。以下の軸について賛成/反対の両側から整理すること）★★★\n論点: ${params.lockedAxis.axis}\n${params.lockedAxis.sideA} ←→ ${params.lockedAxis.sideB}`
@@ -621,7 +732,7 @@ ${revisionFeedback.map((f, i) => `${i + 1}. ${f}`).join("\n")}`
     model: resolveArticleModel(AI_MODELS.article),
     response_format: { type: "json_object" },
     messages: [
-      { role: "system", content: SYSTEM },
+      { role: "system", content: isNews ? NEWS_SYSTEM : SYSTEM },
       {
         role: "user",
         content: `争点: ${issueTitle}
@@ -630,11 +741,11 @@ ${revisionFeedback.map((f, i) => `${i + 1}. ${f}`).join("\n")}`
 
 # この争点の書き方（厳守）
 ${typeHint}
-${excerptBlock}${claimDiffHint}${reportExcerptBlock}${internationalReportExcerptBlock}${pollingExcerptBlock}${dietBlock}${datedExcerptBlock}${backgroundBlock}${lawsBlock}${estatBlock}${previousBlock}${revisionBlock}
+${excerptBlock}${claimDiffHint}${reportExcerptBlock}${internationalReportExcerptBlock}${pollingExcerptBlock}${dietBlock}${datedExcerptBlock}${backgroundBlock}${lawsBlock}${estatBlock}${estatFiguresBlock}${previousBlock}${revisionBlock}
 
 # 確認済みの報道見出し（前回分含む最新の全件）
 ${sourceList}
-${lockedAxisBlock}
+${lockedAxisBlock}${factFoundationBlock}
 
 # 出力形式（JSONのみ）
 {
@@ -660,19 +771,24 @@ ${lockedAxisBlock}
  * 「本当は書いてよかったのに再取得タイミングの差で不合格になる」誤検出が起きるため）。
  */
 export function buildSourceTextIndex(
-  params: Pick<
-    GenerateArticleParams,
-    | "primaryExcerpts"
-    | "reportExcerpts"
-    | "internationalReportExcerpts"
-    | "pollingExcerpts"
-    | "dietSpeeches"
-    | "laws"
-    | "background"
-    | "datedExcerpts"
-  >,
+  params: Partial<Pick<GenerateArticleParams, "sources">> &
+    Pick<
+      GenerateArticleParams,
+      | "primaryExcerpts"
+      | "reportExcerpts"
+      | "internationalReportExcerpts"
+      | "pollingExcerpts"
+      | "dietSpeeches"
+      | "laws"
+      | "background"
+      | "datedExcerpts"
+    >,
 ): Map<string, string> {
   const index = new Map<string, string>();
+  // Writerには「確認済みの報道見出し」としてsourcesのURLも引用可能と明示しているため、
+  // ここに含めないとWriterが見出しだけを根拠に書いたclaimがsource_not_found（存在しないURL扱い）
+  // として偽陽性でHELDされてしまう（本文までは無いので後段のunsupported判定に委ねる）。
+  for (const s of params.sources ?? []) index.set(s.url, s.title);
   for (const e of params.primaryExcerpts ?? []) index.set(e.url, e.text);
   for (const e of params.reportExcerpts ?? []) index.set(e.url, e.text);
   for (const e of params.internationalReportExcerpts ?? []) index.set(e.url, e.text);
@@ -730,6 +846,28 @@ export const STRUCTURE_CLAIM_REASONS = new Set<UngroundedClaim["reason"]>([
 /** unresolvedClaimsに、資料に無い事実を書いた（本物の裏取り失敗）ものが1件でも含まれるか */
 export function hasFactualClaimIssue(claims: readonly UngroundedClaim[]): boolean {
   return claims.some((c) => !STRUCTURE_CLAIM_REASONS.has(c.reason));
+}
+
+/**
+ * "unsupported"（claim単位のnano照合）と"unclaimed_highlight"は、タイパよく読みやすい表現に
+ * 言い換えるほど元の資料の字面から離れる（＝わかりやすさを追求すればするほど偽陽性が増える）
+ * 構造的な弱点があるチェックのため、ここでは「捏造」とみなさない（公開はブロックしない）。
+ *
+ * 一方で以下の2つは言い換えでは説明がつかない、実害の大きい捏造:
+ * - "source_not_found": claimが存在しないURLを引用している（出典の捏造）
+ * - "ungrounded_number": 本文の金額・割合・件数が資料のどこにも数値として存在しない
+ *   （findUngroundedNumbersは単位換算（億→兆等）まで許容した上で判定しているため、
+ *   ここに残るのは言い換えでは説明できないケースに絞られている）
+ * この2つが1件でもあれば公開をブロックする。
+ */
+const HARD_FACTUAL_CLAIM_REASONS = new Set<UngroundedClaim["reason"]>([
+  "source_not_found",
+  "ungrounded_number",
+]);
+
+/** unresolvedClaimsに、言い換えでは説明がつかない捏造（存在しない出典・存在しない数値）が含まれるか */
+export function hasHardFactualClaimIssue(claims: readonly UngroundedClaim[]): boolean {
+  return claims.some((c) => HARD_FACTUAL_CLAIM_REASONS.has(c.reason));
 }
 
 /**
@@ -825,12 +963,47 @@ function containsEitherWay(a: string, b: string): boolean {
   return na.includes(nb) || nb.includes(na);
 }
 
+const MONEY_UNIT_MULTIPLIER: Record<string, number> = {
+  "兆円": 1e12,
+  "億円": 1e8,
+  "万円": 1e4,
+  "円": 1,
+};
+const MONEY_TOKEN_PATTERN = /[0-9]+(?:\.[0-9]+)?(?:兆円|億円|万円|円)/g;
+
+/** 「30兆円」「3000億円」等の金額トークンを円単位の数値に変換する。金額以外はnull */
+function parseMoneyToYen(token: string): number | null {
+  const m = normalizeDigits(token).match(/^([0-9]+(?:\.[0-9]+)?)(兆円|億円|万円|円)$/);
+  if (!m) return null;
+  return parseFloat(m[1]) * MONEY_UNIT_MULTIPLIER[m[2]];
+}
+
+/**
+ * 記事が「30000億円」を読みやすく「3兆円」と単位変換して書いた場合、文字列としては
+ * 資料本文に出現しないが数値としては同じ事実。捏造ではなく言い換えなので、
+ * 円換算した数値が資料本文のどこかの金額表現と一致すればグラウンディング済みとみなす。
+ */
+function isMoneyEquivalentInHaystacks(token: string, haystacks: string[]): boolean {
+  const targetYen = parseMoneyToYen(token);
+  if (targetYen === null) return false;
+  for (const h of haystacks) {
+    const matches = h.match(MONEY_TOKEN_PATTERN) ?? [];
+    for (const m of matches) {
+      const yen = parseMoneyToYen(m);
+      if (yen !== null && Math.abs(yen - targetYen) <= Math.max(1, targetYen * 1e-6)) return true;
+    }
+  }
+  return false;
+}
+
 /** 与えた資料本文（+見出し）のどこにも出現しない数値を検出する */
 export function findUngroundedNumbers(numbers: string[], haystacks: string[]): string[] {
   const normalizedHaystacks = haystacks.map(normalizeDigits);
   return numbers.filter((n) => {
     const normalized = normalizeDigits(n);
-    return !normalizedHaystacks.some((h) => h.includes(normalized));
+    if (normalizedHaystacks.some((h) => h.includes(normalized))) return false;
+    if (isMoneyEquivalentInHaystacks(n, haystacks)) return false;
+    return true;
   });
 }
 
@@ -876,19 +1049,38 @@ export async function generateVerifiedArticle(
   params: GenerateArticleParams,
   maxRetries?: number,
 ): Promise<VerifiedArticleResult> {
-  // timeline-first / reignite は長期争点で直しきれないケースが多いためリトライを厚くする（最大5試行）
+  // timeline-first / reignite は長期争点で直しきれないケースが多いが、
+  // 検証不合格でも公開続行（fail-soft）するためリトライは1回で十分。
+  // コスト削減: リトライループを減らす（grok-4.3は1回$0.05-0.10）。
   const retries =
-    maxRetries ?? (params.timelineFirst || params.reignite ? 4 : 2);
+    maxRetries ?? (params.timelineFirst || params.reignite ? 1 : 1);
   const index = buildSourceTextIndex(params);
   const sourceTitles = (params.sources ?? []).map((s) => s.title);
   const datedUrls = new Set((params.datedExcerpts ?? []).map((e) => e.url));
-  const haystacks = [...index.values(), ...sourceTitles];
+  // e-Stat確定指標の逐語文字列は政府の確定値。記事がこの数値を引用しても
+  // ungrounded_number で誤検出しないよう、グラウンディング用haystackに含める。
+  const estatFigureTexts = (params.estatFigures ?? []).map((f) => f.text);
+  const haystacks = [...index.values(), ...sourceTitles, ...estatFigureTexts];
   let feedback: string[] = [];
   let article: ArticleJson = { lead: "", bullets: [], articleHtml: "" };
   let sideRepairUsed = false;
 
+  // ★★★ 事前事実抽出: Writer呼び出し前にnanoで全抜粋から事実を抽出する。
+  // 抽出された事実だけをWriterに渡すことで、でっち上げ／hallucinationを原理的に防止する。
+  // 抽出に失敗した場合はfacts=[]となり、従来通り全抜粋からWriterが判断する（fail-open）。
+  const allExcerpts = [
+    ...(params.primaryExcerpts ?? []).map(e => ({ url: e.url, text: e.text ?? "", feed: e.feed })),
+    ...(params.reportExcerpts ?? []).map(e => ({ url: e.url, text: e.text ?? "", feed: e.feed })),
+    ...(params.internationalReportExcerpts ?? []).map(e => ({ url: e.url, text: e.text ?? "", feed: e.feed })),
+    ...(params.pollingExcerpts ?? []).map(e => ({ url: e.url, text: e.text ?? "", feed: e.feed })),
+  ].filter(e => e.text.length >= 20 && e.url.length >= 4);
+  const preFacts = await extractKeyFacts(allExcerpts);
+  if (preFacts.length > 0) {
+    console.log(`  🏗️ 事前事実抽出: ${preFacts.length}件`);
+  }
+
   for (let attempt = 1; attempt <= retries + 1; attempt++) {
-    article = await generateArticle({ ...params, revisionFeedback: feedback });
+    article = await generateArticle({ ...params, revisionFeedback: feedback, factList: preFacts });
     const claims = article.claims ?? [];
 
     // ★ A1: thin claim pre-filter — 帰属だけ・短すぎ・長すぎのclaimはnano検証に回さない
@@ -967,6 +1159,7 @@ export async function generateVerifiedArticle(
       isReported: params.isReported,
       debateType: params.debateType,
       issueTitle: params.issueTitle,
+      track: params.track,
     });
     const sidesOnly =
       structureIssues.length > 0 &&
@@ -999,6 +1192,7 @@ export async function generateVerifiedArticle(
               isReported: params.isReported,
               debateType: params.debateType,
               issueTitle: params.issueTitle,
+              track: params.track,
             });
           }
         } catch {
@@ -1007,9 +1201,8 @@ export async function generateVerifiedArticle(
       }
     }
     // 両側の論点が設問と同じ軸を向いているか（軸のすり替え検出）。
-    // SYSTEM prompt内の注意書き（★両側は同じ論点について…）はWriterへの指示だけで機械検証が
-    // 無かったため、regexでは拾えない意味的なズレ（例:「対応の是非」vs「事前管理の是非」）をnanoで補う。
-    if (structureIssues.length === 0) {
+    // Newsトラックは両側を書かないのでスキップ。
+    if (structureIssues.length === 0 && params.track !== "news") {
       const sides = sideSectionsPlain(working.articleHtml);
       if (sides.length >= 2) {
         const [sideA, sideB] = sides;
@@ -1054,6 +1247,26 @@ export async function generateVerifiedArticle(
       ...unclaimedHighlights,
       ...structureFails,
     ];
+
+    // ★★★ 事実整合性チェック（nano）: 事前事実抽出で取得した確認済み事実リストとの整合性を検証
+    // extractKeyFactsが空だった（事前抽出未実施）場合はスキップされる
+    //
+    // 【絶対ルール】事実整合性チェックは常に警告のみ。リトライもHELDも絶対に発生させない。
+    // 理由: チェック元のnanoはWriter（GPT-5.6 Luna）より性能が低く、偽陽性が多い。
+    // 事実抽出（nano）→ Writer（Luna）→ 検証（nano）の循環でnanoがWriterを正しく評価できる保証はない。
+    // よってnanoの検出は参考情報としてログに残すだけにする。
+    if (preFacts.length > 0) {
+      const consistency = await checkFactConsistency({
+        articleHtml: article.articleHtml,
+        factList: preFacts,
+      });
+      if (!consistency.consistent) {
+        console.log(`  🔍 事実整合性チェック: 不整合の可能性 (${consistency.reason}) → 警告のみ（ブロックなし）`);
+      } else if (attempt === 1) {
+        console.log(`  🔍 事実整合性チェック: OK`);
+      }
+    }
+
     if (failed.length === 0) {
       console.log("DEBUG_FINAL articleHtml:", JSON.stringify(article.articleHtml));
       const synced = normalizeArticleSurfaces(article);

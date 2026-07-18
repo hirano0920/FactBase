@@ -18,7 +18,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../src/lib/prisma";
 import { RADAR } from "../../src/lib/constants";
 import { toIssueCategory, jstDateString, jstDayStart, shouldUseInternationalReports } from "../../src/lib/radar";
-import { generateVerifiedArticle, violatesBan, hasFactualClaimIssue } from "../../src/lib/radar-article";
+import { generateVerifiedArticle, violatesBan, hasFactualClaimIssue, hasHardFactualClaimIssue } from "../../src/lib/radar-article";
 import {
   assessReportExcerptThickness,
   finalizeArticleForSave,
@@ -66,7 +66,8 @@ import { isWithinPeakWindow, minutesToNearestWindow, isOverdue } from "./lib/sch
 import { notifyRadarFailure, notifyRadarSkip } from "./notify";
 import { notifyRevalidate } from "./lib/notify-revalidate";
 import { linkBuzzSourcesToIssue } from "./lib/link-buzz-sources";
-import { buildLockedAxis } from "./lib/axis-lock";
+import { buildLockedAxis, classifyTopic } from "./lib/axis-lock";
+import { resolveIssueTrack, trackDbEnum, type IssueTrackId } from "./lib/issue-track";
 import {
   fetchHistoricalDatedExcerpts,
   needsHistoricalEnrich,
@@ -105,7 +106,7 @@ function researchPoolSize(targetCount: number): number {
   return Math.max(targetCount, targetCount * RADAR.researchPoolMultiplier);
 }
 
-/** 候補ごとの本文取得を並列化する上限（Yahoo/Tavily のレート制限と Neon 接続圧を避ける） */
+/** 候補ごとの本文取得を並列化する上限（Yahoo のレート制限と Neon 接続圧を避ける） */
 const RESEARCH_CONCURRENCY = 4;
 
 async function mapPool<T, R>(
@@ -442,7 +443,7 @@ async function main() {
     },
     orderBy: { createdAt: "desc" },
     take: RADAR.followUpMaxActiveIssuesForMatch,
-    select: { id: true, title: true, keywords: true },
+    select: { id: true, title: true, keywords: true, createdAt: true },
   });
 
   // ①本文取得・厚さ判定を候補プール全件で並列に済ませる（ネットワークのみ・LLM課金なし）。
@@ -625,6 +626,8 @@ interface ResearchedCandidate {
   claimDiffBlock: string;
   /** 軸ロック: 現実の対立軸を証拠から確定した結果。Writerに「この軸で書け」と拘束するためのもの。null=軸ロック不能（fail-soft） */
   lockedAxis: import("./lib/axis-lock").AxisLockResult | null;
+  /** Debate / News トラック */
+  track: IssueTrackId;
   /** 選定時スコア内訳（publish時にevidenceJsonに保存し、週次キャリブレーションに使う） */
   selectionBreakdown: SelectionV2Breakdown & { combinedConflictPrime: number; claimDiffConflicts: number };
 }
@@ -790,13 +793,16 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
     }
   }
 
-  // ★★★ 争点正当性フィルタ（両論Gate）★★★
-  // 抜粋上、賛成/反対の両論が成立する話題だけを Writer 候補に残す。
-  // fail-closed: 判定失敗・抜粋不足は通さない（熱量だけでカスが上がるのを防ぐ）。
-  // 設問は lockedAxis.axis を使用（仮設問禁止。discover由来のvoteQuestionは使わない）
-  // 注: 実測データ（externalPoll/commentFriction/claimDiff）が強い場合は
-  // LLM呼び出しをスキップして通過（assessDebateLegitimacy内部でショートカット）
-  {
+  // ★★★ 争点正当性フィルタ（両論Gate） / News直行 ★★★
+  // discover で debatable=false と判明済みなら、コスト高な両論判定+サルベージをスキップして News 直行。
+  // それ以外は従来どおり Legitimacy → 不合格でも News 救済。
+  let resolvedTrack: IssueTrackId = "debate";
+  if (c.evidence.debatable === false) {
+    resolvedTrack = "news";
+    console.log(
+      `  📰 debatable=false（discover判定）→ News直行（Legitimacyスキップ）: ${c.title}`,
+    );
+  } else {
     const legitimacyResult = await assessDebateLegitimacy({
       topic: c.title,
       voteQuestion: lockedAxis.axis,
@@ -822,12 +828,14 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
       c.evidence.predictedDivisionScore = legitimacyResult.predictedDivisionScore;
     }
 
+    let legitimacyOk = legitimacyResult.legitimate;
+
     if (!legitimacyResult.legitimate) {
       const typeLabel = legitimacyResult.problemType || "unknown";
       const reasonSuffix = legitimacyResult.reason
         ? `:${legitimacyResult.reason.slice(0, 100)}`
         : "";
-      trackHeld(`debate_legitimacy_rejected:${typeLabel}${reasonSuffix}`, c.title);
+      console.warn(`  ⚠️ Debate不合格 (${typeLabel}${reasonSuffix}) — Newsトラック候補として続行: ${c.title}`);
 
       // salvage: bad_frame + suggestedFrames → 代案設問で1回だけ再判定
       if (
@@ -856,26 +864,12 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
         if (salvageResult.legitimate) {
           console.log(`  ✅ 代案設問でサルベージ成功: "${legitimacyResult.suggestedFrames[0]}"`);
           lockedAxis.axis = legitimacyResult.suggestedFrames[0];
+          legitimacyOk = true;
           if (salvageResult.predictedDivisionScore !== undefined) {
             c.evidence.predictedDivisionScore = salvageResult.predictedDivisionScore;
           }
-        } else {
-          console.warn(`  ❌ 代案設問でも不合格 → HELD`);
-          if (!DRY_RUN) {
-            await prisma.topicCandidate.update({
-              where: { id: c.id },
-              data: { status: "HELD", decision: `debate_legitimacy_rejected:${typeLabel}${reasonSuffix}_salvage_failed` },
-            });
-          }
-          return null;
         }
-      } else if (
-        legitimacyResult.problemType === "no_opposing_side" &&
-        // 同じ抜粋で設問を言い換えれば両論が見つかる可能性がある
-        lockedAxis
-      ) {
-        // no_opposing_side salvage: 抜粋は同じだが設問を「両方の立場」にフォーカス
-        // することでLLMがStep2（両論の存在確認）を通過しやすくなるよう誘導する
+      } else if (legitimacyResult.problemType === "no_opposing_side" && lockedAxis) {
         console.log(`  💡 no_opposing_side — 設問を両論フォーカスに言い換えて再判定`);
         const salvageResult = await assessDebateLegitimacy({
           topic: c.title,
@@ -895,22 +889,12 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
         });
         if (salvageResult.legitimate) {
           console.log(`  ✅ 両論フォーカス設問でサルベージ成功`);
+          legitimacyOk = true;
           if (salvageResult.predictedDivisionScore !== undefined) {
             c.evidence.predictedDivisionScore = salvageResult.predictedDivisionScore;
           }
-        } else {
-          console.warn(`  ❌ 言い換え設問でも不合格 → HELD`);
-          if (!DRY_RUN) {
-            await prisma.topicCandidate.update({
-              where: { id: c.id },
-              data: { status: "HELD", decision: `debate_legitimacy_rejected:${typeLabel}${reasonSuffix}_salvage_failed` },
-            });
-          }
-          return null;
         }
       } else if (legitimacyResult.problemType === "unacceptable_side") {
-        // unacceptable_side salvage: 設問の言語が一方を犯罪者的にラベリングしている場合、
-        // 中立化した設問で再判定を試みる（「擁護するか」→「評価するか」）
         const neutralized = lockedAxis.axis.replace(/擁護|支持|容認|肯定/gi, "評価");
         if (neutralized !== lockedAxis.axis) {
           console.log(`  💡 unacceptable_side — 中立化した設問で再判定: "${neutralized}"`);
@@ -933,43 +917,29 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
           if (salvageResult.legitimate) {
             console.log(`  ✅ 中立化設問でサルベージ成功`);
             lockedAxis.axis = neutralized;
+            legitimacyOk = true;
             if (salvageResult.predictedDivisionScore !== undefined) {
               c.evidence.predictedDivisionScore = salvageResult.predictedDivisionScore;
             }
-          } else {
-            console.warn(`  ❌ 中立化設問でも不合格 → HELD`);
-            if (!DRY_RUN) {
-              await prisma.topicCandidate.update({
-                where: { id: c.id },
-                data: { status: "HELD", decision: `debate_legitimacy_rejected:${typeLabel}${reasonSuffix}_salvage_failed` },
-              });
-            }
-            return null;
           }
-        } else {
-          // 中立化できない（置換対象の語が無い） → 通常HELD
-          if (!DRY_RUN) {
-            await prisma.topicCandidate.update({
-              where: { id: c.id },
-              data: { status: "HELD", decision: `debate_legitimacy_rejected:${typeLabel}${reasonSuffix}` },
-            });
-          }
-          return null;
         }
-      } else {
-        // obvious_truth, fact_only, またはsalvage対象外 → 通常HELD
-        if (!DRY_RUN) {
-          await prisma.topicCandidate.update({
-            where: { id: c.id },
-            data: {
-              status: "HELD",
-              decision: `debate_legitimacy_rejected:${typeLabel}${reasonSuffix}`,
-            },
-          });
-        }
-        return null;
       }
+      // salvage失敗・対象外でも HELD しない。Newsトラックで公開する。
     }
+
+    const topicClass = classifyTopic(c.topicTerm || c.evidence.topic || c.title);
+    resolvedTrack = resolveIssueTrack({
+      legitimate: legitimacyOk,
+      debatable: c.evidence.debatable,
+      externalPollDivision: c.evidence.externalPoll?.divisionScore,
+      commentFrictionScore: c.evidence.commentFrictionScore,
+      claimDiffConflictCount: claimDiff.conflicts.length,
+      topicClass,
+    });
+    console.log(
+      `  🏷️ トラック判定: ${resolvedTrack === "news" ? "News（タイパまとめ）" : "Debate（スプリット議論）"}` +
+        ` / class=${topicClass} / legitimate=${legitimacyOk}`,
+    );
   }
 
   const suff = evaluateBuzzPromoteSufficiency(c.evidence);
@@ -977,7 +947,11 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
   // claimDiff.conflicts（媒体の食い違い）をDebateHeat'に上乗せ（最大+0.15）
   const claimDiffBonus = Math.min(0.15, claimDiff.conflicts.length * 0.05);
   const debateWithDiff = Math.min(1, baseBreakdown.debateHeat + claimDiffBonus);
-  const promoteScore = baseBreakdown.buzzPrime * baseBreakdown.clickHeat * debateWithDiff;
+  // News候補は選定と同じく DebateHeat 因子を外す（賛否ではなく到達量で評価する）。
+  // Debate候補は claimDiff を上乗せした DebateHeat を掛ける。
+  const promoteScore = baseBreakdown.isNews
+    ? baseBreakdown.rankScore
+    : baseBreakdown.buzzPrime * baseBreakdown.clickHeat * debateWithDiff;
   // 旧互換: combinedConflictPrimeを保存（audit用）
   const combinedCp = combineConflictPrime(baseBreakdown.conflictPrime, claimDiff.conflicts.length);
   const selectionBreakdown = { ...baseBreakdown, combinedConflictPrime: combinedCp, claimDiffConflicts: claimDiff.conflicts.length };
@@ -998,6 +972,7 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
     claimDiff,
     claimDiffBlock,
     lockedAxis,
+    track: resolvedTrack,
     selectionBreakdown,
   };
 }
@@ -1015,6 +990,7 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
     debateTypePreview,
     claimDiffBlock,
     lockedAxis,
+    track,
     selectionBreakdown,
   } = researched;
 
@@ -1057,6 +1033,9 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
   if (timelineFirst) {
     console.log(`  🧭 timeline-first モード（reignite=${reignite}）: ${c.title}`);
   }
+  if (track === "news") {
+    console.log(`  📰 Newsトラックで記事生成: ${c.title}`);
+  }
 
   const {
     article: generatedArticle,
@@ -1076,11 +1055,13 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
     background: c.evidence.background,
     laws: c.evidence.laws,
     estatStats: c.evidence.estatStats,
+    estatFigures: c.evidence.estatIndicators?.map((f) => ({ text: f.text, sourceUrl: f.sourceUrl })),
     debateType: debateResolved?.debateType ?? null,
     reignite,
     datedExcerpts,
     timelineFirst,
-    lockedAxis: lockedAxis ?? undefined,
+    lockedAxis: track === "debate" ? (lockedAxis ?? undefined) : undefined,
+    track,
   });
   let article = generatedArticle;
 
@@ -1092,14 +1073,21 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
     // hasFactualClaimIssueで分岐し、本物の事実検証失敗だけをunverified_claimと呼ぶ。
     const prefix = hasFactualClaimIssue(unresolvedClaims) ? "unverified_claim" : "style_gate";
     const reasons = unresolvedClaims.map((c2) => `${c2.text}(${c2.reason})`).join(" / ");
-    trackHeld(`${prefix}:${reasons.slice(0, 200)}`, c.title);
-    if (!DRY_RUN) {
-      await prisma.topicCandidate.update({
-        where: { id: c.id },
-        data: { status: "HELD", decision: `${prefix}:${reasons.slice(0, 200)}` },
-      });
+    // 2026-07-18: "unsupported"/"unclaimed_highlight"/構成系は、タイパよく言い換えるほど
+    // 元の資料の字面から離れて偽陽性になりやすいチェックなので警告のみで公開続行（fail-soft）。
+    // ただし "source_not_found"（存在しない出典URL）と "ungrounded_number"
+    // （単位換算しても資料に無い金額・件数）は言い換えでは説明がつかない本物の捏造なのでHELDに戻す。
+    if (hasHardFactualClaimIssue(unresolvedClaims)) {
+      trackHeld(`${prefix}:${reasons.slice(0, 200)}`, c.title);
+      if (!DRY_RUN) {
+        await prisma.topicCandidate.update({
+          where: { id: c.id },
+          data: { status: "HELD", decision: `${prefix}:${reasons.slice(0, 200)}` },
+        });
+      }
+      return null;
     }
-    return null;
+    console.warn(`  ⚠️ ${prefix}: ${reasons.slice(0, 200)} — 警告のみで公開続行`);
   }
 
   const banned = violatesBan(article);
@@ -1136,14 +1124,7 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
       console.log(`  🔧 両側mini修理で品質ゲート通過: ${c.title}`);
     }
     if (!gate.ok) {
-      trackHeld(`quality_gate:${(gate.reason ?? "").slice(0, 200)}`, c.title);
-      if (!DRY_RUN) {
-        await prisma.topicCandidate.update({
-          where: { id: c.id },
-          data: { status: "HELD", decision: `quality_gate:${(gate.reason ?? "").slice(0, 200)}` },
-        });
-      }
-      return null;
+      console.warn(`  ⚠️ quality_gate:${(gate.reason ?? "").slice(0, 200)} — 警告のみで公開続行`);
     }
   } catch (e) {
     console.warn(`  ⚠️ 品質ゲートnano失敗（fail-open・公開続行）: ${c.title} (${e})`);
@@ -1159,6 +1140,7 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
       isReported: !isOfficial,
       debateType: debateResolved?.debateType,
       issueTitle: c.title,
+      track,
     });
   } catch (e) {
     console.warn(`  ⚠️ finalizeArticleForSave失敗（HELD）: ${c.title} (${e})`);
@@ -1174,65 +1156,76 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
   article = finalized.article;
   if (finalized.issues.length > 0) {
     const reasons = finalized.issues.map((i) => `${i.reason}:${i.message}`).join(" / ");
-    trackHeld(`final_structure:${reasons.slice(0, 200)}`, c.title);
-    if (!DRY_RUN) {
-      await prisma.topicCandidate.update({
-        where: { id: c.id },
-        data: { status: "HELD", decision: `final_structure:${reasons.slice(0, 200)}` },
-      });
-    }
-    return null;
+    // 2026-07-17: final_structureは絶対にHELDしない。
+    // generateVerifiedArticleですでに構造チェックは完了している（style_gateでfail-soft通過済み）。
+    // ここで再度HELDすると、すでに通過した記事が保存直前に不当にブロックされる。
+    // finalizeArticleForSaveの役割はlead/bulletsの正規化であって、追加の品質ゲートではない。
+    console.warn(`  ⚠️ final_structure issues（警告のみ・公開続行）: ${reasons.slice(0, 200)}`);
   }
 
   // discover段階の仮設問・選択肢（見出しだけを見て作った）を、実際の記事本文と確定debateTypeに
   // 合わせて作り直す。失敗時はdiscover段階の値にフォールバックする（記事公開は止めない）。
-  const fallbackChoices =
-    c.evidence.voteChoices ?? { for: "支持する", against: "支持しない", undecided: "わからない" };
-  const voteQuestionInput = {
-    issueTitle: c.title,
-    lead: article.lead,
-    bullets: article.bullets,
-    debateType: debateResolved?.debateType ?? ("policy" as const),
-    fallbackQuestion: c.evidence.voteQuestion || c.title,
-    fallbackChoices,
-    lockedAxis: lockedAxis ?? undefined,
-  };
-  let { question: voteQuestionTitle, choices } = await composeVoteQuestion(voteQuestionInput);
+  // Newsトラックは両側議論ではなく関心度のソフト投票にする。
+  let voteQuestionTitle: string;
+  let choices: { for: string; against: string; undecided: string };
 
-  // 選択肢(for/against)が両側セクションの実際の主張内容と噛み合っているかをnanoで確認する
-  // （sanitizePolarVoteChoices等は極性の形式しか見ておらず、政党名リーク等の実害があったため）。
-  // 不一致なら1回再生成し、再生成結果も再検証する。2回目もダメならそのまま公開（fail-open）。
-  const sides = sideSectionsPlain(article.articleHtml);
-  if (sides.length >= 2) {
-    const [sideA, sideB] = sides;
-    const itemsA = sideA.items.length > 0 ? sideA.items : [sideA.text];
-    const itemsB = sideB.items.length > 0 ? sideB.items : [sideB.text];
-    const runContentCheck = (forLabel: string, againstLabel: string) =>
-      verifyVoteChoicesReflectSides({
-        choices: { for: forLabel, against: againstLabel },
-        sideA: { heading: sideA.heading, items: itemsA },
-        sideB: { heading: sideB.heading, items: itemsB },
-      });
-    const contentCheck = await runContentCheck(choices.for, choices.against);
-    if (!contentCheck.aligned) {
-      console.warn(`  ⚠️ 投票選択肢が対立の芯とズレている（${contentCheck.reason}）→ 再生成: ${c.title}`);
-      const retried = await composeVoteQuestion({
-        ...voteQuestionInput,
-        avoidHint: `前回の選択肢「${choices.for}」「${choices.against}」は却下されました
+  if (track === "news") {
+    voteQuestionTitle = `「${c.title}」このニュース、どれくらい重要だと思いますか？`;
+    choices = {
+      for: "かなり重要",
+      against: "そこまで重要ではない",
+      undecided: "わからない",
+    };
+    console.log(`  📰 News投票設問: ${voteQuestionTitle}`);
+  } else {
+    const fallbackChoices =
+      c.evidence.voteChoices ?? { for: "支持する", against: "支持しない", undecided: "わからない" };
+    const voteQuestionInput = {
+      issueTitle: c.title,
+      lead: article.lead,
+      bullets: article.bullets,
+      debateType: debateResolved?.debateType ?? ("policy" as const),
+      fallbackQuestion: c.evidence.voteQuestion || c.title,
+      fallbackChoices,
+      lockedAxis: lockedAxis ?? undefined,
+    };
+    ({ question: voteQuestionTitle, choices } = await composeVoteQuestion(voteQuestionInput));
+
+    // 選択肢(for/against)が両側セクションの実際の主張内容と噛み合っているかをnanoで確認する
+    // （sanitizePolarVoteChoices等は極性の形式しか見ておらず、政党名リーク等の実害があったため）。
+    // 不一致なら1回再生成し、再生成結果も再検証する。2回目もダメならそのまま公開（fail-open）。
+    const sides = sideSectionsPlain(article.articleHtml);
+    if (sides.length >= 2) {
+      const [sideA, sideB] = sides;
+      const itemsA = sideA.items.length > 0 ? sideA.items : [sideA.text];
+      const itemsB = sideB.items.length > 0 ? sideB.items : [sideB.text];
+      const runContentCheck = (forLabel: string, againstLabel: string) =>
+        verifyVoteChoicesReflectSides({
+          choices: { for: forLabel, against: againstLabel },
+          sideA: { heading: sideA.heading, items: itemsA },
+          sideB: { heading: sideB.heading, items: itemsB },
+        });
+      const contentCheck = await runContentCheck(choices.for, choices.against);
+      if (!contentCheck.aligned) {
+        console.warn(`  ⚠️ 投票選択肢が対立の芯とズレている（${contentCheck.reason}）→ 再生成: ${c.title}`);
+        const retried = await composeVoteQuestion({
+          ...voteQuestionInput,
+          avoidHint: `前回の選択肢「${choices.for}」「${choices.against}」は却下されました
 （${contentCheck.reason || "両側セクションの実際の主張内容と噛み合っていなかったため"}）。
 政党名・人物名ではなく、両側セクションで実際に主張されている理由を指す選択肢にしてください。
 設問は「前置き＋選択肢A？選択肢B？」の1文形式を厳守し、二重質問にしないでください。`,
-      });
-      const recheck = await runContentCheck(retried.choices.for, retried.choices.against);
-      if (recheck.aligned) {
-        voteQuestionTitle = retried.question;
-        choices = retried.choices;
-      } else {
-        console.warn(
-          `  ⚠️ 投票選択肢の再生成後も不一致（${recheck.reason}）→ 再生成案を採用して続行: ${c.title}`,
-        );
-        voteQuestionTitle = retried.question;
-        choices = retried.choices;
+        });
+        const recheck = await runContentCheck(retried.choices.for, retried.choices.against);
+        if (recheck.aligned) {
+          voteQuestionTitle = retried.question;
+          choices = retried.choices;
+        } else {
+          console.warn(
+            `  ⚠️ 投票選択肢の再生成後も不一致（${recheck.reason}）→ 再生成案を採用して続行: ${c.title}`,
+          );
+          voteQuestionTitle = retried.question;
+          choices = retried.choices;
+        }
       }
     }
   }
@@ -1240,7 +1233,7 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
   if (DRY_RUN) {
     const thumbnail = await thumbnailPromise;
     console.log(
-      `  📝 [dry-run] ${c.title}（buzzScore=${c.evidence.buzzScore} / ${isOfficial ? "OFFICIAL" : "REPORTED"}）`,
+      `  📝 [dry-run] ${c.title}（buzzScore=${c.evidence.buzzScore} / ${isOfficial ? "OFFICIAL" : "REPORTED"} / ${track === "news" ? "News" : "Debate"}）`,
     );
     console.log(`     lead: ${article.lead}`);
     console.log(`     question: ${voteQuestionTitle}`);
@@ -1325,6 +1318,7 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
       voteLabelsJson: choices as unknown as Prisma.InputJsonValue,
       glossaryJson: glossary.length > 0 ? (glossary as unknown as Prisma.InputJsonValue) : undefined,
       debateType: debateResolved?.debateType ?? null,
+      track: trackDbEnum(track),
       thumbnailUrl: thumbnail?.thumbnailUrl ?? null,
       thumbnailSourceUrl: thumbnail?.thumbnailSourceUrl ?? null,
       thumbnailSourceFeed: thumbnail?.thumbnailSourceFeed ?? null,
@@ -1364,7 +1358,7 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
   }
 
   await notifyRevalidate(slug, issue.id);
-  console.log(`  ✅ /issues/${slug} を公開（${isOfficial ? "OFFICIAL" : "REPORTED"}・buzzScore=${c.evidence.buzzScore}）`);
+  console.log(`  ✅ /issues/${slug} を公開（${isOfficial ? "OFFICIAL" : "REPORTED"}・${track === "news" ? "News" : "Debate"}・buzzScore=${c.evidence.buzzScore}）`);
   return issue.id;
 }
 

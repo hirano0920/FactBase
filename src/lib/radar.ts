@@ -415,14 +415,14 @@ export function dedupKey(title: string): string {
  * ここでは文字bigramのJaccard類似度でクラスタ内タイトルの一貫性を機械的に再検証し、
  * nanoの判断が壊れているクラスタを検出する。日本語は分かち書きがないため文字bigramを使う。
  */
-function bigrams(text: string): Set<string> {
+export function bigrams(text: string): Set<string> {
   const clean = text.replace(/\s+/g, "");
   const set = new Set<string>();
   for (let i = 0; i < clean.length - 1; i++) set.add(clean.slice(i, i + 2));
   return set;
 }
 
-function jaccard(a: Set<string>, b: Set<string>): number {
+export function jaccard(a: Set<string>, b: Set<string>): number {
   if (a.size === 0 || b.size === 0) return 0;
   let intersection = 0;
   for (const x of a) if (b.has(x)) intersection++;
@@ -455,7 +455,7 @@ export const COHERENCE_THRESHOLD = 0.12;
  * Issueタイトルは「〜をどう見る？」形式に中立化されており見出しと語彙が離れがちなので、
  * キーワード包含（強いシグナル）を優先し、bigram類似はゆるい下限として使う。
  */
-export const FOLLOW_UP_MATCH_SIMILARITY = 0.08;
+export const FOLLOW_UP_MATCH_SIMILARITY = 0.05;
 
 export function isPlausibleFollowUp(
   clusterTitle: string,
@@ -463,13 +463,21 @@ export function isPlausibleFollowUp(
   issue: { title: string; keywords: string[] },
 ): boolean {
   const blob = [clusterTitle, ...memberTitles].join("\n");
-  // 1. Issueのキーワード（元クラスタ題・法案名）が見出し群に含まれていれば続報とみなす
-  if (issue.keywords.some((kw) => kw.length >= 2 && blob.includes(kw))) return true;
-  // 2. それ以外はタイトル同士のbigram類似で最低限の関連を要求する
+  // 1. Issueのキーワードまたはタイトル本体が見出し群に含まれていれば続報とみなす
+  const checkStrings = [issue.title, ...issue.keywords].filter((s) => s.length >= 4);
+  if (checkStrings.some((s) => blob.includes(s))) return true;
+  // 2. 主タイトル同士のbigram類似で最低限の関連を要求する。
+  //    因果マージで追加されたメンバー見出し（「日経平均急落」等）は使用せず、
+  //    主タイトル（clusterTitle）のみで判定する。
+  //    これによりキオクシア賠償→日経急落Issueのような誤統合を防ぐ。
   const issueSet = bigrams(`${issue.title} ${issue.keywords.join(" ")}`);
-  return [clusterTitle, ...memberTitles].some(
-    (t) => jaccard(bigrams(t), issueSet) >= FOLLOW_UP_MATCH_SIMILARITY,
-  );
+  const titleJaccard = jaccard(bigrams(clusterTitle), issueSet);
+  // 主タイトルのbigramが一致しなくても、因果マージ前のメンバー見出しに十分な
+  // 類似があれば続報と認める（ただし閾値は高め＝厳格に）。
+  const memberBest = memberTitles.length > 0
+    ? Math.max(...memberTitles.map((t) => jaccard(bigrams(t), issueSet)))
+    : 0;
+  return titleJaccard >= FOLLOW_UP_MATCH_SIMILARITY || memberBest >= 0.20;
 }
 
 /**

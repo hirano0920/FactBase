@@ -290,12 +290,6 @@ export const RADAR = {
   /** 1トピックあたり取得する海外/英字メディア関連ニュースの件数 */
   internationalNewsRecords: 8,
   /**
-   * 1トピックあたりTavily検索で追加発見するURLの件数（TAVILY_API_KEY未設定時は0件扱いで自動スキップ）。
-   * Google News検索で拾えない一次情報・専門メディア・海外の穴を埋める発見専用の追加ソース。
-   * 発見範囲が広がる分の品質担保はWriter/Verify間の主張裏取り検証（radar-article.ts）が担う。
-   */
-  tavilyResultsPerTopic: 6,
-  /**
    * Yahoo!記事個別ページのtotalCommentCountが前回調査（12時間再調査ガード内）からこれ以上増えたら
    * 「炎上が加速中」の急増シグナルとみなす。絶対値だけでは「元々コメントが多い定番トピック」と
    * 「今まさに炎上が広がっているトピック」を区別できないため、差分で見る。
@@ -404,8 +398,8 @@ export const BADGE_TIERS = [
 export type BadgeTier = (typeof BADGE_TIERS)[number]["tier"];
 
 export const AI_MODELS = {
-  /** 争点記事の主筆。Azure Foundry のデプロイ名は ARTICLE_MODEL で上書き（コスト優先で 4.3） */
-  article: "grok-4.3",
+  /** 争点記事の主筆。Azure Foundry のデプロイ名は ARTICLE_MODEL で上書き（GPT-5.6 Luna に換装） */
+  article: "gpt-5.6-luna",
   /** FC・claims検証・モデレーション（高頻度・安価な門番） */
   utility: "gpt-5-nano",
   /** discover.ts の争点選別（filterRelevantTopics）。Azure Foundry のデプロイ名は RADAR_TOPIC_FILTER_MODEL で上書き */

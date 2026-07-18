@@ -112,7 +112,7 @@ describe("clickHeat", () => {
     const base = clickHeat({ tweetCount: 0 });
     const withCluster = clickHeat({ tweetCount: 0, newsClusterCount: 5 });
     expect(withCluster).toBeGreaterThan(base);
-    expect(withCluster).toBeCloseTo(0.20, 1);
+    expect(withCluster).toBeCloseTo(0.10, 1);
   });
   it("tweetCount + トレンド + クラスタは上限1.0でclamp", () => {
     const maxed = clickHeat({ tweetCount: 100000, googleTrendTraffic: 500_000, newsClusterCount: 10 }, 100000);
@@ -356,5 +356,24 @@ describe("passesSelectionV2", () => {
     expect(ok.clickHeat).toBeGreaterThan(0);
     expect(ok.debateHeat).toBeGreaterThanOrEqual(DEBATE_HEAT_MIN);
     expect(passesSelectionV2(ok)).toBe(true);
+  });
+
+  it("News候補（debatable=false・キオクシア型）は賛否が無くても到達量で通す", () => {
+    // 株価急落型: バズ大・検索大だが賛否コメントは無い（debateHeatほぼ0）
+    const kioxiaEvidence = {
+      buzzScore: 3,
+      tweetCount: 2000,
+      googleTrendTraffic: 50_000,
+      newsClusterCount: 10,
+    };
+    // Debate扱い（debatableフラグなし）なら debateHeat 不足で落ちる
+    const asDebate = selectionV2RankScore(kioxiaEvidence);
+    expect(asDebate.debateHeat).toBeLessThan(DEBATE_HEAT_MIN);
+    expect(passesSelectionV2(asDebate)).toBe(false);
+    // 同じ証拠でも News（debatable=false）なら DebateHeat 因子を外して通す
+    const asNews = selectionV2RankScore({ ...kioxiaEvidence, debatable: false });
+    expect(asNews.isNews).toBe(true);
+    expect(asNews.rankScore).toBeGreaterThan(asDebate.rankScore);
+    expect(passesSelectionV2(asNews)).toBe(true);
   });
 });

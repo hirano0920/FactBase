@@ -5,7 +5,6 @@
  */
 import type { DebateType } from "../../../src/lib/debate-type";
 import { searchNews, searchInternationalNews, type NewsItem } from "../sources/google-news";
-import { searchTavily } from "../sources/tavily";
 import { fetchReportExcerpts, type ReportExcerpt } from "./report-text";
 import { buildInternationalNewsQueries } from "./research-queries";
 
@@ -104,7 +103,7 @@ function isHistoricalEnough(publishedAt: string, now = new Date()): boolean {
 }
 
 /**
- * Google News + Tavily で日付付き候補を集め、本文抜粋を最大 MAX_DATED_EXCERPTS 件返す。
+ * Google News で日付付き候補を集め、本文抜粋を最大 MAX_DATED_EXCERPTS 件返す。
  * 直近36時間以内の速報は除外（reportExcerpts 側の担当）。
  */
 export async function fetchHistoricalDatedExcerpts(topic: string): Promise<DatedExcerpt[]> {
@@ -129,38 +128,18 @@ export async function fetchHistoricalDatedExcerpts(topic: string): Promise<Dated
     }
   }
 
-  // Tavily: 403で落ちやすい国際ソースの穴埋め（要約付きで候補を増やす）
-  const tavilyQueries = queries.slice(0, 3);
-  const tavilyBatches = await Promise.all(
-    tavilyQueries.map((q) => searchTavily(q, 6, { days: 365 })),
-  );
-  for (const results of tavilyBatches) {
-    for (const r of results) {
-      if (!r.url || seen.has(r.url)) continue;
-      seen.add(r.url);
-      // Tavily は日付が無いことが多い → 履歴クエリ由来なので候補に入れ、後で本文取得時に残す
-      candidates.push({
-        title: r.title,
-        url: r.url,
-        feed: "tavily",
-        publishedAt: "",
-      });
-    }
-  }
-
   const targets = candidates.slice(0, MAX_CANDIDATE_ITEMS);
   if (targets.length === 0) return [];
 
   const excerpts = await fetchReportExcerpts(targets);
   const byUrl = new Map(targets.map((t) => [t.url, t]));
-  // Tavily フォールバックで URL が変わっていることがあるので title でも照合
   const byTitle = new Map(targets.map((t) => [t.title, t]));
 
   const dated: DatedExcerpt[] = [];
   for (const e of excerpts) {
     const meta = byUrl.get(e.url) ?? byTitle.get(e.title);
     const publishedAt = meta?.publishedAt ?? "";
-    // 日付が取れたものだけタイムライン材料に（日付不明の Tavily は背景用に少し残す）
+    // 日付が取れたものだけタイムライン材料に
     if (publishedAt && !isHistoricalEnough(publishedAt)) continue;
     dated.push({
       ...e,

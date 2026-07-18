@@ -3,6 +3,7 @@ import { CATEGORIES } from "@/lib/constants";
 import { ChartBarIcon, MessageCircleIcon } from "@/components/ui/icons";
 import { formatNumber } from "@/lib/utils";
 import { IssueThumbnail } from "@/components/issue/issue-thumbnail";
+import { TrackBadge } from "@/components/issue/track-badge";
 import type { Issue } from "@/types";
 
 interface IssueCardProps {
@@ -46,6 +47,7 @@ export function IssueCard({ issue, onSelect }: IssueCardProps) {
       <div className="order-1 min-w-0 flex-1 sm:order-2">
         <div className="mb-1.5 flex items-center gap-1.5">
           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-gradient-to-br from-accent to-hot" />
+          <TrackBadge track={issue.track} />
           <span className="text-xs font-semibold text-ink-secondary">{categoryLabel}</span>
         </div>
         <h3 className="text-[15px] font-semibold leading-snug tracking-tight text-ink">

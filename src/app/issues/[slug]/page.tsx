@@ -13,6 +13,7 @@ import {
   IssueVoteSlot,
 } from "@/components/issue/issue-viewer-context";
 import { CategoryBadge, StatusBadge } from "@/components/ui/badge";
+import { TrackBadge } from "@/components/issue/track-badge";
 import { AppSidebarStatic } from "@/components/layout/app-sidebar";
 import { AdSlotGated } from "@/components/layout/ad-slot-gated";
 import { PageContainer, Section, SectionTitle } from "@/components/layout/page-container";
@@ -90,6 +91,7 @@ export default async function IssuePage({ params }: IssuePageProps) {
 
             <header className="mb-8">
               <div className="mb-4 flex flex-wrap items-center gap-2">
+                <TrackBadge track={issue.track} />
                 <CategoryBadge category={issue.category} />
                 <StatusBadge status={issue.status} />
                 {issue.confirmation === "official" && (

@@ -60,7 +60,7 @@ export async function publishHeldRadarCandidate(candidate: TopicCandidateRow): P
     topicTerm: candidate.topicTerm,
     title: candidate.title,
   });
-  const { dietSpeeches, background, laws, estatStats } = evidenceToArticleFacts(evidence);
+  const { dietSpeeches, background, laws, estatStats, estatFigures } = evidenceToArticleFacts(evidence);
   const internationalReportExcerpts = evidence
     ? await fetchReportExcerpts(internationalNewsSources(evidence))
     : [];
@@ -102,6 +102,7 @@ export async function publishHeldRadarCandidate(candidate: TopicCandidateRow): P
     background,
     laws,
     estatStats,
+    estatFigures,
   });
   if (!verified) {
     const reasons = unresolvedClaims.map((c) => c.reason).join(", ");

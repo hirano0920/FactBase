@@ -33,7 +33,6 @@ const OPTIONAL = [
   "ARTICLE_BASE_URL",
   "ARTICLE_MODEL", // Foundry の Grok デプロイ名
   "YOUTUBE_DATA_API_KEY", // 未設定でもRadarは動く（YouTubeソースのみスキップ）
-  "TAVILY_API_KEY", // 未設定でもRadarは動く（Tavily検索による収集拡張のみスキップ）
   "RADAR_INTERNAL_SECRET", // 未設定でもRadarは動くがrevalidate通知がスキップされる
 ];
 

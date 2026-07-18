@@ -67,6 +67,7 @@ export function evidenceToArticleFacts(evidence: EvidenceBundle | null) {
     background: evidence?.background ?? null,
     laws: evidence?.laws ?? [],
     estatStats: evidence?.estatStats ?? [],
+    estatFigures: (evidence?.estatIndicators ?? []).map((f) => ({ text: f.text, sourceUrl: f.sourceUrl })),
   };
 }
 

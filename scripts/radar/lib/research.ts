@@ -23,9 +23,9 @@ import {
 import { searchDietSpeeches, type DietSpeech } from "../sources/kokkai";
 import { searchLaws, type LawInfo } from "../sources/egov-law";
 import { searchNews, searchInternationalNews, searchCJKNews, type NewsItem } from "../sources/google-news";
-import { searchTavily, type TavilyResult } from "../sources/tavily";
 import { fetchWikipediaBackground, type WikipediaBackground } from "../sources/wikipedia";
 import { searchEStatStats, type EStatItem } from "../sources/estat";
+import { fetchTopicIndicators, type EStatIndicatorFigure } from "../sources/estat-indicators";
 import {
   matchYahooPoll,
   fetchYahooPollDetail,
@@ -38,7 +38,6 @@ import { computeCommentFrictionScore } from "./comment-friction";
 import { assessCommentStanceSpread } from "../../../src/lib/ai";
 import { PRIMARY_SOURCE_FEED } from "../../../src/lib/radar";
 import { RADAR } from "../../../src/lib/constants";
-import { isTrustedTavilyUrl, loadDomainTrustDenylist } from "./domain-trust";
 import { resolveYahooArticleUrl } from "./resolve-google-news-url";
 
 export { buildResearchSearchTerms, buildInternationalNewsQueries } from "./research-queries";
@@ -58,7 +57,8 @@ export interface EvidenceBundle {
   internationalNews: NewsItem[]; // 海外/英字メディア報道（日本メディアとの報道比較・国際的な視点に使う）
   background: WikipediaBackground | null; // 背景解説（歴史・人権・国際等で必須）
   officialEvents: OfficialEvent[]; // 既存90本RSSの官庁一次情報との一致（既存DBの再利用）
-  estatStats?: EStatItem[]; // e-Stat政府統計（経済系トピックの数値一次情報）
+  estatStats?: EStatItem[]; // e-Stat政府統計（経済系トピックの数値一次情報・名称のみ）
+  estatIndicators?: EStatIndicatorFigure[]; // e-Stat基幹指標の確定数値（CPI・失業率等・逐語引用用）
   pollingNews?: NewsItem[]; // 世論調査を報じたニュース（支持率・賛否割合等の具体的数値の裏取り材料）
   /**
    * Yahoo!ニュース「みんなの意見」で一致した設問（あれば）。コメント数（炎上の絶対量）と違い、
@@ -197,34 +197,6 @@ function dedupeNewsByUrl(items: NewsItem[]): NewsItem[] {
   });
 }
 
-/** 日本のドメインらしさの粗い判定（Tavily結果を国内/海外どちらの枠で競わせるかの振り分けにのみ使う） */
-const JP_DOMAIN_HINT = /\.(?:jp|co\.jp|ne\.jp|go\.jp|or\.jp|ac\.jp)$/i;
-
-export function classifyTavilyRegion(url: string): "domestic" | "international" {
-  try {
-    return JP_DOMAIN_HINT.test(new URL(url).hostname) ? "domestic" : "international";
-  } catch {
-    return "international";
-  }
-}
-
-/**
- * Tavily検索結果を既存のNewsItem形式に変換する（発見専用。本文はここでは取得しない）。
- * Google Newsのクロス検索で拾えない一次情報・専門メディア・海外報道の穴を埋め、
- * 既存のnews/internationalNews枠内でGoogle News由来の結果と競わせる（url重複は自動排除）。
- */
-export function tavilyResultsToNewsItems(results: TavilyResult[]): NewsItem[] {
-  return results.map((r) => {
-    let source = "tavily";
-    try {
-      source = new URL(r.url).hostname.replace(/^www\./, "");
-    } catch {
-      // ホスト名が取れない場合はsource="tavily"のまま
-    }
-    return { title: r.title, source, url: r.url, pubDate: "", region: classifyTavilyRegion(r.url) };
-  });
-}
-
 /**
  * 官庁・国会・裁判所等（PRIMARY_SOURCE_FEED）由来のSourceEventから、
  * 検索語いずれかをタイトルに含む直近の一致を探す。
@@ -246,12 +218,6 @@ async function matchOfficialEvents(prisma: PrismaClient, searchTerms: string[]):
     .map((r) => ({ title: r.title, url: r.url, feed: r.feedName, publishedAt: r.publishedAt.toISOString() }));
 }
 
-/** これ未満の件数しかGoogle Newsから拾えなかったトピックはTavilyで追加取得する。
- * ただし記事数自体が多くても本文が取れない（有料壁等）ことが多いため、閾値を低めに設定し
- * Tavilyの機械抽出で実質的な証拠量を底上げする（2026-07-15: 4→2に強化）。
- */
-const TAVILY_SUPPLEMENT_THRESHOLD = 2;
-
 export async function researchTopic(
   term: string,
   limits: ResearchLimits,
@@ -264,7 +230,7 @@ export async function researchTopic(
   const perQueryNews = Math.max(2, Math.ceil(limits.newsRecords / Math.max(queries.length, 1)));
   const perQueryIntl = Math.max(2, Math.ceil(limits.internationalNewsRecords / Math.max(intlQueries.length, 1)));
 
-  const [dietSpeeches, laws, background, officialEvents, cjkNews, estatStats, pollingNewsRaw, ...newsBatches] =
+  const [dietSpeeches, laws, background, officialEvents, cjkNews, estatStats, estatIndicators, pollingNewsRaw, ...newsBatches] =
     await Promise.all([
       searchDietSpeeches(term, limits.kokkaiRecords),
       searchLaws(term, limits.lawRecords),
@@ -272,6 +238,8 @@ export async function researchTopic(
       matchOfficialEvents(prisma, queries),
       searchCJKNews(term, 3),
       searchEStatStats(term, 3),
+      // 確定指標（CPI・失業率等）はキーワード非該当なら即[]、該当時のみ日次キャッシュ/APIで最新値。
+      fetchTopicIndicators(term),
       searchNews(buildPollingQuery(term), POLLING_NEWS_LIMIT),
       ...queries.map((q) => searchNews(q, perQueryNews)),
       ...intlQueries.map((q) => searchInternationalNews(q, perQueryIntl)),
@@ -282,30 +250,8 @@ export async function researchTopic(
   const domesticFromGoogle = dedupeNewsByUrl(domesticChunks.flat());
   const intlFromGoogle = dedupeNewsByUrl([...intlChunks.flat(), ...cjkNews]);
 
-  // Tavilyは「Google Newsだけでは足りていないトピック」だけの補完枠にする（呼び出し回数の絞り込み）
-  // 複数クエリを使うことで、単語変化による発見漏れを減らす（最大2クエリ並列）
-  const needsTavily = domesticFromGoogle.length + intlFromGoogle.length < TAVILY_SUPPLEMENT_THRESHOLD;
-  const tavilyQueries = queries.slice(0, 2);
-  const perTavilyQuery = Math.ceil(RADAR.tavilyResultsPerTopic / Math.max(tavilyQueries.length, 1));
-  const tavilyRaw = needsTavily
-    ? await (async () => {
-        const [rawBatches, denylist] = await Promise.all([
-          Promise.all(tavilyQueries.map((q) => searchTavily(q ?? term, perTavilyQuery))),
-          loadDomainTrustDenylist(prisma),
-        ]);
-        return rawBatches.flat().filter((r) => isTrustedTavilyUrl(r.url, denylist));
-      })()
-    : [];
-  const tavilyNews = tavilyResultsToNewsItems(tavilyRaw);
-
-  const news = dedupeNewsByUrl([
-    ...domesticFromGoogle,
-    ...tavilyNews.filter((n) => n.region === "domestic"),
-  ]).slice(0, limits.newsRecords);
-  const internationalNews = dedupeNewsByUrl([
-    ...intlFromGoogle,
-    ...tavilyNews.filter((n) => n.region === "international"),
-  ]).slice(0, limits.internationalNewsRecords);
+  const news = domesticFromGoogle.slice(0, limits.newsRecords);
+  const internationalNews = intlFromGoogle.slice(0, limits.internationalNewsRecords);
 
   const pollingNews = dedupeNewsByUrl(pollingNewsRaw as NewsItem[]);
 
@@ -354,6 +300,10 @@ export async function researchTopic(
     background,
     officialEvents,
     estatStats: (estatStats as EStatItem[]).length > 0 ? (estatStats as EStatItem[]) : undefined,
+    estatIndicators:
+      (estatIndicators as EStatIndicatorFigure[]).length > 0
+        ? (estatIndicators as EStatIndicatorFigure[])
+        : undefined,
     pollingNews: pollingNews.length > 0 ? pollingNews : undefined,
     externalPoll,
     commentSamples,

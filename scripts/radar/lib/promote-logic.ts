@@ -3,7 +3,7 @@
  * promote.ts のオーケストレーションから分離し、DB/外部APIなしでテストできるようにする。
  */
 import { evaluateBuzzPromoteSufficiency, type EvidenceBundle } from "./research";
-import { isPlausibleFollowUp } from "../../../src/lib/radar";
+import { bigrams, isPlausibleFollowUp, jaccard } from "../../../src/lib/radar";
 import {
   debateTypePromoteBonus,
   isPromotableDebateType,
@@ -19,6 +19,8 @@ export type SavedEvidence = EvidenceBundle & {
   voteChoices?: { for: string; against: string; undecided: string };
   /** e-Stat政府統計（EvidenceBundleのestatStatsをSavedEvidenceでも保持） */
   estatStats?: import("../sources/estat").EStatItem[];
+  /** e-Stat基幹指標の確定数値（CPI・失業率等）。記事に逐語引用する */
+  estatIndicators?: import("../sources/estat-indicators").EStatIndicatorFigure[];
   /**
    * detect.ts（RSS経路）で「多数の媒体が報じているが一次情報が無く、まだSNSでバズる前」という理由で
    * 公開見送り（no_primary_source / defer_buzz_pipeline）になった候補を discover.ts が引き取り、
@@ -269,13 +271,14 @@ export function isEligibleForPromotion(
   suff: ReturnType<typeof evaluateBuzzPromoteSufficiency>,
   minBuzzScore: number,
 ): boolean {
-  if (c.evidence.debatable === false) return false;
-  if (!isPromotableDebateType(resolveCandidateDebateType(c))) return false;
+  // News候補（debatable=false）は debateType 不要。Debate候補は本線タイプ必須。
+  const isNewsCandidate = c.evidence.debatable === false;
+  if (!isNewsCandidate && !isPromotableDebateType(resolveCandidateDebateType(c))) return false;
   // isLopsidedWithoutHeatによるハードゲートは撤去（2026-07-16）。
   // 「実際の世論がどうなるか」に関する判定は実測投票だろうがAI予測だろうが、
   // resolveDivisionScore経由でDVS'（独立因子）/ divisionScoreBonus（旧加算）のソフトランクに
   // 一本化する（詳細はisLopsidedWithoutHeatのJSDoc参照）。ハードゲートは
-  // debatable/debateTypeのような論理的に確定できるものだけに限定する。
+  // Debate本線のdebateTypeのような論理的に確定できるものだけに限定する。
 
   if ((c.evidence.buzzScore ?? 0) >= minBuzzScore && suff.sufficient) return true;
   if (c.evidence.mediaConsensus && suff.distinctNewsOutlets >= CONSENSUS_MIN_OUTLETS) return true;
@@ -339,10 +342,13 @@ export interface ActiveIssueForDedup {
   id: string;
   title: string;
   keywords: string[];
+  createdAt: Date;
 }
 
 /**
  * バズ経路とRSS経路のタイトルゆれを、既存アクティブIssueとの bigram/キーワードで再確認する。
+ * 同一出来事と判定しても、既存Issueが24時間以上前に作成されている場合は新規記事を作成する
+ * （新しい展開・議会通過等は別記事として扱う）。
  */
 export function findDuplicateActiveIssue(
   candidateTitle: string,
@@ -350,7 +356,13 @@ export function findDuplicateActiveIssue(
   activeIssues: ActiveIssueForDedup[],
 ): ActiveIssueForDedup | null {
   const memberTitles = candidateTopicTerm ? [candidateTopicTerm] : [];
+  // 同一Pipeline内の重複（数時間以内に同じ話題が再度選ばれたケース）だけを統合。
+  // 3時間以上前の記事に統合しても誰も見ないため、その場合は新規記事を作成する。
+  const FRESH_DUP_THRESHOLD_HOURS = 3;
+  const cutoff = new Date(Date.now() - FRESH_DUP_THRESHOLD_HOURS * 60 * 60_000);
+
   for (const issue of activeIssues) {
+    if (!issue.createdAt || issue.createdAt < cutoff) continue;
     if (isPlausibleFollowUp(candidateTitle, memberTitles, issue)) return issue;
   }
   return null;
@@ -413,14 +425,38 @@ export interface DedupedSelection {
  * 2記事に分裂しかけた。findDuplicateActiveIssueは既存Issueとしか比較しないため、
  * 同一ラン内の候補同士の重複はここで別途拾う。
  */
+/** ラン内統合で同一出来事とみなすJaccard類似度の閾値（isPlausibleFollowUpの0.05より厳格）。
+ *  全く別の法案（例: 電気事業法改正 vs 国旗損壊罪法）が「の成立」などの共通バイグラムだけで
+ *  誤統合されるのを防ぐため、0.40と高めに設定。 */
+const WITHIN_RANK_MERGE_SIMILARITY = 0.40;
+
+/** ラン内統合用の同一出来事判定。isPlausibleFollowUpより厳格で、
+ *  主タイトルのみでJaccard類似度を判定し、content word（名詞・固有名詞）の共有も要求する。 */
+function isWithinRankDuplicate(
+  a: PromotionCandidate,
+  b: PromotionCandidate,
+): boolean {
+  // 主タイトルのbigram Jaccard で判定
+  const aBigrams = bigrams(a.title);
+  const bBigrams = bigrams(b.title);
+  const titleJaccard = jaccard(aBigrams, bBigrams);
+  if (titleJaccard >= WITHIN_RANK_MERGE_SIMILARITY) return true;
+
+  // topicTermも含めて再判定（因果マージで短縮されたタイトル対策）
+  if (a.topicTerm || b.topicTerm) {
+    const aBlob = `${a.title} ${a.topicTerm ?? ""}`;
+    const bBlob = `${b.title} ${b.topicTerm ?? ""}`;
+    const blobJaccard = jaccard(bigrams(aBlob), bigrams(bBlob));
+    if (blobJaccard >= WITHIN_RANK_MERGE_SIMILARITY) return true;
+  }
+  return false;
+}
+
 export function dedupeSelectedCandidates(candidates: PromotionCandidate[]): DedupedSelection[] {
   const groups: DedupedSelection[] = [];
   for (const c of candidates) {
     const group = groups.find((g) =>
-      isPlausibleFollowUp(c.title, c.topicTerm ? [c.topicTerm] : [], {
-        title: g.primary.title,
-        keywords: g.primary.topicTerm ? [g.primary.topicTerm] : [],
-      }),
+      isWithinRankDuplicate(c, g.primary),
     );
     if (!group) {
       groups.push({ primary: c, absorbed: [] });

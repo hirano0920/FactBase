@@ -50,3 +50,6 @@ prisma/*.db-journal
 .wrangler
 .dev.vars*
 !.dev.vars.example
+
+# news cache
+.cache

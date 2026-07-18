@@ -568,29 +568,44 @@ politics / economy / law / finance / rights / education / international / societ
 - true: 賛否・評価の軸がはっきりしている（政策是非、企業対応の是非、声明のどちらを支持するか、等）
 - false: 話題にはなっているが、立場を取る意味が薄い（単なる速報事実の共有、結果報告のみ）
 一次情報の有無は debatable の条件にしない。
-debatable=false のときは debateType を付けず、relevant=false 扱いに近い（後工程で記事化しない）。
 
-# debateType（relevant=true かつ debatable=true のみ。いずれか1つ）※記事テンプレとpromote本線
-軸が立つ型だけ付ける。速報直後・事実未確定で軸が無いものは relevant=false か debatable=false。
+★★★ TwoSides News対応（2026-07-18）★★★
+debatable=false でも relevant=true のまま残してよい。後工程で「Newsトラック」のタイパまとめ記事になる。
+残す条件（いずれか）:
+- 数値インパクトが大きい（株価暴落・時価総額・賠償額・負債額・被害規模など）
+- 複数媒体で一斉に報じられそうな大型ニュース
+- 急上昇ワードとして明らかにホット
+例:「キオクシア株急落」「決済代行会社の大型破産」「日経平均急落」
+→ debatable=false, relevant=true, debateTypeなし
+
+捨てる（relevant=false）のは従来どおり: スポーツ結果・天気・セール・声明のない色恋など。
+
+# debateType（relevant=true かつ debatable=true のみ。いずれか1つ）※Debate記事テンプレ
+軸が立つ型だけ付ける。debatable=false（News向け）のときは debateType を付けない。
 - declaration: 双方声明・反論・謝罪の対立（芸能含む）
 - policy: 政策・法案・制度の賛否（減税・別姓・防衛費等）。再燃バズもこれ
 - org_response: 企業・組織の対応是非（謝罪・処分・値上げ・改悪等）
 - norm_flare: 社会炎上・規範対立（声明なし。表現の自由vs配慮など軸を1本に固定できるもの）
 - indicator: 金利・物価・為替・GDP・世論調査など数値の解釈対立
 - geopolitics: 戦争・外交・制裁・関税など国際・陣営対立
-迷ったら policy / org_response / norm_flare のどれか。上記に当てはまらない薄い速報は捨てる。
+迷ったら policy / org_response / norm_flare のどれか。
+debatable=true なのに上記に当てはまらない薄いものは relevant=false。
 
 # reignite（debateType=policy のときのみ、任意）
 同じ制度論が再びトレンド入りした再燃なら true（きっかけ先頭＋定番両論の再提示）。
 
 # question・choices（relevant=trueのみ・仮設問。promote段階で記事本文に合わせて作り直す）
-当事者以外の一般ユーザーも自分の意見を持てる中立的な投票設問を作る（55字以内・必ず日本語）。
+debatable=true: 当事者以外の一般ユーザーも自分の意見を持てる中立的な投票設問を作る（55字以内・必ず日本語）。
 形式: 「[固有名詞翻訳済みの主題]は[choice1]？[choice2]？」の1文。前置き不要。
 例:「高市政権の外交方針は支持？不支持？」「国旗毀損罪は必要？不要？」
 **最重要: 選択肢を「支持？不支持？」にデフォルトするな。争点ごとに適切な対立軸を選べ**（必要/不要、妥当/不当、是認/拒否、賛成/反対、是/非 etc.）。
 二重質問禁止。断定・煽り・一方に不利な言葉選びは禁止。
 choicesは常にfor/against/undecidedの3キー。文言は対立軸に合わせ、各${VOTE_CHOICE_MAX_CHARS}字以内。
 undecidedは「どちらとも言えない」「まだ判断できない」等。
+
+debatable=false（News向け）: 重要度のソフト設問でよい。
+例:「キオクシア株急落、どれくらい重要？」「かなり重要／そこまで／わからない」
+debateTypeは付けない。
 
 必ずJSONのみ:
 {"topics": [{"topic": "正規トピック語", "relevant": true, "category": "society", "debatable": true,
@@ -623,9 +638,15 @@ export interface RelevantTopic {
   topic: string;
   relevant: boolean;
   category: string;
-  /** 一般読者が for/against を選べるか。falseは「話題だが立場を取る意味が薄い」の意 */
+  /**
+   * 一般読者が for/against を選べるか。
+   * false=話題だが立場を取る意味が薄い → TwoSides News 向け（捨てない）。
+   */
   debatable: boolean;
-  /** 争点タイプ。debatable=false や不正値は null（promote 対象外） */
+  /**
+   * 争点タイプ。debatable=false（News）や不正値は null。
+   * Debate本線は debateType 必須、News本線は null でよい。
+   */
   debateType: DebateType | null;
   /** policy のスローバーン再燃 */
   reignite: boolean;
@@ -635,7 +656,9 @@ export interface RelevantTopic {
 }
 
 /**
- * 急上昇ワード群 → 賛否を取れる火種トピックだけを返す（discover 時間帯のみ・1実行1回）。
+ * 急上昇ワード群 → 記事化候補トピックを返す（discover 時間帯のみ・1実行1回）。
+ * - Debate向け: relevant + debatable + debateType
+ * - News向け: relevant + debatable=false（debateTypeなし）← キオクシア型など
  * sustained（継続的に話題）フラグはプロンプトのヒントとして併記する。
  * モデルは gpt-5-mini（RADAR_TOPIC_FILTER_MODEL）。
  */
@@ -660,49 +683,54 @@ export async function filterRelevantTopics(
   });
   const parsed = safeParseJson(res.choices[0]?.message?.content ?? "{}", TOPIC_FILTER_SCHEMA);
   return parsed.topics
-    .filter((t) => t.relevant && t.topic.trim().length >= 2 && t.debatable !== false)
+    .filter((t) => t.relevant && t.topic.trim().length >= 2)
     .map((t) => {
       const topic = t.topic.trim();
       const category = t.category.trim();
-      const resolved = resolveDebateType({
-        topic,
-        category,
-        debateType: t.debateType,
-        reignite: t.reignite,
-        sustained: terms.find((x) => x.term.includes(topic) || topic.includes(x.term))?.sustained,
-      });
+      const debatable = t.debatable !== false;
+      const resolved = debatable
+        ? resolveDebateType({
+            topic,
+            category,
+            debateType: t.debateType,
+            reignite: t.reignite,
+            sustained: terms.find((x) => x.term.includes(topic) || topic.includes(x.term))?.sustained,
+          })
+        : null;
+      const newsDefaults = {
+        for: "かなり重要",
+        against: "そこまで重要ではない",
+        undecided: "わからない",
+      };
+      const defaults =
+        resolved?.debateType != null ? defaultPolarChoices(resolved.debateType) : debatable ? null : newsDefaults;
       return {
         topic,
         relevant: true as const,
         category,
-        debatable: true as const,
+        debatable,
         debateType: resolved?.debateType ?? null,
         reignite: resolved?.reignite ?? false,
         reason: t.reason.trim(),
-        question: (t.question.trim() || `${topic}、賛成ですか？`).slice(0, 40),
-        // discover段階の仮選択肢。空応答時は争点非依存の「支持する/支持しない」ではなく、
-        // 争点タイプ別のデフォルト（defaultPolarChoices）にフォールバックする。
-        // どのみちpromote段階のcomposeVoteQuestionで記事本文に合わせて作り直されるが、
-        // 万一そこも失敗した場合にこのdiscover段階の値がそのまま公開されるため、
-        // 最低限争点タイプに沿った文言にしておく。
-        choices: (() => {
-          const defaults =
-            resolved?.debateType != null ? defaultPolarChoices(resolved.debateType) : null;
-          return {
-            for: (t.choices.for.trim() || defaults?.for || "支持する").slice(0, VOTE_CHOICE_MAX_CHARS),
-            against: (t.choices.against.trim() || defaults?.against || "支持しない").slice(
-              0,
-              VOTE_CHOICE_MAX_CHARS,
-            ),
-            undecided: (t.choices.undecided.trim() || defaults?.undecided || "わからない").slice(
-              0,
-              VOTE_CHOICE_MAX_CHARS,
-            ),
-          };
-        })(),
+        question: (
+          t.question.trim() ||
+          (debatable ? `${topic}、賛成ですか？` : `「${topic}」このニュース、どれくらい重要だと思いますか？`)
+        ).slice(0, 55),
+        choices: {
+          for: (t.choices.for.trim() || defaults?.for || "支持する").slice(0, VOTE_CHOICE_MAX_CHARS),
+          against: (t.choices.against.trim() || defaults?.against || "支持しない").slice(
+            0,
+            VOTE_CHOICE_MAX_CHARS,
+          ),
+          undecided: (t.choices.undecided.trim() || defaults?.undecided || "わからない").slice(
+            0,
+            VOTE_CHOICE_MAX_CHARS,
+          ),
+        },
       };
     })
-    .filter((t) => t.debateType !== null);
+    // Debateは debateType 必須。News（debatable=false）は debateType なしで通す。
+    .filter((t) => t.debatable === false || t.debateType !== null);
 }
 
 const ISSUE_TITLE_PROMPT = `あなたは${SITE.name}の編集デスクです。争点一覧に載るタイトル（55字以内・日本語）を3案作ります。
@@ -1544,6 +1572,52 @@ const WRITEABILITY_SCHEMA = z.object({
 });
 
 /**
+ * 報道抜粋の束から、事実として使えるキーファクトをnanoで事前抽出する。
+ * Writer（grok-4.3）呼び出し前に実行し、抽出された事実のみをWriterに渡すことで
+ * でっち上げ・ hallucination を原理的に防止する。
+ * 抽出に失敗した場合は空配列を返し、Writerには生の抜粋を渡す（fail-open）。
+ */
+export async function extractKeyFacts(
+  excerpts: { url: string; text: string; feed?: string }[],
+): Promise<{ fact: string; sourceUrl: string }[]> {
+  try {
+    const blob = excerpts
+      .filter((e) => (e.text ?? "").length >= 20)
+      .slice(0, 8)
+      .map((e) => `【URL: ${e.url}】${(e.text ?? "").slice(0, 800)}`)
+      .join("\n---\n");
+    if (!blob.trim()) return [];
+    const res = await getOpenAIRadar().chat.completions.create({
+      model: process.env.RADAR_CLASSIFY_MODEL || AI_MODELS.utility,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content: `あなたは報道記事のファクトチェッカーです。与えられた抜粋群から、「事実として確定している具体的な内容（発言・決定・数値・日付・行為）」だけをリストアップしてください。
+
+ルール:
+- 抜粋に書かれていることだけを抽出する。憶測や補完は禁止
+- 「〜と報じている」「〜との見方」のような帰属表現は事実として抽出しない
+- 抽象的な要約ではなく、具体的な事実だけを抽出する
+  × 「価格転嫁の是非で議論」
+  ○ 「経団連は価格転嫁を認めるべきだと主張し、中小企業団体は反対している」
+- 1つの事実は30字以内に要約する
+- 各事実に対応するソースURLを必ず記載する
+
+出力形式: {"facts": [{"text": "事実の要約（30字以内）", "sourceUrl": "対応するURL"}], "exhausted": true}`,
+        },
+        { role: "user", content: `以下の抜粋から事実を抽出してください:\n${blob.slice(0, 6000)}` },
+      ],
+    });
+    const content = res.choices[0]?.message?.content ?? "{}";
+    const parsed = safeParseJson(content, { facts: [] as { text: string; sourceUrl: string }[], exhausted: false });
+    return (parsed.facts ?? []).filter((f: { text: string; sourceUrl: string }) => f.text?.length >= 4 && f.sourceUrl?.length >= 4);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * 報道抜粋の束を見て「この材料でTwoSidesの記事が書けるか」をnanoで事前判定する。
  * falseを返した場合、呼び出し側は高コストなWriter（generateVerifiedArticle）を呼ばずに
  * HELDする（無駄なWriter呼び出しを減らすための安価な事前フィルタ）。
@@ -1870,5 +1944,109 @@ export async function assessDebateLegitimacy(params: {
     };
   } catch {
     return reject("no_opposing_side", "両論判定に失敗したため見送り");
+  }
+}
+
+// ──────────────────────────────────────────
+// 記事生成後の事実整合性チェック（nano）
+// ──────────────────────────────────────────
+
+const FACT_CONSISTENCY_CHECK_PROMPT = `あなたはファクトチェッカーです。
+与えられた「確認済み事実リスト」と「生成された記事の本文」を見比べて、
+記事に**明確な事実誤認・hallucination**が含まれていないか判定してください。
+
+# 基本方針
+- **疑わしきは合格にする**。微妙なケースでは常にconsistent=trueを返す。
+- このチェックは「明らかに間違っている記事」だけを弾くための最終ラインであり、
+  厳密な整合性チェックではない。
+
+# 合格（consistent=true）にしてよいケース
+- 事実リストに書かれていることの言い換え・要約：OK
+- 事実リストに無いが、一般的に知られている背景情報や常識レベルの記述：OK（例：「日本銀行は中央銀行である」など）
+- 事実リストに基づく解釈や分析：OK（記事の価値）
+- 「詳細は明らかになっていない」「今後の動きに注目が集まる」などの婉曲表現：OK
+- 事実リストが不完全（nano抽出の限界）で、記事に書かれている内容がむしろ正しいように見える：OK
+- 自信がない：OK
+
+# 不合格（consistent=false）にするべきケース（以下のすべてを満たす場合のみ）
+- 記事に**事実リストと明らかに矛盾する**具体的な記述がある
+  （例: 事実リスト「経団連は賛成」→ 記事「経団連は反対」）
+  （例: 事実リスト「負債額1151億円」→ 記事「負債額2000億円」）
+- かつ、その記述が一般的な常識や背景知識でも補えない
+- かつ、自信がある
+
+# 出力形式
+{"consistent": true/false, "reason": "falseの場合のみ、問題の箇所と根拠を日本語で30字以内で簡潔に"} `;
+
+const FACT_CONSISTENCY_SCHEMA = z.object({
+  consistent: z.boolean().optional().default(true),
+  reason: z.string().optional().default(""),
+});
+
+export interface FactConsistencyCheckInput {
+  /** 生成された記事のHTML本文 */
+  articleHtml: string;
+  /** 事実抽出で取得した確認済み事実のリスト */
+  factList?: { fact: string; sourceUrl: string }[];
+}
+
+export interface FactConsistencyCheckResult {
+  consistent: boolean;
+  reason: string;
+}
+
+/**
+ * 記事生成後の事実整合性チェック。
+ * 事前事実抽出（extractKeyFacts）で取得した確認済み事実リストを基準に、
+ * 生成された記事に事実誤認や hallucination が無いかを nano モデルで検証する。
+ * これにより GPT-5.6 Luna でも起こりうる subtle hallucination を最終ラインでブロックする。
+ *
+ * fail-open: 検証自体が失敗したら安全側で consistent=true にする。
+ */
+export async function checkFactConsistency(
+  input: FactConsistencyCheckInput,
+): Promise<FactConsistencyCheckResult> {
+  // factListがない（事前抽出が行われなかった）場合はスキップ
+  if (!input.factList || input.factList.length === 0) {
+    return { consistent: true, reason: "" };
+  }
+  // articleHtmlが空の場合はスキップ
+  const articleText = input.articleHtml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  if (articleText.length < 50) {
+    return { consistent: true, reason: "" };
+  }
+  try {
+    const factBlock = input.factList
+      .slice(0, 15)
+      .map((f, i) => `${i + 1}. ${f.fact}`)
+      .join("\n");
+    const res = await getOpenAIRadar().chat.completions.create({
+      model: process.env.RADAR_CLASSIFY_MODEL || AI_MODELS.utility,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: FACT_CONSISTENCY_CHECK_PROMPT },
+        {
+          role: "user",
+          content: `【確認済み事実リスト】
+${factBlock}
+
+【生成された記事の本文】
+${articleText.slice(0, 4000)}`,
+        },
+      ],
+    });
+    const parsed = safeParseJson(
+      res.choices[0]?.message?.content ?? "{}",
+      FACT_CONSISTENCY_SCHEMA,
+    );
+    if (parsed.consistent === false && parsed.reason) {
+      console.warn(`  ⚠️ 事実整合性チェック: 不合格 (${parsed.reason})`);
+    }
+    return {
+      consistent: parsed.consistent !== false,
+      reason: parsed.reason ?? "",
+    };
+  } catch {
+    return { consistent: true, reason: "" };
   }
 }

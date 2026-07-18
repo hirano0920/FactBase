@@ -338,16 +338,16 @@ describe("filterRelevantTopics", () => {
     expect(topics[0].choices.undecided.length).toBeLessThanOrEqual(VOTE_CHOICE_MAX_CHARS);
   });
 
-  it("debatable=falseやdebateType不明は落とす", async () => {
+  it("debatable=falseはNews候補として残し、Debateは従来通り残す", async () => {
     mockContent(
       JSON.stringify({
         topics: [
           {
-            topic: "速報だけ",
+            topic: "キオクシア株急落",
             relevant: true,
-            category: "",
+            category: "economy",
             debatable: false,
-            reason: "事実共有のみ",
+            reason: "数値インパクト大の速報",
           },
           {
             topic: "減税",
@@ -357,11 +357,26 @@ describe("filterRelevantTopics", () => {
             debateType: "policy",
             reason: "賛否あり",
           },
+          {
+            topic: "試合結果だけ",
+            relevant: false,
+            category: "",
+            debatable: false,
+            reason: "スポーツ結果",
+          },
         ],
       }),
     );
-    const topics = await filterRelevantTopics([{ term: "速報だけ" }, { term: "減税" }]);
-    expect(topics.map((t) => t.topic)).toEqual(["減税"]);
+    const topics = await filterRelevantTopics([
+      { term: "キオクシア株急落" },
+      { term: "減税" },
+      { term: "試合結果だけ" },
+    ]);
+    expect(topics.map((t) => t.topic)).toEqual(["キオクシア株急落", "減税"]);
+    expect(topics[0].debatable).toBe(false);
+    expect(topics[0].debateType).toBeNull();
+    expect(topics[1].debatable).toBe(true);
+    expect(topics[1].debateType).toBe("policy");
   });
 });
 

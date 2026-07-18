@@ -95,6 +95,7 @@ describe("evidenceToArticleFacts", () => {
       background: null,
       laws: [],
       estatStats: [],
+      estatFigures: [],
     });
   });
 
