@@ -1211,7 +1211,7 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
       lead: article.lead,
       bullets: article.bullets,
       debateType: debateResolved?.debateType ?? ("policy" as const),
-      fallbackQuestion: c.evidence.voteQuestion || c.title,
+      fallbackQuestion: (c.evidence.voteQuestion && c.evidence.voteQuestion.length >= 20) ? c.evidence.voteQuestion : c.title,
       fallbackChoices,
       lockedAxis: lockedAxis ?? undefined,
     };
@@ -1307,15 +1307,24 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
     );
   }
 
-  // ★ タイトル品質ガード: 極端に短いvoteQuestionはIssueタイトルに使わない。
-  //   「是認？拒否？」「容認できる？容認できない？」のような崩壊タイトルを防ぐ。
-  //   本来の候補タイトル(c.title)はdiscover/nanoが生成した具体的な争点名なので、
-  //   最低限の品質は保証されている。
-  const MIN_TITLE_LENGTH = 12;
-  if (voteQuestionTitle.trim().length < MIN_TITLE_LENGTH) {
-    if (c.title.length >= MIN_TITLE_LENGTH) {
+  // ★ タイトル品質ガード: voteQuestionTitleが短すぎる、または具体的なトピック名を
+  //   含んでいない場合はc.title（候補トピック名）にフォールバックする。
+  //   「是認？拒否？」(6字, 国旗損壊罪の主題なし)
+  //   「容認できる？容認できない？」(13字, れいわ辞任の主題なし)
+  //   のような崩壊タイトルを防ぐ。
+  //   c.titleはdiscover/nanoが生成した具体的な争点名で、最低限の品質がある。
+  //   判定方法: (a) 25字未満 かつ (b) voteQuestionTitleにc.titleの内容語が含まれない
+  //   → フォールバック。
+  //   内容語の判定はbigramJaccard >= 0.1（「国旗損壊罪」を含む設問は通す）。
+  const MIN_TITLE_LENGTH = 25;
+  const qTrimmed = voteQuestionTitle.trim();
+  const cTitleBigrams = bigrams(c.title);
+  const qBigrams = bigrams(qTrimmed);
+  const titleInQuestion = jaccard(cTitleBigrams, qBigrams) >= 0.1;
+  if (qTrimmed.length < MIN_TITLE_LENGTH && !titleInQuestion) {
+    if (c.title.length >= 15) {
       console.warn(
-        `  ⚠️ voteQuestionTitleが短すぎるためc.titleに差し替え: "${voteQuestionTitle}" → "${c.title}"`,
+        `  ⚠️ voteQuestionTitleが短く主題不明のためc.titleに差し替え: "${qTrimmed}" → "${c.title}"`,
       );
       voteQuestionTitle = c.title;
     }
