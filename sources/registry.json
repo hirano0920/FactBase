@@ -113,7 +113,7 @@
         "議会"
       ],
       "law_id": "322AC0000000067",
-      "last_revision": "2024-06-21"
+      "last_revision": "2026-07-17"
     },
     {
       "law_title": "政党助成法",
@@ -186,7 +186,7 @@
         "予算"
       ],
       "law_id": "322AC0000000034",
-      "last_revision": "2021-05-19"
+      "last_revision": "2026-07-17"
     },
     {
       "law_title": "日本銀行法",
@@ -249,7 +249,7 @@
         "労基"
       ],
       "law_id": "322AC0000000049",
-      "last_revision": "2026-06-24"
+      "last_revision": "2026-07-17"
     },
     {
       "law_title": "労働組合法",
@@ -451,7 +451,7 @@
         "国連平和維持活動"
       ],
       "law_id": "404AC0000000079",
-      "last_revision": "2025-05-28"
+      "last_revision": "2026-07-17"
     },
     {
       "law_title": "武力攻撃事態等及び存立危機事態における我が国の平和と独立並びに国及び国民の安全の確保に関する法律",
@@ -465,7 +465,7 @@
         "存立危機事態"
       ],
       "law_id": "415AC0000000079",
-      "last_revision": "2021-05-19"
+      "last_revision": "2026-07-17"
     },
     {
       "law_title": "出入国管理及び難民認定法",
@@ -495,7 +495,7 @@
         "行政文書"
       ],
       "law_id": "411AC0000000042",
-      "last_revision": "2021-05-19"
+      "last_revision": "2026-07-17"
     },
     {
       "law_title": "個人情報の保護に関する法律",
@@ -509,7 +509,7 @@
         "マイナンバー"
       ],
       "law_id": "415AC0000000057",
-      "last_revision": "2026-06-24"
+      "last_revision": "2026-07-17"
     },
     {
       "law_title": "教育基本法",
@@ -683,6 +683,390 @@
         "イランのホルムズ海峡封鎖宣言"
       ],
       "issue_slug": "radar-buzz-2026-07-12-ad6e5518",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "ロシアのスパイ活動と対日影響",
+      "category": [
+        "POLITICS"
+      ],
+      "keywords": [
+        "ロシアのスパイ活動と対日影響"
+      ],
+      "issue_slug": "radar-buzz-2026-07-13-77d8f191",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "車掌の外国人排斥発言と解雇処分（米）",
+      "category": [
+        "SOCIETY"
+      ],
+      "keywords": [
+        "車掌の外国人排斥発言と解雇処分（米）"
+      ],
+      "issue_slug": "radar-buzz-2026-07-13-fc15506d",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "中国台風被害とダム決壊対応",
+      "category": [
+        "POLITICS"
+      ],
+      "keywords": [
+        "中国台風被害とダム決壊対応"
+      ],
+      "issue_slug": "radar-buzz-2026-07-14-68636890",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "詐欺疑惑企業のテレビCM放映",
+      "category": [
+        "SOCIETY"
+      ],
+      "keywords": [
+        "詐欺疑惑企業のテレビCM放映"
+      ],
+      "issue_slug": "radar-buzz-2026-07-15-83c55fd0",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "年金マネー（GPIF）の国内投資と円相場への影響",
+      "category": [
+        "FINANCE"
+      ],
+      "keywords": [
+        "年金マネー（GPIF）の国内投資と円相場への影響"
+      ],
+      "issue_slug": "radar-buzz-2026-07-13-706fdc37",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "中国作家の論文盗用と学位剥奪",
+      "category": [
+        "SOCIETY"
+      ],
+      "keywords": [
+        "中国作家の論文盗用と学位剥奪"
+      ],
+      "issue_slug": "radar-buzz-2026-07-15-f5affe52",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "インフルエンサー宮崎麗果の脱税有罪判決",
+      "category": [
+        "LAW"
+      ],
+      "keywords": [
+        "インフルエンサー宮崎麗果の脱税有罪判決"
+      ],
+      "issue_slug": "radar-buzz-2026-07-15-9fa2adf1",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "NVIDIAの訪日と日本企業との提携",
+      "category": [
+        "ECONOMY"
+      ],
+      "keywords": [
+        "NVIDIAの訪日と日本企業との提携"
+      ],
+      "issue_slug": "radar-buzz-2026-07-16-33e85507",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "加熱式たばこの一斉値上げ（JT）",
+      "category": [
+        "ECONOMY"
+      ],
+      "keywords": [
+        "加熱式たばこの一斉値上げ（JT）"
+      ],
+      "issue_slug": "radar-buzz-2026-07-16-9115ed29",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "モバイルSuica等の決済障害と企業対応",
+      "category": [
+        "SOCIETY"
+      ],
+      "keywords": [
+        "モバイルSuica等の決済障害と企業対応"
+      ],
+      "issue_slug": "radar-buzz-2026-07-16-481399c1",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "ロシアの北朝鮮労働者雇用問題",
+      "category": [
+        "POLITICS"
+      ],
+      "keywords": [
+        "ロシアの北朝鮮労働者雇用問題"
+      ],
+      "issue_slug": "radar-buzz-2026-07-16-6b33aa3a",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "米軍の対イラン攻撃継続",
+      "category": [
+        "POLITICS"
+      ],
+      "keywords": [
+        "米軍の対イラン攻撃継続"
+      ],
+      "issue_slug": "radar-buzz-2026-07-17-71e4c0e8",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "トランプの株購入と利益相反疑惑",
+      "category": [
+        "POLITICS"
+      ],
+      "keywords": [
+        "トランプの株購入と利益相反疑惑"
+      ],
+      "issue_slug": "radar-buzz-2026-07-17-b2ef5edf",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "山本太郎の辞任とれいわ新選組の対応",
+      "category": [
+        "POLITICS"
+      ],
+      "keywords": [
+        "山本太郎の辞任とれいわ新選組の対応"
+      ],
+      "issue_slug": "radar-buzz-2026-07-18-523fafbf",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "キオクシア株急落",
+      "category": [
+        "FINANCE"
+      ],
+      "keywords": [
+        "キオクシア株急落"
+      ],
+      "issue_slug": "radar-buzz-2026-07-18-77d8acd7",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "国旗損壊罪の成立と表現の自由",
+      "category": [
+        "LAW"
+      ],
+      "keywords": [
+        "国旗損壊罪の成立と表現の自由"
+      ],
+      "issue_slug": "radar-buzz-2026-07-18-a44d8370",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "iPhone日本国内販売価格の引き上げ",
+      "category": [
+        "ECONOMY"
+      ],
+      "keywords": [
+        "iPhone日本国内販売価格の引き上げ"
+      ],
+      "issue_slug": "radar-buzz-2026-07-18-3c387e10",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "国旗損壊罪の成立（表現の自由との衝突）",
+      "category": [
+        "LAW"
+      ],
+      "keywords": [
+        "国旗損壊罪の成立（表現の自由との衝突）"
+      ],
+      "issue_slug": "radar-buzz-2026-07-18-77882150",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "iPhoneの日本国内販売価格引き上げ（円安反映）",
+      "category": [
+        "ECONOMY"
+      ],
+      "keywords": [
+        "iPhoneの日本国内販売価格引き上げ（円安反映）"
+      ],
+      "issue_slug": "radar-buzz-2026-07-18-3693647b",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "日経平均の急落（AI・半導体影響）",
+      "category": [
+        "FINANCE"
+      ],
+      "keywords": [
+        "日経平均の急落（AI・半導体影響）"
+      ],
+      "issue_slug": "radar-buzz-2026-07-17-ca658693",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "食料品の消費税減税（軽減税率政策の是非）",
+      "category": [
+        "ECONOMY"
+      ],
+      "keywords": [
+        "食料品の消費税減税（軽減税率政策の是非）"
+      ],
+      "issue_slug": "radar-buzz-2026-07-19-069137e6",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "国旗損壊罪の是非",
+      "category": [
+        "LAW"
+      ],
+      "keywords": [
+        "国旗損壊罪の是非"
+      ],
+      "issue_slug": "radar-buzz-2026-07-19-d37bf2c0",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "れいわ新選組・山本太郎の辞任",
+      "category": [
+        "POLITICS"
+      ],
+      "keywords": [
+        "れいわ新選組・山本太郎の辞任"
+      ],
+      "issue_slug": "radar-buzz-2026-07-19-84afd6e0",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "iPhoneの日本国内価格引き上げ",
+      "category": [
+        "ECONOMY"
+      ],
+      "keywords": [
+        "iPhoneの日本国内価格引き上げ"
+      ],
+      "issue_slug": "radar-buzz-2026-07-19-218cd0e6",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "懲戒免職職員の退職金不支給訴訟",
+      "category": [
+        "LAW"
+      ],
+      "keywords": [
+        "懲戒免職職員の退職金不支給訴訟"
+      ],
+      "issue_slug": "radar-buzz-2026-07-19-8bf9b965",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "ロシアの戦況発表の信頼性",
+      "category": [
+        "POLITICS"
+      ],
+      "keywords": [
+        "ロシアの戦況発表の信頼性"
+      ],
+      "issue_slug": "radar-buzz-2026-07-19-0ded10f4",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "ホルムズ海峡の通航料要求",
+      "category": [
+        "POLITICS"
+      ],
+      "keywords": [
+        "ホルムズ海峡の通航料要求"
+      ],
+      "issue_slug": "radar-buzz-2026-07-19-51ec3146",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "日印新幹線遅延と牧原元法相の対インド発言",
+      "category": [
+        "POLITICS"
+      ],
+      "keywords": [
+        "日印新幹線遅延と牧原元法相の対インド発言"
+      ],
+      "issue_slug": "radar-buzz-2026-07-19-15db7d45",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "中東情勢による原油高と世界株安",
+      "category": [
+        "ECONOMY"
+      ],
+      "keywords": [
+        "中東情勢による原油高と世界株安"
+      ],
+      "issue_slug": "radar-buzz-2026-07-19-026653b1",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "米国の留学生ビザを4年に制限（滞在制限）",
+      "category": [
+        "POLITICS"
+      ],
+      "keywords": [
+        "米国の留学生ビザを4年に制限（滞在制限）"
+      ],
+      "issue_slug": "radar-buzz-2026-07-19-635d28b5",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "コンビニのトイレ利用トラブルと逮捕事案",
+      "category": [
+        "SOCIETY"
+      ],
+      "keywords": [
+        "コンビニのトイレ利用トラブルと逮捕事案"
+      ],
+      "issue_slug": "radar-buzz-2026-07-20-dbda41c5",
+      "last_fetched": null,
+      "active": true
+    },
+    {
+      "keyword": "国家公務員の夏ボーナス水準への是非",
+      "category": [
+        "ECONOMY"
+      ],
+      "keywords": [
+        "国家公務員の夏ボーナス水準への是非"
+      ],
+      "issue_slug": "radar-buzz-2026-07-20-c9b14beb",
       "last_fetched": null,
       "active": true
     }
