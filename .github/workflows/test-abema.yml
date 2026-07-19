@@ -1,6 +1,7 @@
 # ABEMA Prime連携の実地検証（一時ワークフロー）。手動起動のみ、cronなし、DB書き込みなし。
-# 目的: GitHub Actionsの実行環境からYouTubeの字幕取得(youtubei.js)が通るかを確認する。
-# ローカル環境ではYouTube側のBot対策で空応答になることを確認済み。
+# 目的: yt-dlp(player_client=android)でのYouTube字幕取得がCI環境でも通るか確認する。
+# youtubei.js・素のHTTPアクセスはローカル/GH Actions両方でBot対策に阻まれたが、
+# yt-dlpのandroidクライアント偽装だけはローカルで3件とも成功した（2026-07-19）。
 name: Test ABEMA Prime integration
 
 on:
@@ -17,6 +18,11 @@ jobs:
         with:
           node-version: 22
           cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install yt-dlp
 
       - run: npm ci
       - run: npx prisma generate

@@ -1,8 +1,8 @@
 /**
  * ABEMA Prime連携の実地検証用（一時スクリプト）。DB書き込みなし。
- * 目的: ①候補取得・②debate/news/exclude分類・③字幕取得、の3点が実際に動くか確認する。
- * ③はローカル環境ではYouTube側のBot対策で失敗することを確認済み。
- * GitHub Actionsの実行環境（別IP）で通るかどうかがこのスクリプトの本題。
+ * 目的: ①候補取得・②debate/news/exclude分類・③字幕取得(yt-dlp player_client=android)、
+ * の3点が実際に動くか確認する。③はCI環境にyt-dlpのインストールが必要
+ * （.github/workflows/test-abema.ymlのpip installステップ参照）。
  *
  * 実行: npx tsx scripts/radar/_test_abema.ts
  */
