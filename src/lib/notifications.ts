@@ -3,6 +3,7 @@
  * プッシュ通知やメールではなく、ヘッダーのバッジ＋ドロップダウンだけの軽量な仕組み。
  */
 import { prisma } from "@/lib/prisma";
+import { getVoteSwing } from "@/lib/vote-swing";
 
 export interface NotificationItem {
   issueId: string;
@@ -43,15 +44,50 @@ export async function getFollowedUpdates(userId: string, limit = 20): Promise<Fo
     include: { issue: { select: { slug: true, title: true } } },
   });
 
-  return {
-    items: rows.map((r) => ({
-      issueId: r.issueId,
-      slug: r.issue.slug,
-      title: r.issue.title,
-      label: r.label,
-      at: r.at.toISOString(),
-    })),
-  };
+  const items: NotificationItem[] = rows.map((r) => ({
+    issueId: r.issueId,
+    slug: r.issue.slug,
+    title: r.issue.title,
+    label: r.label,
+    at: r.at.toISOString(),
+  }));
+
+  // ★常設debateのフォロー通知: 続報が無い争点でも、中立層のスイングが有意に動いていれば
+  // 「対立の結果でなく説得の過程を商品化する」コアメカニクスの一部として知らせる。
+  // 続報の方が情報として濃いため、同じ争点で両方あれば続報を優先し重複させない。
+  const coveredIssueIds = new Set(items.map((i) => i.issueId));
+  const swingCandidateIds = issueIds.filter((id) => !coveredIssueIds.has(id));
+  if (swingCandidateIds.length > 0 && items.length < limit) {
+    const swingIssues = await prisma.issue.findMany({
+      where: { id: { in: swingCandidateIds } },
+      select: { id: true, slug: true, title: true },
+    });
+    const swingResults = await Promise.all(
+      swingIssues.map(async (issue) => ({ issue, swing: await getVoteSwing(issue.id) })),
+    );
+    for (const { issue, swing } of swingResults) {
+      if (items.length >= limit) break;
+      if (!swing) continue;
+      const leader: "for" | "against" | null =
+        swing.deltaPoints.for > swing.deltaPoints.against
+          ? "for"
+          : swing.deltaPoints.against > swing.deltaPoints.for
+            ? "against"
+            : null;
+      if (!leader) continue;
+      const delta = Math.abs(swing.deltaPoints[leader]);
+      if (delta < 0.5) continue;
+      items.push({
+        issueId: issue.id,
+        slug: issue.slug,
+        title: issue.title,
+        label: `中立層が動いています（${leader === "for" ? "賛成" : "反対"}+${delta}pt / 直近${swing.hoursAgo}時間）`,
+        at: new Date().toISOString(),
+      });
+    }
+  }
+
+  return { items };
 }
 
 export async function markNotificationsSeen(userId: string): Promise<void> {

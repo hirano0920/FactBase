@@ -100,6 +100,26 @@ describe("resolveIssueTrack", () => {
       }),
     ).toBe("news");
   });
+
+  it("ウクライナAIドローン(war_tech_foreign) → News", () => {
+    expect(
+      resolveIssueTrack({
+        legitimate: true,
+        topicClass: "war_tech_foreign",
+        commentFrictionScore: 0.4,
+      }),
+    ).toBe("news");
+  });
+
+  it("懸賞金(foreign_spectacle) → News", () => {
+    expect(
+      resolveIssueTrack({
+        legitimate: true,
+        topicClass: "foreign_spectacle",
+        commentFrictionScore: 0.3,
+      }),
+    ).toBe("news");
+  });
 });
 
 describe("isNewsishTopicClass", () => {

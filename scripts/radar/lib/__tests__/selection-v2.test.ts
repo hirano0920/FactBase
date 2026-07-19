@@ -359,7 +359,6 @@ describe("passesSelectionV2", () => {
   });
 
   it("News候補（debatable=false・キオクシア型）は賛否が無くても到達量で通す", () => {
-    // 株価急落型: バズ大・検索大だが賛否コメントは無い（debateHeatほぼ0）
     const kioxiaEvidence = {
       buzzScore: 3,
       tweetCount: 2000,
@@ -375,5 +374,36 @@ describe("passesSelectionV2", () => {
     expect(asNews.isNews).toBe(true);
     expect(asNews.rankScore).toBeGreaterThan(asDebate.rankScore);
     expect(passesSelectionV2(asNews)).toBe(true);
+  });
+});
+
+describe("topicRankDemoteFactor / 国内政策ブースト", () => {
+  it("ウクライナAIドローンは rankScore を大幅減衰", () => {
+    const ukraine = selectionV2RankScore({
+      buzzScore: 3,
+      topic: "ウクライナのAIドローンによる反攻",
+      tweetCount: 2000,
+      commentCount: 500,
+      commentFrictionScore: 0.35,
+    });
+    const domestic = selectionV2RankScore({
+      buzzScore: 3,
+      topic: "食料品の消費税減税",
+      tweetCount: 2000,
+      commentCount: 500,
+      commentFrictionScore: 0.35,
+    });
+    expect(ukraine.rankScore).toBeLessThan(domestic.rankScore * 0.15);
+  });
+
+  it("食料品消費税減税は nationalImportance 2.0", () => {
+    const rank = selectionV2RankScore({
+      buzzScore: 3,
+      topic: "食料品の消費税減税（軽減税率政策の是非）",
+      tweetCount: 500,
+      commentCount: 300,
+      commentFrictionScore: 0.25,
+    });
+    expect(rank.nationalImportance).toBe(2.0);
   });
 });

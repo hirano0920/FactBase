@@ -3,7 +3,8 @@
 # 意図どおりの実行頻度（スクリプト側の窓チェックと一致。src/lib/constants.ts の
 # discoverWindowsJst / peakWindowsJst と必ず対で変更すること）:
 #   - discover: JST 1日7回（PENDING 作成・深掘り）
-#   - promote:  JST ピーク3回（6:33 / 11:03 / 16:03）に記事公開
+#   - promote:  JST ピーク5回（6:33 / 11:03 / 16:03 / 19:33 / 22:33）に記事公開
+#     （2026-07-19: 30本/日体制に向けて夕方・夜間の2枠を追加）
 #
 # 以前は */15 で Workflow 自体を回し、スクリプトが no-op する方式だったため
 # GitHub Actions 上では日中だけで約70回/日走って見えていた。
@@ -35,10 +36,12 @@ on:
     - cron: "3 9 * * *" # 18:03 JST 夕方スイープ
     - cron: "3 12 * * *" # 21:03 JST 夜スイープ
     - cron: "33 15 * * *" # 00:33 JST 深夜スイープ（翌朝6:33ピークに備える）
-    # —— promote 3/day（実際の読者到達目標の1時間前） ——
+    # —— promote 5/day（実際の読者到達目標の1時間前） ——
     - cron: "33 21 * * *" # 06:33 JST
     - cron: "3 2 * * *" # 11:03 JST
     - cron: "3 7 * * *" # 16:03 JST
+    - cron: "33 10 * * *" # 19:33 JST
+    - cron: "33 13 * * *" # 22:33 JST
   workflow_dispatch: {}
 
 concurrency:
@@ -74,7 +77,7 @@ jobs:
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
         run: npx tsx scripts/radar/discover.ts
 
-      - name: "Promote: publish buzz articles at peak times (3/day JST)"
+      - name: "Promote: publish buzz articles at peak times (5/day JST)"
         env:
           DATABASE_URL: ${{ secrets.DIRECT_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
@@ -85,6 +88,9 @@ jobs:
           ARTICLE_API_KEY: ${{ secrets.ARTICLE_API_KEY }}
           ARTICLE_BASE_URL: ${{ secrets.ARTICLE_BASE_URL }}
           ARTICLE_MODEL: ${{ secrets.ARTICLE_MODEL }}
+          # DEEPSEEK_API_KEY/MODELは未設定でよい: 同一AzureリソースのAZURE_OPENAI_API_KEYと
+          # AI_MODELS.articleEconomyのデフォルト値にフォールバックする（src/lib/openai-client.ts参照）
+          DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL }}
           RADAR_ALERT_WEBHOOK_URL: ${{ secrets.RADAR_ALERT_WEBHOOK_URL }}
           RADAR_INTERNAL_SECRET: ${{ secrets.RADAR_INTERNAL_SECRET }}
           AUTH_URL: ${{ secrets.AUTH_URL }}

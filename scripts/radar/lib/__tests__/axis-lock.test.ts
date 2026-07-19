@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyTopic, structuralAxis } from "../axis-lock";
+import { classifyTopic, isPoliticalTopicClass, structuralAxis } from "../axis-lock";
 
 describe("classifyTopic", () => {
   it("キオクシア急落 → stock_crash", () => {
@@ -26,6 +26,32 @@ describe("classifyTopic", () => {
 
   it("れいわ辞任 → politics", () => {
     expect(classifyTopic("れいわ新選組の山本太郎代表辞任")).toBe("politics");
+  });
+
+  it("ウクライナAIドローン → war_tech_foreign", () => {
+    expect(classifyTopic("ウクライナのAIドローンによる反攻")).toBe("war_tech_foreign");
+  });
+
+  it("懸賞金 → foreign_spectacle", () => {
+    expect(classifyTopic("トランプ大統領への懸賞金表明（親イラン民兵組織）")).toBe(
+      "foreign_spectacle",
+    );
+  });
+});
+
+describe("isPoliticalTopicClass", () => {
+  it("政治・法制度・地政学系はフラッグシップ対象", () => {
+    expect(isPoliticalTopicClass("politics")).toBe(true);
+    expect(isPoliticalTopicClass("legal")).toBe(true);
+    expect(isPoliticalTopicClass("geopolitics")).toBe(true);
+  });
+
+  it("経済・企業・技術系はeconomy Writer対象", () => {
+    expect(isPoliticalTopicClass("stock_crash")).toBe(false);
+    expect(isPoliticalTopicClass("consumer_price")).toBe(false);
+    expect(isPoliticalTopicClass("corporate")).toBe(false);
+    expect(isPoliticalTopicClass("tech_social")).toBe(false);
+    expect(isPoliticalTopicClass("other")).toBe(false);
   });
 });
 

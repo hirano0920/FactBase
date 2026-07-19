@@ -97,6 +97,65 @@ export const LIKE_TITLES: LikeTitle[] = [
   },
 ];
 
+/**
+ * 越境ポイント（相手陣営+中立層からのhelpful合計）による称号。
+ * 同陣営からのhelpful（LIKE_TITLES）とは別軸で、「中立・相手を説得できたか」だけを評価する。
+ */
+export const BRIDGING_TITLES: LikeTitle[] = [
+  {
+    id: "bridge-sage",
+    label: "越境の賢者",
+    emoji: "🕊️",
+    colorClass: "text-amber-600",
+    minLikes: 250,
+  },
+  {
+    id: "consensus-maker",
+    label: "合意形成者",
+    emoji: "🤝",
+    colorClass: "text-violet-600",
+    minLikes: 75,
+  },
+  {
+    id: "persuader",
+    label: "説得者",
+    emoji: "🎯",
+    colorClass: "text-sky-700",
+    minLikes: 20,
+  },
+  {
+    id: "bridge-builder",
+    label: "橋渡し役",
+    emoji: "🌉",
+    colorClass: "text-emerald-700",
+    minLikes: 5,
+  },
+];
+
+export function getBridgingTitle(bridgingPoints: number): LikeTitle | null {
+  for (const title of BRIDGING_TITLES) {
+    if (bridgingPoints >= title.minLikes) return title;
+  }
+  return null;
+}
+
+export function bridgingTitleProgress(bridgingPoints: number): {
+  current: LikeTitle | null;
+  next: LikeTitle | null;
+  pointsToNext: number | null;
+} {
+  const current = getBridgingTitle(bridgingPoints);
+  const next =
+    BRIDGING_TITLES.filter((t) => t.minLikes > bridgingPoints).sort(
+      (a, b) => a.minLikes - b.minLikes,
+    )[0] ?? null;
+  return {
+    current,
+    next,
+    pointsToNext: next ? Math.max(0, next.minLikes - bridgingPoints) : null,
+  };
+}
+
 export function getUserReputation(plan: Plan, commentCount: number): ReputationTier {
   const ladder = REPUTATION_LADDERS[plan];
   let current = ladder[0];

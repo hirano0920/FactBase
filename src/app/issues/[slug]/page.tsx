@@ -20,6 +20,8 @@ import { PageContainer, Section, SectionTitle } from "@/components/layout/page-c
 import { LeftRail } from "@/components/layout/left-rail";
 import { ScrollReveal } from "@/components/ui/scroll-reveal";
 import { getComments, getIssueBySlug, getIssueTimeline, isDbEnabled } from "@/lib/data";
+import { getVoteSwing } from "@/lib/vote-swing";
+import { SwingIndicator } from "@/components/issue/swing-indicator";
 import { GUEST_COMMENT_LIMIT, HOME_THREE_COL_GRID } from "@/lib/constants";
 import type { Metadata } from "next";
 
@@ -63,9 +65,10 @@ export default async function IssuePage({ params }: IssuePageProps) {
   const issue = await getIssueBySlug(slug);
   if (!issue) notFound();
 
-  const [commentPage, timeline] = await Promise.all([
+  const [commentPage, timeline, swing] = await Promise.all([
     getComments(issue.id, undefined, GUEST_COMMENT_LIMIT, "new", { includeReplies: false }),
     isDbEnabled() ? getIssueTimeline(issue.id) : Promise.resolve([]),
+    isDbEnabled() ? getVoteSwing(issue.id) : Promise.resolve(null),
   ]);
   commentPage.nextCursor = null;
 
@@ -154,6 +157,11 @@ export default async function IssuePage({ params }: IssuePageProps) {
                       <IssueVoteSlot
                         issueId={issue.id}
                         initialTally={tally}
+                        labels={issue.voteLabels}
+                      />
+                      <SwingIndicator
+                        slug={issue.slug}
+                        initialSwing={swing}
                         labels={issue.voteLabels}
                       />
                     </div>

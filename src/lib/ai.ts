@@ -1272,7 +1272,11 @@ export function syncVoteQuestionWithChoices(
   const joinerLen = preamble ? 1 : 0;
   const budget = maxLen - tail.length - joinerLen;
   if (budget < 2) return tail.slice(0, maxLen);
-  const shortPre = preamble.slice(0, budget).replace(/[、，\s]+$/g, "");
+  // 単純な文字数カットだと単語の途中で切れて意味不明になる（例:「食品の消費税を〜」→「食品の消」）。
+  // budget内に句読点があればそこで切り、無ければ前置き自体を諦めてtailだけ返す。
+  const truncated = preamble.slice(0, budget);
+  const lastBreak = truncated.lastIndexOf("、");
+  const shortPre = lastBreak >= 4 ? truncated.slice(0, lastBreak) : "";
   return shortPre ? `${shortPre}、${tail}` : tail.slice(0, maxLen);
 }
 

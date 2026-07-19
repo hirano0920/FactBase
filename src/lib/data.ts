@@ -348,6 +348,19 @@ export const getIssues = cache(async (): Promise<Issue[]> => {
   return mapped;
 });
 
+/**
+ * 常設debate（長年論争、Issue.isStanding=trueで手動選定）の一覧。
+ * getIssues()と違い直近50件に限定しない（何年経っても常設ページとして残す）。
+ */
+export const getStandingIssues = cache(async (): Promise<Issue[]> => {
+  if (!isDbEnabled()) return [];
+  const issues = await prisma.issue.findMany({
+    where: { status: { not: "ARCHIVED" }, underReview: false, isStanding: true },
+    orderBy: { createdAt: "desc" },
+  });
+  return issues.map(mapIssue).filter((i) => !isPendingArticlePlaceholder(i.summary));
+});
+
 export interface IssuesFeedResult {
   issues: Issue[];
   total: number;

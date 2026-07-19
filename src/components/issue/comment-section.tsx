@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Fragment } from "react";
+import { ArrowLeftRight, Eye, Scale, Target } from "lucide-react";
 import { CommentCard } from "@/components/issue/comment-card";
 import { Button } from "@/components/ui/button";
 import { CountUp } from "@/components/ui/count-up";
@@ -1009,30 +1010,35 @@ export function CommentSection({
                               </p>
                             ) : (
                               isTopOpposing && (
-                                <p className="px-2 pt-2 text-xs font-bold text-accent">
-                                  👀 最も説得力のある{label}派の意見
+                                <p className="flex items-center gap-1 px-2 pt-2 text-xs font-bold text-accent">
+                                  <Eye className="h-3.5 w-3.5 shrink-0" aria-hidden="true" strokeWidth={2.5} />
+                                  最も説得力のある{label}派の意見
                                 </p>
                               )
                             )}
                             {showCrossBadge && (
                               <div className="mx-2 mt-2 inline-flex items-center gap-1 rounded-full border border-transparent bg-gradient-to-r from-accent to-hot px-2.5 py-1 text-[11px] font-semibold text-white shadow-[0_2px_10px_rgb(79_70_229_/_0.25)]">
-                                🔀 越境評価 no.1・{oppositeLabel}派の{comment.crossHelpful}人も支持
+                                <ArrowLeftRight className="h-3 w-3 shrink-0" aria-hidden="true" strokeWidth={2.5} />
+                                越境評価 no.1・{oppositeLabel}派の{comment.crossHelpful}人も支持
                               </div>
                             )}
                             {/* 各コメントのcrossHelpful/neutralHelpfulを小さく表示 */}
                             {!showCrossBadge && hasCrossHelpful && (
                               <div className="mx-2 mt-1.5 inline-flex items-center gap-1 text-[11px] text-accent">
-                                🔀 反対派+{comment.crossHelpful}
+                                <ArrowLeftRight className="h-3 w-3 shrink-0" aria-hidden="true" strokeWidth={2.5} />
+                                反対派+{comment.crossHelpful}
                                 {hasNeutralHelpful && (
-                                  <span className="ml-1 text-emerald-500">
+                                  <span className="ml-1 inline-flex items-center gap-0.5 text-emerald-500">
+                                    <Target className="h-3 w-3 shrink-0" aria-hidden="true" strokeWidth={2.5} />
                                     中立+{comment.neutralHelpful}
                                   </span>
                                 )}
                               </div>
                             )}
                             {!hasCrossHelpful && hasNeutralHelpful && (
-                              <div className="mx-2 mt-1.5 text-[11px] text-emerald-500">
-                                🎯 中立+{comment.neutralHelpful}
+                              <div className="mx-2 mt-1.5 inline-flex items-center gap-1 text-[11px] text-emerald-500">
+                                <Target className="h-3 w-3 shrink-0" aria-hidden="true" strokeWidth={2.5} />
+                                中立+{comment.neutralHelpful}
                               </div>
                             )}
                             <CommentCard
@@ -1086,10 +1092,11 @@ export function CommentSection({
                 );
               })}
             </div>
-            {/* 中央の対戦線+VSバッジ(デスクトップのみ)。装飾なのでクリックは透過させる */}
+            {/* 中央の対戦線+天秤バッジ(デスクトップのみ)。「ぶつかる」でなく「両方を測る」印象にするため
+                VSではなくScale(天秤)アイコンにしてある。装飾なのでクリックは透過させる */}
             <div className="pointer-events-none absolute inset-y-0 left-1/2 hidden w-px -translate-x-1/2 bg-border sm:block" />
-            <div className="pointer-events-none absolute left-1/2 top-7 hidden h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-transparent bg-gradient-to-br from-accent to-hot text-[11px] font-bold text-white shadow-[0_2px_12px_rgb(79_70_229_/_0.3)] sm:flex">
-              VS
+            <div className="pointer-events-none absolute left-1/2 top-7 hidden h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-transparent bg-gradient-to-br from-accent to-hot text-white shadow-[0_2px_12px_rgb(79_70_229_/_0.3)] sm:flex">
+              <Scale className="h-4 w-4" aria-hidden="true" strokeWidth={2.5} />
             </div>
           </div>
         </div>
@@ -1097,8 +1104,9 @@ export function CommentSection({
         <>
           {hasHighlights && (
             <div className="mb-6">
-              <p className="mb-2.5 text-xs font-extrabold tracking-wide text-ink-faint">
-                🥊 賛成派・反対派の代表意見
+              <p className="mb-2.5 flex items-center gap-1.5 text-xs font-extrabold tracking-wide text-ink-faint">
+                <Scale className="h-3.5 w-3.5 shrink-0" aria-hidden="true" strokeWidth={2.5} />
+                賛成派・反対派の代表意見
               </p>
               <div className="grid gap-3 sm:grid-cols-2">
                 {(["for", "against"] as const).map((side) => {

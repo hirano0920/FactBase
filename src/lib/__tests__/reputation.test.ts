@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { getLikeTitle, getUserReputation, reputationProgress } from "@/lib/reputation";
+import {
+  bridgingTitleProgress,
+  getBridgingTitle,
+  getLikeTitle,
+  getUserReputation,
+  reputationProgress,
+} from "@/lib/reputation";
 
 describe("getUserReputation", () => {
   it("無料は常に Newbie", () => {
@@ -30,6 +36,25 @@ describe("getLikeTitle", () => {
     expect(getLikeTitle(100)?.label).toBe("Scholar学者");
     expect(getLikeTitle(500)?.label).toBe("Philosopher哲学者");
     expect(getLikeTitle(5000)?.label).toBe("Great Sage大賢者");
+  });
+});
+
+describe("getBridgingTitle", () => {
+  it("越境ポイントで称号が決まる（同陣営helpfulは含まない前提）", () => {
+    expect(getBridgingTitle(4)).toBeNull();
+    expect(getBridgingTitle(5)?.label).toBe("橋渡し役");
+    expect(getBridgingTitle(20)?.label).toBe("説得者");
+    expect(getBridgingTitle(75)?.label).toBe("合意形成者");
+    expect(getBridgingTitle(250)?.label).toBe("越境の賢者");
+  });
+});
+
+describe("bridgingTitleProgress", () => {
+  it("次の称号までの残りポイントを返す", () => {
+    const p = bridgingTitleProgress(10);
+    expect(p.current?.label).toBe("橋渡し役");
+    expect(p.next?.label).toBe("説得者");
+    expect(p.pointsToNext).toBe(10);
   });
 });
 

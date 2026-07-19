@@ -110,6 +110,14 @@ export function classifyTopic(topic: string): string {
   if (/法案|改正|可決|成立|制定|制度|法$|罰則|規制|義務化|損壊罪|典範/.test(t)) {
     return "legal";
   }
+  // 外国戦場の兵器・AI兵器速報（News向き。Debate軸が立ちにくい）
+  if (/ウクライナ/.test(t) && /ドローン|AI|反攻|反撃|兵器/.test(t)) {
+    return "war_tech_foreign";
+  }
+  // 懸賞金・暗殺示唆など奇行ネタ（News向き）
+  if (/懸賞金|暗殺示唆|賞金.*表明/.test(t)) {
+    return "foreign_spectacle";
+  }
   // 外交/地政学
   if (/イラン|ウクライナ|ロシア|中国|北朝鮮|安保|防衛|制裁|軍事|NATO|ミサイル|ホルムズ/.test(t)) {
     return "geopolitics";
@@ -127,6 +135,21 @@ export function classifyTopic(topic: string): string {
     return "tech_social";
   }
   return "other";
+}
+
+/** classifyTopicの分類のうち、政治・国際安保・法制度系（フラッグシップWriter対象）かどうか */
+const POLITICAL_TOPIC_CLASSES = new Set([
+  "legal",
+  "geopolitics",
+  "scandal",
+  "politics",
+  "fact_scandal",
+  "war_tech_foreign",
+  "foreign_spectacle",
+]);
+
+export function isPoliticalTopicClass(topicClass: string): boolean {
+  return POLITICAL_TOPIC_CLASSES.has(topicClass);
 }
 
 /**
@@ -179,6 +202,22 @@ export function structuralAxis(topic: string, _category?: string): AxisLockResul
       axis: `${t}、説明責任とルール整備のどちらを優先すべきか`,
       sideA: "当事者の説明責任と透明性を最優先すべき",
       sideB: "再発防止のためのルール・開示義務の強化を優先すべき",
+    };
+  }
+
+  if (type === "war_tech_foreign") {
+    return {
+      axis: `${t}、戦況・兵器動向としてどう整理すべきか`,
+      sideA: "軍事・技術面の進展として注視すべき",
+      sideB: "人道・停戦の観点から慎重に見るべき",
+    };
+  }
+
+  if (type === "foreign_spectacle") {
+    return {
+      axis: `${t}、報道としてどう捉えるべきか`,
+      sideA: "重大な安全保障・政治リスクとして注視すべき",
+      sideB: "過剰報道・扇動と見る",
     };
   }
 

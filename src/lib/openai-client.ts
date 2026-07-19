@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { AI_MODELS } from "@/lib/constants";
 
-function normalizeBaseUrl(url: string | undefined): string | undefined {
+export function normalizeBaseUrl(url: string | undefined): string | undefined {
   if (!url) return undefined;
   const trimmed = url.replace(/\/$/, "");
   // 既にパス付きならそのまま（/v1, /openai/v1, /models 等）
@@ -14,8 +14,18 @@ function normalizeBaseUrl(url: string | undefined): string | undefined {
   }
   // Azure OpenAI（クラシック）
   if (trimmed.includes(".openai.azure.com")) return `${trimmed}/openai/v1`;
-  // Azure AI Foundry Models（Grok 等）— OpenAI SDK 互換は /models
-  if (trimmed.includes("services.ai.azure.com")) return `${trimmed}/models`;
+  // Azure AI Foundry Models（Grok・DeepSeek等）— OpenAI SDK互換の推論エンドポイントは
+  // <resource>.services.ai.azure.com/models。Foundryポータルが目立つ場所に表示する
+  // 「プロジェクトエンドポイント」（.../api/projects/<name>）はAI Foundry SDK専用の別物で、
+  // これをそのまま使うと models が二重パスになり404になる。ホスト部分だけ取り出して付け直す。
+  if (trimmed.includes(".services.ai.azure.com")) {
+    try {
+      const origin = new URL(trimmed).origin;
+      return `${origin}/models`;
+    } catch {
+      return `${trimmed}/models`;
+    }
+  }
   if (trimmed.includes("api.x.ai")) return `${trimmed}/v1`;
   return trimmed;
 }
@@ -120,4 +130,34 @@ export function createArticleClient(options?: {
 /** 記事生成モデル名。Azure Foundry ではデプロイ名を ARTICLE_MODEL で上書き */
 export function resolveArticleModel(defaultModel: string): string {
   return firstNonEmpty(process.env.ARTICLE_MODEL, defaultModel) ?? defaultModel;
+}
+
+/**
+ * 非政治ジャンル向けの低コストWriterクライアント（DeepSeek）。
+ * フラッグシップ（createArticleClient）とは別プロバイダなので、DEEPSEEK_API_KEY未設定なら
+ * 呼び出し側でフラッグシップにフォールバックすること（このクライアント自体は例外を投げる）。
+ */
+export function createEconomyArticleClient(options?: {
+  timeout?: number;
+  maxRetries?: number;
+}): OpenAI {
+  // DEEPSEEK_API_KEY未設定なら既存のAZURE_OPENAI_API_KEYにフォールバックする。
+  // 同一Azure AI Servicesリソースの鍵は.openai.azure.com（クラシック）と
+  // .services.ai.azure.com（Foundry Models）の両方で共通のため、Azure経由でDeepSeekを
+  // デプロイしただけなら新規キーを別途secretsに登録しなくてよい。
+  const apiKey = firstNonEmpty(process.env.DEEPSEEK_API_KEY, process.env.AZURE_OPENAI_API_KEY);
+  if (!apiKey) throw new Error("DEEPSEEK_API_KEY or AZURE_OPENAI_API_KEY is not set");
+  return new OpenAI({
+    apiKey,
+    baseURL: normalizeBaseUrl(
+      firstNonEmpty(process.env.DEEPSEEK_BASE_URL, "https://api.deepseek.com/v1"),
+    ),
+    timeout: options?.timeout,
+    maxRetries: options?.maxRetries,
+  });
+}
+
+/** 非政治ジャンルWriterモデル名。DEEPSEEK_MODEL で上書き可 */
+export function resolveEconomyArticleModel(defaultModel: string): string {
+  return firstNonEmpty(process.env.DEEPSEEK_MODEL, defaultModel) ?? defaultModel;
 }

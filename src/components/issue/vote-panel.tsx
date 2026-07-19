@@ -76,15 +76,17 @@ export function VoteResultEffect({
         {callout.text}
       </p>
 
-      {/* 決着バー: 賛成が左から・反対が右から伸びて中央でぶつかる。「今どちらが優勢か」を一目で伝える演出 */}
+      {/* 決着バー: 賛成が左から・反対が右から伸びて中央でぶつかる。「今どちらが優勢か」を一目で伝える演出。
+          transition-[width]は初回のanimate-grow-from-*が終わった後、SSEでtallyが変わるたびに
+          バーが瞬間切り替えでなくなめらかに動くようにするため（ライブ更新している実感を出す） */}
       <div className="relative h-3.5 animate-clash-shake overflow-hidden rounded-full border border-border bg-surface-muted">
         <div
-          className="absolute inset-y-0 left-0 animate-grow-from-left rounded-full bg-for"
+          className="absolute inset-y-0 left-0 animate-grow-from-left rounded-full bg-for transition-[width] duration-700 ease-out"
           style={{ width: `${tally.percents.for}%` }}
           title={`${labelFor("for")} ${formatPercent(tally.percents.for)}`}
         />
         <div
-          className="absolute inset-y-0 right-0 animate-grow-from-right rounded-full bg-against"
+          className="absolute inset-y-0 right-0 animate-grow-from-right rounded-full bg-against transition-[width] duration-700 ease-out"
           style={{ width: `${tally.percents.against}%` }}
           title={`${labelFor("against")} ${formatPercent(tally.percents.against)}`}
         />
@@ -105,7 +107,11 @@ export function VoteResultEffect({
         </div>
       </div>
 
-      <p className="mt-3 text-center text-sm text-ink-muted">
+      <p className="mt-3 flex items-center justify-center gap-1.5 text-sm text-ink-muted">
+        <span className="relative flex h-2 w-2" aria-hidden="true">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-hot opacity-60" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-hot" />
+        </span>
         <CountUp value={tally.totalVotes} className="tabular-nums font-bold text-ink-secondary" />
         {" 票 · "}
         <CountUp value={tally.totalVoters} className="tabular-nums font-bold text-ink-secondary" />

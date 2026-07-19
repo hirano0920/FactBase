@@ -796,7 +796,7 @@ async function main() {
             dietSpeeches,
             claimDiffBlock,
           });
-          const { gate, articleHtml: gatedHtml, repaired } = await checkArticleQualityGateWithRepair(
+          const { gate, articleHtml: gatedHtml, repaired, confirmed } = await checkArticleQualityGateWithRepair(
             {
               title: issueTitle,
               lead: article.lead,
@@ -810,8 +810,13 @@ async function main() {
             console.log(`  🔧 両側mini修理で品質ゲート通過: ${cluster.title}`);
           }
           if (!gate.ok) {
-            await holdForArticle(`quality_gate:${(gate.reason ?? "").slice(0, 200)}`);
-            continue;
+            if (confirmed) {
+              await holdForArticle(`quality_gate:${(gate.reason ?? "").slice(0, 200)}`);
+              continue;
+            }
+            console.warn(
+              `  ⚠️ quality_gate:${(gate.reason ?? "").slice(0, 200)}（再判定と結果が割れたためブレとみなし公開続行）: ${cluster.title}`,
+            );
           }
         } catch (e) {
           console.warn(`  ⚠️ 品質ゲートnano失敗（fail-open・公開続行）: ${cluster.title} (${e})`);

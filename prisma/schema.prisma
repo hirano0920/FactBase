@@ -182,6 +182,9 @@ model Issue {
   // 人間確認が終わるまでトレンド表示・新規流入から外す（削除はしない＝透明性ログとして残す）
   underReview    Boolean              @default(false)
   qualityReports IssueQualityReport[]
+  // 常設debate（長年論争になってる争点）。オーナーが手動で選定・trueにする運用が前提で、
+  // discover/promoteの自動パイプラインからは付与しない。
+  isStanding     Boolean              @default(false)
 
   votes         Vote[]
   voteEvents    VoteEvent[]
@@ -190,6 +193,7 @@ model Issue {
   timeline      IssueTimeline[]
   bookmarks     Bookmark[]
   sourceEvents  SourceEvent[]
+  politicians   IssuePolitician[]
 }
 
 // 「この要約はおかしい」報告（Radar自動生成争点向け）。閾値到達でunderReview化。
@@ -422,6 +426,50 @@ model Bookmark {
 
   @@unique([userId, issueId])
   @@index([userId, createdAt])
+}
+
+/** 政治家・政党の争点での立場。VoteChoiceを流用しないのは「棄権」が実在するため（国会採決は賛成/反対/棄権が実データにある） */
+enum PoliticianStance {
+  FOR
+  AGAINST
+  ABSTAIN
+}
+
+/** 政治家・政党。争点横断で「中立層への説得力」を集計する対象（IssuePolitician経由） */
+model Politician {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  name      String
+  /** 所属政党（政党そのものをエントリにする場合はnullで可） */
+  party     String?
+  createdAt DateTime @default(now())
+
+  issues IssuePolitician[]
+
+  @@index([name])
+}
+
+/**
+ * 争点と政治家/政党の紐付け。stanceはその争点でこの政治家/政党がどちら側の立場を取ったか。
+ * 法案系争点はdietVote（本会議の記名投票結果）から自動タグ付けできる
+ * （tagPoliticiansFromDietVote、src/lib/politician-tagging.ts）。
+ * この行を起点に、該当stance側のコメントの越境評価(bridging)を集計して説得力スコアを出す
+ * （ABSTAINはComment.stance側に対応する陣営が無いため集計対象外）。
+ */
+model IssuePolitician {
+  id           String           @id @default(cuid())
+  issueId      String
+  politicianId String
+  stance       PoliticianStance
+  /** dietVote由来か等の出典メモ（任意） */
+  source       String?
+  createdAt    DateTime         @default(now())
+
+  issue      Issue      @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  politician Politician @relation(fields: [politicianId], references: [id], onDelete: Cascade)
+
+  @@unique([issueId, politicianId])
+  @@index([politicianId])
 }
 
 model FcCache {

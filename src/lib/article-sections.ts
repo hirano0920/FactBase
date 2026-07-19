@@ -13,6 +13,26 @@ export function isOpeningSectionHeading(heading: string | null | undefined): boo
   return heading != null && OPENING_SECTION_HEADINGS.has(heading);
 }
 
+/**
+ * Writerや局所修正（claim削除・両側mini修理）が生成したHTMLの<ul>/<li>の対応崩れを直す。
+ * 対応する開始タグの無い閉じタグは孤児として削除する（例:「</li></li>」の二重閉じ）。
+ * ネストしたリストは扱わない想定なので、タグ種別ごとの単純なスタックで十分。
+ */
+export function sanitizeListMarkup(html: string): string {
+  const stack: string[] = [];
+  return html.replace(/<(\/?)(ul|ol|li)(\s[^>]*)?>/gi, (match, closingSlash: string, tagRaw: string) => {
+    const tag = tagRaw.toLowerCase();
+    if (!closingSlash) {
+      stack.push(tag);
+      return match;
+    }
+    const idx = stack.lastIndexOf(tag);
+    if (idx === -1) return ""; // 対応する開始タグが無い孤児の閉じタグは削除
+    stack.splice(idx, 1);
+    return match;
+  });
+}
+
 /** HTML断片をプレーンテキストに（要約表示用） */
 export function htmlToPlainText(html: string): string {
   return html

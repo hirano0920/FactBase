@@ -8,6 +8,7 @@ import {
   isOpeningSectionHeading,
   extractOpeningSummary,
   extractListItems,
+  sanitizeListMarkup,
 } from "@/lib/article-sections";
 import type { DebateType } from "@/lib/debate-type";
 
@@ -508,14 +509,15 @@ export function normalizeArticleSurfaces(article: {
   bullets: string[];
   articleHtml: string;
 }): { lead: string; bullets: string[]; articleHtml: string } {
-  const openingText = extractOpeningSummary(article.articleHtml, article.lead);
+  const articleHtml = sanitizeListMarkup(article.articleHtml);
+  const openingText = extractOpeningSummary(articleHtml, article.lead);
   const lead =
     openingText.length >= 60 ? truncateAtSentence(openingText, 280) : article.lead.trim();
 
   const bullets = [...(article.bullets ?? [])];
   while (bullets.length < 3) bullets.push("");
 
-  const opening = openingSection(article.articleHtml);
+  const opening = openingSection(articleHtml);
   if (opening && hasIncidentSubstance(opening.text)) {
     const labelMatch = bullets[0]?.match(/^([^：:]{1,20})[：:]/);
     const label = labelMatch?.[1]?.trim() || "いま分かっていること";
@@ -530,7 +532,7 @@ export function normalizeArticleSurfaces(article: {
     if (short.length >= 40) bullets[0] = `${label}: ${short}`;
   }
 
-  const sides = sideSectionsPlain(article.articleHtml);
+  const sides = sideSectionsPlain(articleHtml);
   for (let i = 0; i < 2; i++) {
     const side = sides[i];
     const bi = i + 1;
@@ -550,7 +552,7 @@ export function normalizeArticleSurfaces(article: {
     bullets[bi] = `${label}: ${truncateAtSentence(claim, 140)}`;
   }
 
-  return { ...article, lead, bullets: bullets.slice(0, 3) };
+  return { ...article, articleHtml, lead, bullets: bullets.slice(0, 3) };
 }
 
 /**

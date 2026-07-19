@@ -34,7 +34,9 @@ export function isNewsishTopicClass(topicClass: string | null | undefined): bool
     topicClass === "corporate" ||
     topicClass === "consumer_price" ||
     topicClass === "tech_social" ||
-    topicClass === "fact_scandal"
+    topicClass === "fact_scandal" ||
+    topicClass === "war_tech_foreign" ||
+    topicClass === "foreign_spectacle"
   );
 }
 

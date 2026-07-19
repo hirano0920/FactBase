@@ -244,8 +244,8 @@ export const RADAR = {
     { hour: 9, minute: 33 }, // → 11:03 ピーク
     { hour: 12, minute: 33 }, // 昼過ぎスイープ
     { hour: 14, minute: 33 }, // → 16:03 ピーク
-    { hour: 18, minute: 3 }, // 夕方スイープ
-    { hour: 21, minute: 3 }, // 夜スイープ
+    { hour: 18, minute: 3 }, // → 19:33 ピーク
+    { hour: 21, minute: 3 }, // → 22:33 ピーク
     { hour: 0, minute: 33 }, // 深夜スイープ（夜バズ → 翌朝 6:33）
   ],
   /**
@@ -298,9 +298,10 @@ export const RADAR = {
   // --- バズ駆動記事の公開（promote.ts、④）---
   /**
    * 1ピーク時間帯あたりの基本公開本数。日次では min/soft/hard と組み合わせて使う。
-   * ピーク内で失敗（HELD・Azure拒否）が出ても補充できるよう、目標3よりやや大きめ。
+   * 2026-07-19: 30本/日体制（peakWindowsJst 5枠）に合わせて4→6に引き上げ
+   * （5枠 × 6本 = 30本 = dailyPublishHardCapと一致）。
    */
-  buzzArticlesPerWindow: 4,
+  buzzArticlesPerWindow: 6,
   /**
    * 1日の最低公開本数。Selection V2 では 0（キャッチアップしない）。
    * 互換のため定数は残すが、computePromoteRunBudget は参照しない。
@@ -311,18 +312,24 @@ export const RADAR = {
    * 通常日はここまでのペースで残りピーク数に均等按分される。
    * 以前はhardCapと同値(9)で、soft到達判定が実質何もしていなかった
    * （2026-07-16修正: 値を分けて初めてsoft/hardの2段構造が機能する）。
+   * 2026-07-19: 30本/日体制（フラッグシップ10+非政治20）に合わせて6→24に引き上げ。
    */
-  dailyPublishSoftTarget: 6,
+  dailyPublishSoftTarget: 24,
   /**
    * 1日の硬上限。特に強いバズが重なった例外的な日だけ、softを超えてここまでの
    * 上振れを許容する（質を落として埋めるための枠ではない）。
+   * 2026-07-19: 9→30に引き上げ（フラッグシップ10本＋非政治20本の30本/日体制）。
    */
-  dailyPublishHardCap: 9,
+  dailyPublishHardCap: 30,
   /**
    * Writerに進める前の本文取得プール倍率（target本数×この値）。
    * 薄い候補を先に落とすため、試行枠より広くネットワーク取得する。
+   * 2026-07-19: 実運用ログでは深堀りリサーチまで進んだ候補の実際の失敗率は
+   * 約20%程度（15件中2〜3件がHELD/生成失敗）だったため、5倍は過剰だった。
+   * 30本/日体制でリサーチ側のnano/mini呼び出し・外部API従量課金が比例して膨らむのを避けるため
+   * 2に引き下げる（50%の失敗率まで許容できるバッファ）。歩留まりが悪化したら見直すこと。
    */
-  researchPoolMultiplier: 5,
+  researchPoolMultiplier: 2,
   /**
    * 1ピーク時間帯・1カテゴリからの最大公開数。buzzScore純粋順だと単発のメガバズ争点が
    * 同じピーク枠を独占し、政治・国際・法律等の他カテゴリを機械的に押し出すことがあるため、
@@ -357,11 +364,15 @@ export const RADAR = {
    * （朝7:30・昼12:00・夕方17:00の通勤・昼休み・夕方の可処分時間の1時間前＝
    * 6:33・11:03・16:03）。cronが多少遅れても実際の読者到達時刻には十分間に合い、
    * 早く公開される分には何の問題も無いという方針（2026-07-14、ユーザーとの合意）。
+   * 2026-07-19: 30本/日体制に向けて夕方帰宅後(19:33)・夜間くつろぎ時間(22:33)の
+   * 2枠を追加（discoverWindowsJstの18:03/21:03スイープの90分後に合わせてある）。
    */
   peakWindowsJst: [
     { hour: 6, minute: 33 },
     { hour: 11, minute: 3 },
     { hour: 16, minute: 3 },
+    { hour: 19, minute: 33 },
+    { hour: 22, minute: 33 },
   ],
   /** buzzScore（4ソース + Newsクラスタ）の公開最低ライン。effectiveScore≥2 */
   minBuzzScoreForPromotion: 2,
@@ -371,6 +382,16 @@ export const RADAR = {
   youtubeTrendingMaxTitles: 80,
   /** News 見出しドリブン YouTube 検索のシード数 */
   youtubeNewsSeedQueries: 8,
+  /**
+   * ABEMA Prime 公式チャンネルID。動画取り込みの対象（オーナーが実例で承認した基準:
+   * 再生数25,000以上・コメント数200以上なら討論回として拾う。人生ストーリー・単独対談は
+   * 量的しきい値を満たしても除外し、それはclassifyAbemaVideoが判定する）。
+   */
+  abemaPrimeChannelId: "UCB1dgsqLiEp57oDAyNV_vww",
+  abemaPrimeMinViews: 25_000,
+  abemaPrimeMinComments: 200,
+  /** discover 1実行あたりのABEMA Prime取り込み上限 */
+  abemaPrimePerRun: 5,
   // --- 記事生成の調査エンリッチ（summarize.ts/followup.ts、detect.ts系にもdiscover.ts相当の調査を後付け）---
   /** この時間内に調査済みならTopicCandidate.evidenceJsonを再利用し、外部APIを叩き直さない */
   enrichRefreshHours: 12,
@@ -398,8 +419,10 @@ export const BADGE_TIERS = [
 export type BadgeTier = (typeof BADGE_TIERS)[number]["tier"];
 
 export const AI_MODELS = {
-  /** 争点記事の主筆。Azure Foundry のデプロイ名は ARTICLE_MODEL で上書き（GPT-5.6 Luna に換装） */
+  /** 争点記事の主筆（フラッグシップ枠）。Azure Foundry のデプロイ名は ARTICLE_MODEL で上書き（GPT-5.6 Luna に換装） */
   article: "gpt-5.6-luna",
+  /** 非政治ジャンルの主筆（低コスト枠）。Azure AI Foundryのデプロイ名。DEEPSEEK_MODEL で上書き可 */
+  articleEconomy: "DeepSeek-V4-Flash",
   /** FC・claims検証・モデレーション（高頻度・安価な門番） */
   utility: "gpt-5-nano",
   /** discover.ts の争点選別（filterRelevantTopics）。Azure Foundry のデプロイ名は RADAR_TOPIC_FILTER_MODEL で上書き */

@@ -1,0 +1,31 @@
+# ABEMA Prime連携の実地検証（一時ワークフロー）。手動起動のみ、cronなし、DB書き込みなし。
+# 目的: GitHub Actionsの実行環境からYouTubeの字幕取得(youtubei.js)が通るかを確認する。
+# ローカル環境ではYouTube側のBot対策で空応答になることを確認済み。
+name: Test ABEMA Prime integration
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  test-abema:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npx prisma generate
+
+      - name: "Test: ABEMA Prime discovery + classification + transcript fetch"
+        env:
+          YOUTUBE_DATA_API_KEY: ${{ secrets.YOUTUBE_DATA_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+        run: npx tsx scripts/radar/_test_abema.ts

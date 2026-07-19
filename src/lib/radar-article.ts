@@ -25,7 +25,12 @@
  *   5. それでも解消しない場合はHELD相当として呼び出し側に伝える（callsite側でTopicCandidate.statusを更新）
  */
 import { AI_MODELS, SITE } from "@/lib/constants";
-import { createArticleClient, resolveArticleModel } from "@/lib/openai-client";
+import {
+  createArticleClient,
+  createEconomyArticleClient,
+  resolveArticleModel,
+  resolveEconomyArticleModel,
+} from "@/lib/openai-client";
 import { verifyClaimsAgainstSources, verifySidesAxisAlignment, type ClaimToVerify, extractKeyFacts, checkFactConsistency } from "@/lib/ai";
 import {
   debateTypeArticleHint,
@@ -403,6 +408,11 @@ export interface GenerateArticleParams {
    * 未指定・debate は従来のスプリット議論向け。
    */
   track?: "debate" | "news";
+  /**
+   * Writerモデルの階層。"economy"は非政治ジャンル向けの低コストモデル（DeepSeek）。
+   * DEEPSEEK_API_KEY未設定時はflagshipに自動フォールバックする。未指定はflagship。
+   */
+  writerTier?: "flagship" | "economy";
 }
 
 /**
@@ -574,8 +584,15 @@ export async function generateArticle(params: GenerateArticleParams): Promise<Ar
     datedExcerpts = [],
     timelineFirst = false,
     track = "debate",
+    writerTier = "flagship",
   } = params;
-  const openai = createArticleClient({ timeout: 180_000, maxRetries: 1 });
+  const useEconomy = writerTier === "economy" && Boolean(process.env.DEEPSEEK_API_KEY?.trim());
+  const openai = useEconomy
+    ? createEconomyArticleClient({ timeout: 180_000, maxRetries: 1 })
+    : createArticleClient({ timeout: 180_000, maxRetries: 1 });
+  const writerModel = useEconomy
+    ? resolveEconomyArticleModel(AI_MODELS.articleEconomy)
+    : resolveArticleModel(AI_MODELS.article);
   const sourceList = sources
     .map(
       (s, i) =>
@@ -773,7 +790,7 @@ ${revisionFeedback.map((f, i) => `${i + 1}. ${f}`).join("\n")}`
     : "";
 
   const res = await openai.chat.completions.create({
-    model: resolveArticleModel(AI_MODELS.article),
+    model: writerModel,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: isNews ? NEWS_SYSTEM : SYSTEM },
@@ -1319,7 +1336,6 @@ export async function generateVerifiedArticle(
     }
 
     if (failed.length === 0) {
-      console.log("DEBUG_FINAL articleHtml:", JSON.stringify(article.articleHtml));
       const synced = normalizeArticleSurfaces(article);
       return {
         article: { ...article, lead: synced.lead, bullets: synced.bullets },

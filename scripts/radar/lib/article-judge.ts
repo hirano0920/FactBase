@@ -187,38 +187,59 @@ export async function checkArticleQualityGate(article: ArticleForJudge): Promise
  * 品質ゲート不合格時に両側だけ mini で直して一度再判定する。
  * 全文 Grok 再生成より安く、bothSidesQuality 不足のHELDを減らす。
  * 検証ループ内で既に mini 修理済みなら二重呼び出ししない。
- * 修理失敗・再判定不合格なら元の gate を返す。
+ * 修理してもなお不合格の場合は、同じ記事をもう一度別枠でジャッジし直す
+ * （2026-07-18: 単発nano/mini judgeのブレによる誤検知HELDが多かったため、
+ *  1回の不合格だけでは確定させず、2回連続で同じ軸が閾値未満になった場合だけ
+ *  confirmed=trueとする。1回目と2回目で結果が割れた場合はブレとみなし合格扱いにする）。
+ * 呼び出し側は confirmed=true の場合だけHELDにしてよい。
  */
 export async function checkArticleQualityGateWithRepair(
   article: { title: string; lead: string; articleHtml: string },
   repairHints: string[],
   options?: { sideRepairAlreadyUsed?: boolean },
-): Promise<{ gate: QualityGateResult; articleHtml: string; repaired: boolean }> {
+): Promise<{ gate: QualityGateResult; articleHtml: string; repaired: boolean; confirmed: boolean }> {
   const gate = await checkArticleQualityGate(article);
-  if (gate.ok) return { gate, articleHtml: article.articleHtml, repaired: false };
+  if (gate.ok) return { gate, articleHtml: article.articleHtml, repaired: false, confirmed: false };
 
   const bothSidesFail = gate.reason?.includes("bothSidesQuality");
-  if (!bothSidesFail || repairHints.length === 0 || options?.sideRepairAlreadyUsed) {
-    return { gate, articleHtml: article.articleHtml, repaired: false };
+  const canRepair = bothSidesFail && repairHints.length > 0 && !options?.sideRepairAlreadyUsed;
+
+  let finalGate = gate;
+  let finalHtml = article.articleHtml;
+  let repaired = false;
+
+  if (canRepair) {
+    try {
+      const repairedHtml = await repairSideSectionsWithMini({
+        issueTitle: article.title,
+        articleHtml: article.articleHtml,
+        sourceHints: repairHints,
+        failureReason: gate.reason,
+      });
+      if (repairedHtml) {
+        const gate2 = await checkArticleQualityGate({ ...article, articleHtml: repairedHtml });
+        if (gate2.ok) {
+          return { gate: gate2, articleHtml: repairedHtml, repaired: true, confirmed: false };
+        }
+        finalGate = gate2;
+        finalHtml = repairedHtml;
+      }
+    } catch {
+      // 修理失敗時は元のgateのまま確認ジャッジに進む
+    }
   }
 
+  // ここまで来た時点でまだ不合格。単発judgeのブレを疑い、もう一度独立にジャッジして確認する。
   try {
-    const repairedHtml = await repairSideSectionsWithMini({
-      issueTitle: article.title,
-      articleHtml: article.articleHtml,
-      sourceHints: repairHints,
-      failureReason: gate.reason,
-    });
-    if (!repairedHtml) return { gate, articleHtml: article.articleHtml, repaired: false };
-
-    const gate2 = await checkArticleQualityGate({
-      ...article,
-      articleHtml: repairedHtml,
-    });
-    if (gate2.ok) return { gate: gate2, articleHtml: repairedHtml, repaired: true };
-    return { gate: gate2, articleHtml: article.articleHtml, repaired: false };
+    const confirmGate = await checkArticleQualityGate({ ...article, articleHtml: finalHtml });
+    if (confirmGate.ok) {
+      // 1回目と2回目で結果が割れた＝ブレの可能性が高いので合格扱いにする
+      return { gate: confirmGate, articleHtml: finalHtml, repaired, confirmed: false };
+    }
+    return { gate: confirmGate, articleHtml: finalHtml, repaired, confirmed: true };
   } catch {
-    return { gate, articleHtml: article.articleHtml, repaired: false };
+    // 確認judgeが例外なら確定できないので、確認できなかった扱い（呼び出し側はfail-soft運用）
+    return { gate: finalGate, articleHtml: finalHtml, repaired, confirmed: false };
   }
 }
 

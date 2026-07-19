@@ -10,6 +10,8 @@ export interface UserInfluenceStats {
   totalHelpful: number;
   /** 相手陣営からの helpful（越境） */
   crossHelpful: number;
+  /** 中立(UNDECIDED)からの helpful */
+  neutralHelpful: number;
   /** crossHelpful / totalHelpful（0〜100）。helpful 0 なら null */
   bridgingRate: number | null;
   /** 越境評価トップ（helpful≥3 かつ crossHelpful≥1）の件数 */
@@ -36,6 +38,7 @@ export async function getUserInfluenceStats(userId: string): Promise<UserInfluen
       commentCount,
       totalHelpful: 0,
       crossHelpful: 0,
+      neutralHelpful: 0,
       bridgingRate: null,
       bridgingTopCount: 0,
     };
@@ -85,6 +88,7 @@ export async function getUserInfluenceStats(userId: string): Promise<UserInfluen
     commentCount,
     totalHelpful,
     crossHelpful,
+    neutralHelpful,
     bridgingRate,
     bridgingTopCount,
   };

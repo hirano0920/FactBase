@@ -425,6 +425,35 @@ function foreignDomesticCap(
 
   if (isUnrelatedInternational) return 0.25;
 
+  // ウクライナAIドローン等: 外国戦場の兵器アップデート速報。
+  // コメントは「戦争への感想」であり、TwoSides向きの国内両論ではない。
+  if (
+    /ウクライナ/.test(topic) &&
+    /ドローン|AI|反攻|反撃|兵器/.test(topic)
+  ) {
+    return 0.12;
+  }
+
+  // 懸賞金・暗殺示唆: 外国の奇行ネタ。DebateHeat を上げない。
+  if (/懸賞金|暗殺示唆|賞金.*表明/.test(topic)) {
+    return 0.10;
+  }
+
+  return 1.0;
+}
+
+/**
+ * Rank 全体への減衰（Writer前の選定9本用）。
+ * foreignDomesticCap は debateHeat 上限のみ。こちらは rankScore 積にも掛ける。
+ */
+export function topicRankDemoteFactor(topic: string | null | undefined): number {
+  if (!topic) return 1.0;
+  if (/ウクライナ/.test(topic) && /ドローン|AI|反攻|反撃|兵器/.test(topic)) {
+    return 0.08;
+  }
+  if (/懸賞金|暗殺示唆|賞金.*表明/.test(topic)) {
+    return 0.10;
+  }
   return 1.0;
 }
 
@@ -541,6 +570,10 @@ export function nationalImportanceFactor(
   if (/皇室典範/.test(topic)) return 3.0;
   // 憲法改正関連
   if (/憲法改正/.test(topic)) return 2.5;
+  // 食料品消費税減税 — 全世帯の財布に直結する国内政策
+  if (/消費税.*減税|減税.*消費|軽減税率|食料品.*消費税|消費税.*食料/.test(topic)) {
+    return 2.0;
+  }
   // 国旗毀損罪（新しい法律の成立）
   if (/国旗損壊罪/.test(topic)) return 1.5;
   // 一般の法案通過: tv_newsでも報じられる法律改正
@@ -567,10 +600,12 @@ export function selectionV2RankScore(
   const dh = debateHeat(evidence);
   const ni = nationalImportanceFactor(evidence.topic, evidence.buzzSources);
   const isNews = evidence.debatable === false;
+  const demote = topicRankDemoteFactor(evidence.topic);
   // 旧互換
   const heat = heatPrime(evidence, opts?.tweetCountOverride, opts?.tweetRef);
   const dvs = dvsPrime(evidence);
   const cp = conflictPrime(evidence);
+  const baseRank = isNews ? bp * ch * ni : bp * ch * dh * ni;
   return {
     buzzPrime: bp,
     heatPrime: heat.heatPrime,
@@ -581,7 +616,7 @@ export function selectionV2RankScore(
     conflictPrime: cp,
     tweetHeat: heat.tweetHeat,
     secondaryHeat: heat.secondaryHeat,
-    rankScore: isNews ? bp * ch * ni : bp * ch * dh * ni,
+    rankScore: baseRank * demote,
     hasTweetCount: heat.hasTweetCount,
     tweetCount: heat.tweetCount,
     hasMeasuredDvs: dvs.hasMeasured,

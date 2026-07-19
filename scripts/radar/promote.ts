@@ -26,6 +26,7 @@ import {
 } from "../../src/lib/article-quality";
 import { checkArticleQualityGateWithRepair } from "./lib/article-judge";
 import { collectSourceHintsForRepair } from "../../src/lib/article-repair";
+import { tagPoliticiansFromDietVote } from "../../src/lib/politician-tagging";
 import { buildClaimDiff, formatClaimDiffBlock, type ClaimDiffResult } from "./lib/claim-diff";
 import { fetchArticleThumbnail } from "./lib/og-image";
 import { fetchYahooRealtimeBuzzPolitics, type YahooBuzzTerm } from "./sources/yahoo-realtime";
@@ -66,7 +67,7 @@ import { isWithinPeakWindow, minutesToNearestWindow, isOverdue } from "./lib/sch
 import { notifyRadarFailure, notifyRadarSkip } from "./notify";
 import { notifyRevalidate } from "./lib/notify-revalidate";
 import { linkBuzzSourcesToIssue } from "./lib/link-buzz-sources";
-import { buildLockedAxis, classifyTopic, structuralAxis } from "./lib/axis-lock";
+import { buildLockedAxis, classifyTopic, isPoliticalTopicClass, structuralAxis } from "./lib/axis-lock";
 import { isNewsishTopicClass, resolveIssueTrack, trackDbEnum, type IssueTrackId } from "./lib/issue-track";
 import {
   fetchHistoricalDatedExcerpts,
@@ -77,6 +78,8 @@ import {
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const FORCE = process.argv.includes("--force"); // ピーク時間帯チェックを無視（動作確認用）
+// Writer（gpt-5.6-luna、有料）を一切呼ばずに、選定ランキングだけ確認したいときに使う
+const RANK_ONLY = process.argv.includes("--rank-only");
 const LIMIT_ARG = process.argv.find((a) => a.startsWith("--limit="));
 const BASE_PROMOTE_LIMIT = LIMIT_ARG
   ? Math.max(1, parseInt(LIMIT_ARG.split("=")[1] ?? "", 10) || RADAR.buzzArticlesPerWindow)
@@ -456,6 +459,18 @@ async function main() {
     `  両論Gate+厚さOK: ${researched.length}件中 → Buzz×Heat通過${ranked.length}件 → 成功${successCap}本までWriter（候補${ranked.length}件）`,
   );
 
+  if (RANK_ONLY) {
+    console.log(`  🧮 [--rank-only] Writer呼び出しなしでランキングのみ表示（上位${ranked.length}件）:`);
+    ranked.forEach(({ g, r }, i) => {
+      console.log(
+        `    ${i + 1}. [${r.debateTypePreview ?? "?"}] ${g.primary.title}` +
+          ` (promoteScore=${r.promoteScore.toFixed(3)} / thickness=${r.thicknessScore.toFixed(3)} / buzz=${g.primary.evidence.buzzScore ?? "?"})`,
+      );
+    });
+    console.log("📰 Radar promote 完了（--rank-only）");
+    return;
+  }
+
   let published = 0;
   for (const { g, r } of ranked) {
     if (published >= successCap) break;
@@ -593,6 +608,8 @@ interface ResearchedCandidate {
   lockedAxis: import("./lib/axis-lock").AxisLockResult | null;
   /** Debate / News トラック */
   track: IssueTrackId;
+  /** classifyTopicの分類（politics/legal/geopolitics/corporate/other等）。Writerモデルの階層選択に使う */
+  topicClass: string;
   /** 選定時スコア内訳（publish時にevidenceJsonに保存し、週次キャリブレーションに使う） */
   selectionBreakdown: SelectionV2Breakdown & { combinedConflictPrime: number; claimDiffConflicts: number };
 }
@@ -907,6 +924,7 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
     promoteScore,
     claimDiff,
     claimDiffBlock,
+    topicClass: topicClassEarly,
     lockedAxis,
     track: resolvedTrack,
     selectionBreakdown,
@@ -927,8 +945,10 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
     claimDiffBlock,
     lockedAxis,
     track,
+    topicClass,
     selectionBreakdown,
   } = researched;
+  const writerTier = isPoliticalTopicClass(topicClass) ? "flagship" : "economy";
 
   // カードのサムネイル取得（リンクプレビュー用・自前保存なし）。本文取得に既に成功したURLを
   // 候補にすることで無駄打ちを減らす。記事生成と並行して走らせ、公開直前にまとめて待つ。
@@ -999,8 +1019,12 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
     timelineFirst,
     lockedAxis: track === "debate" ? (lockedAxis ?? undefined) : undefined,
     track,
+    writerTier,
   });
   let article = generatedArticle;
+  if (writerTier === "economy") {
+    console.log(`  💸 economy Writer（DeepSeek, class=${topicClass}）: ${c.title}`);
+  }
 
   if (!verified) {
     // 2026-07-16: 事実の裏取り失敗(unsupported/ungrounded_number/source_not_found等)と
@@ -1047,7 +1071,7 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
       dietSpeeches: c.evidence.dietSpeeches,
       claimDiffBlock,
     });
-    const { gate, articleHtml: gatedHtml, repaired } = await checkArticleQualityGateWithRepair(
+    const { gate, articleHtml: gatedHtml, repaired, confirmed } = await checkArticleQualityGateWithRepair(
       {
         title: c.title,
         lead: article.lead,
@@ -1061,7 +1085,23 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
       console.log(`  🔧 両側mini修理で品質ゲート通過: ${c.title}`);
     }
     if (!gate.ok) {
-      console.warn(`  ⚠️ quality_gate:${(gate.reason ?? "").slice(0, 200)} — 警告のみで公開続行`);
+      // 2026-07-18: 単発judgeのブレによる誤検知HELDを避けるため、修理後に不合格でも
+      // もう一度独立にジャッジし直し（checkArticleQualityGateWithRepair内部）、
+      // 2回とも同じ軸で不合格が確定した場合（confirmed）だけHELDにする。
+      // 1回目と2回目で結果が割れた場合はブレとみなし、従来通り警告のみで公開続行する。
+      if (confirmed) {
+        trackHeld(`quality_gate:${(gate.reason ?? "").slice(0, 200)}`, c.title);
+        if (!DRY_RUN) {
+          await prisma.topicCandidate.update({
+            where: { id: c.id },
+            data: { status: "HELD", decision: `quality_gate:${(gate.reason ?? "").slice(0, 200)}` },
+          });
+        }
+        return null;
+      }
+      console.warn(
+        `  ⚠️ quality_gate:${(gate.reason ?? "").slice(0, 200)}（再判定と結果が割れたためブレとみなし公開続行）`,
+      );
     }
   } catch (e) {
     console.warn(`  ⚠️ 品質ゲートnano失敗（fail-open・公開続行）: ${c.title} (${e})`);
@@ -1323,6 +1363,18 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
   const linked = await linkBuzzSourcesToIssue(prisma, issue.id, linkSources, c.topicTerm);
   if (linked.created + linked.linkedExisting > 0) {
     console.log(`  🔗 SourceEvent紐づけ: 新規${linked.created}・既存RSS${linked.linkedExisting}件`);
+  }
+
+  // 参議院本会議の記名投票結果があれば、政党/離反者を自動でIssuePoliticianにタグ付けする
+  if (c.evidence.dietVote) {
+    try {
+      await tagPoliticiansFromDietVote(issue.id, c.evidence.dietVote);
+      console.log(
+        `  🏛️ 政治家タグ付け: 政党${c.evidence.dietVote.parties.length}件・離反者${c.evidence.dietVote.defectors.length}件`,
+      );
+    } catch (e) {
+      console.warn(`  ⚠️ 政治家タグ付け失敗（公開自体は続行）: ${e}`);
+    }
   }
 
   await notifyRevalidate(slug, issue.id);
