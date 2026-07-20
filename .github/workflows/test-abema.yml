@@ -1,7 +1,8 @@
 # ABEMA Prime連携の実地検証（一時ワークフロー）。手動起動のみ、cronなし、DB書き込みなし。
-# 目的: yt-dlp(player_client=android)でのYouTube字幕取得がCI環境でも通るか確認する。
-# youtubei.js・素のHTTPアクセスはローカル/GH Actions両方でBot対策に阻まれたが、
-# yt-dlpのandroidクライアント偽装だけはローカルで3件とも成功した（2026-07-19）。
+# 目的: yt-dlp(player_client=android) + Cookie認証でのYouTube字幕取得がCI環境でも通るか確認する。
+# Cookie無しではGitHub ActionsのIP（データセンター）だとBot対策で弾かれることを確認済み（2026-07-19）。
+# YTDLP_COOKIES_B64 secretは、専用の捨てGoogleアカウントでログインした状態からエクスポートした
+# cookies.txt（Netscape形式）をbase64化したもの。本アカウントのCookieは絶対に使わないこと。
 name: Test ABEMA Prime integration
 
 on:
@@ -34,4 +35,5 @@ jobs:
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
           AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          YTDLP_COOKIES_B64: ${{ secrets.YTDLP_COOKIES_B64 }}
         run: npx tsx scripts/radar/_test_abema.ts

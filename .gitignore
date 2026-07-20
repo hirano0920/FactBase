@@ -32,6 +32,13 @@ yarn-error.log*
 .env
 .env*.local
 
+# YouTube認証Cookie（yt-dlp用、abema-transcript.ts参照）。絶対にコミットしない
+cookies.txt
+*.cookies.txt
+
+# SeleniumBase UC mode検証時の生成物
+downloaded_files/
+
 # vercel
 .vercel
 
