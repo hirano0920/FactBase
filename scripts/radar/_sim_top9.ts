@@ -115,7 +115,7 @@ async function main() {
     topicTerm: p.topicTerm,
     category: p.category,
     sourceUrls: (p.sourceUrls as { title: string; url: string; feed: string }[]) ?? [],
-    evidence: (p.evidenceJson as SavedEvidence) ?? ({} as SavedEvidence),
+    evidence: (p.evidenceJson as unknown as SavedEvidence) ?? ({} as SavedEvidence),
     updatedAt: p.updatedAt,
   }));
 
