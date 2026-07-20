@@ -69,4 +69,29 @@ describe("prepareCookiesFile", () => {
     const written = await readFile(path!, "utf-8");
     expect(written).toBe(content);
   });
+
+  it("デコード結果がNetscape形式に見えなければnull（壊れたbase64を渡してyt-dlpに丸投げしない）", async () => {
+    delete process.env.YTDLP_COOKIES_PATH;
+    // ランダムなバイナリっぽい文字列をbase64化（コピペ崩れ・二重エンコードを模擬）
+    process.env.YTDLP_COOKIES_B64 = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]).toString("base64");
+    await expect(prepareCookiesFile(dir)).resolves.toBeNull();
+  });
+
+  it("コメント行だけ・データ行が無ければnull", async () => {
+    delete process.env.YTDLP_COOKIES_PATH;
+    process.env.YTDLP_COOKIES_B64 = Buffer.from("# Netscape HTTP Cookie File\n", "utf-8").toString(
+      "base64",
+    );
+    await expect(prepareCookiesFile(dir)).resolves.toBeNull();
+  });
+
+  it("YTDLP_COOKIES_B64にbase64化せず生のNetscapeテキストを入れても使える(コピペミス救済)", async () => {
+    delete process.env.YTDLP_COOKIES_PATH;
+    const content = "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tTEST\tvalue";
+    process.env.YTDLP_COOKIES_B64 = content;
+    const path = await prepareCookiesFile(dir);
+    expect(path).toBe(join(dir, "cookies.txt"));
+    const written = await readFile(path!, "utf-8");
+    expect(written).toBe(content);
+  });
 });

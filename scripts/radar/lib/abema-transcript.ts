@@ -29,18 +29,46 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 /**
+ * 内容がNetscape cookie形式らしいかを機械的に確認する。
+ * base64のコピペ崩れ・二重エンコード等で壊れると、yt-dlpに渡した際に
+ * 「invalid length」「does not look like a Netscape format cookies file」という
+ * わかりにくいエラーになるため、ここで早期に検知して原因を切り分けやすくする。
+ */
+function looksLikeNetscapeCookies(content: string): boolean {
+  const lines = content.split("\n").filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return false;
+  const dataLines = lines.filter((l) => !l.startsWith("#"));
+  if (dataLines.length === 0) return false;
+  // Netscape形式は domain\tflag\tpath\tsecure\texpiry\tname\tvalue の7フィールドTSV
+  return dataLines.every((l) => l.split("\t").length >= 6);
+}
+
+/**
  * Cookie資格情報を一時ファイルに用意する。YTDLP_COOKIES_PATHが直接指定されていればそれを使い、
- * 無ければYTDLP_COOKIES_B64をデコードして一時ファイルに書き出す。どちらも無ければnull。
+ * 無ければYTDLP_COOKIES_B64を使う。どちらも無ければnull。
+ * YTDLP_COOKIES_B64は、変数名に反して**base64済みか生のNetscape cookieテキストかを自動判定**する
+ * （2026-07-19: GitHub Secretsにbase64化せず生テキストをそのまま貼るミスが実際に起きたため、
+ * 「base64のつもりが生テキストだった」場合もそのまま使えるようにして事故を吸収する）。
  * 呼び出し側が一時ファイルの削除まで責任を持つ。
  */
 export async function prepareCookiesFile(dir: string): Promise<string | null> {
   const directPath = process.env.YTDLP_COOKIES_PATH?.trim();
   if (directPath) return directPath;
 
-  const b64 = process.env.YTDLP_COOKIES_B64?.trim();
-  if (!b64) return null;
+  const raw = process.env.YTDLP_COOKIES_B64?.trim();
+  if (!raw) return null;
+
+  const content = looksLikeNetscapeCookies(raw) ? raw : Buffer.from(raw, "base64").toString("utf-8");
+  if (!looksLikeNetscapeCookies(content)) {
+    console.warn(
+      `  ⚠️ abema-transcript: YTDLP_COOKIES_B64がNetscape cookie形式に見えません` +
+        `（生テキストとしてもbase64デコード後としても不正。デコード後${content.length}バイト、` +
+        `先頭: ${JSON.stringify(content.slice(0, 30))}）。Cookie無しで続行します。`,
+    );
+    return null;
+  }
   const cookiesPath = join(dir, "cookies.txt");
-  await writeFile(cookiesPath, Buffer.from(b64, "base64").toString("utf-8"), "utf-8");
+  await writeFile(cookiesPath, content, "utf-8");
   return cookiesPath;
 }
 
