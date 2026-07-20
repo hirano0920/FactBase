@@ -32,7 +32,7 @@ yarn-error.log*
 .env
 .env*.local
 
-# YouTube認証Cookie（yt-dlp用、abema-transcript.ts参照）。絶対にコミットしない
+# 認証Cookie類。絶対にコミットしない（念のため汎用的に除外）
 cookies.txt
 *.cookies.txt
 
