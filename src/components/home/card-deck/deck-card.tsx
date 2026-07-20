@@ -27,41 +27,42 @@ export function DeckCard({ issue, onSkip, onRead, onOpen }: DeckCardProps) {
       onKeyDown={(e) => {
         if (e.key === "Enter") onOpen();
       }}
-      className="animate-fade-slide-up cursor-pointer rounded-[20px] border border-border bg-surface-raised p-6 shadow-card transition-shadow hover:shadow-glow sm:p-7"
+      className="animate-fade-slide-up cursor-pointer rounded-[20px] border border-border bg-surface-raised p-5 shadow-card transition-shadow hover:shadow-glow sm:p-6"
     >
-      <div className="mb-3.5 flex items-center gap-2">
+      <div className="mb-2.5 flex items-center gap-2">
         <TrackBadge track={issue.track} />
         <span className="rounded-md bg-surface-muted px-1.5 py-0.5 text-[11px] font-bold text-ink-secondary">
           {categoryLabel}
         </span>
       </div>
 
-      <h2 className="text-balance mb-4 text-xl font-extrabold leading-tight tracking-tight text-ink sm:text-2xl">
-        {issue.shareTitle || issue.title}
-      </h2>
+      <div className="flex gap-3.5">
+        {issue.thumbnailUrl && (
+          <IssueThumbnail
+            src={issue.thumbnailUrl}
+            alt=""
+            sourceFeed={issue.thumbnailSourceFeed}
+            className="h-20 w-28 shrink-0 rounded-xl sm:h-24 sm:w-32"
+          />
+        )}
+        <h2 className="text-balance text-lg font-extrabold leading-tight tracking-tight text-ink sm:text-xl">
+          {issue.shareTitle || issue.title}
+        </h2>
+      </div>
 
-      {issue.thumbnailUrl && (
-        <IssueThumbnail
-          src={issue.thumbnailUrl}
-          alt=""
-          sourceFeed={issue.thumbnailSourceFeed}
-          className="mb-4 aspect-[16/9] w-full rounded-2xl"
-        />
-      )}
-
-      <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs font-semibold text-ink-secondary">
+      <div className="mb-1.5 mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs font-semibold text-ink-secondary">
         {sourceCount > 0 && <span>🔎 {sourceCount}ソース参照</span>}
       </div>
       <SwingIndicator slug={issue.slug} initialSwing={null} labels={issue.voteLabels} />
 
-      <div className="my-4 flex items-center gap-2.5" aria-hidden="true">
+      <div className="my-3 flex items-center gap-2.5" aria-hidden="true">
         <span className="h-px flex-1 bg-border" />
         <span className="text-[11px] font-extrabold tracking-wide text-ink-faint">30秒でわかる</span>
         <span className="h-px flex-1 bg-border" />
       </div>
-      <p className="text-[14.5px] leading-relaxed text-ink-secondary">{issue.summary.lead}</p>
+      <p className="line-clamp-4 text-[14.5px] leading-relaxed text-ink-secondary">{issue.summary.lead}</p>
 
-      <div className="mt-6 grid grid-cols-2 gap-3">
+      <div className="mt-4 grid grid-cols-2 gap-3">
         <button
           type="button"
           onClick={(e) => {
