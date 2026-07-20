@@ -92,31 +92,53 @@ export function json3ToText(data: Json3Captions): string {
   return parts.join("").replace(/\n{2,}/g, "\n").trim();
 }
 
+function buildYtDlpArgs(
+  outputTemplate: string,
+  videoId: string,
+  cookiesPath: string | null,
+  useJsRuntime: boolean,
+): string[] {
+  return [
+    "--skip-download",
+    "--write-auto-sub",
+    "--sub-lang",
+    "ja",
+    "--sub-format",
+    "json3",
+    // "n"署名解読に外部JSランタイムを要求するyt-dlpのバージョンでだけ必要なフラグ。
+    // 古いバージョンだと未知のオプションとしてエラーになるため、失敗時だけ外して再試行する
+    // （呼び出し側のリトライロジック参照）。
+    ...(useJsRuntime ? ["--js-runtimes", "node"] : []),
+    // androidクライアント偽装はPOトークン回避に有効だが、Cookie（ログイン済みセッション）とは
+    // 併用できない（yt-dlpが"Skipping client android since it does not support cookies"で無視する）。
+    // Cookieがある場合はクライアント指定を外し、既定のweb系クライアントに任せる
+    // （実データで確認済み: Cookie+クライアント指定無しで字幕取得成功）。
+    ...(cookiesPath ? ["--cookies", cookiesPath] : ["--extractor-args", "youtube:player_client=android"]),
+    "-o",
+    outputTemplate,
+    `https://youtu.be/${videoId}`,
+  ];
+}
+
 export async function fetchYoutubeTranscript(videoId: string): Promise<string | null> {
   const dir = await mkdtemp(join(tmpdir(), "yt-cap-"));
   try {
     const outputTemplate = join(dir, "cap");
     const cookiesPath = await prepareCookiesFile(dir);
-    // androidクライアント偽装はPOトークン回避に有効だが、Cookie（ログイン済みセッション）とは
-    // 併用できない（yt-dlpが"Skipping client android since it does not support cookies"で無視する）。
-    // Cookieがある場合はクライアント指定を外し、既定のweb系クライアントに任せる
-    // （実データで確認済み: Cookie+クライアント指定無しで字幕取得成功）。
-    await execFileAsync(
-      "yt-dlp",
-      [
-        "--skip-download",
-        "--write-auto-sub",
-        "--sub-lang",
-        "ja",
-        "--sub-format",
-        "json3",
-        ...(cookiesPath ? ["--cookies", cookiesPath] : ["--extractor-args", "youtube:player_client=android"]),
-        "-o",
-        outputTemplate,
-        `https://youtu.be/${videoId}`,
-      ],
-      { timeout: 60_000 },
-    );
+    try {
+      await execFileAsync("yt-dlp", buildYtDlpArgs(outputTemplate, videoId, cookiesPath, true), {
+        timeout: 60_000,
+      });
+    } catch (e) {
+      // --js-runtimes未対応の古いyt-dlpなら「no such option」で即失敗するので、外して再試行する
+      if (String(e).includes("no such option")) {
+        await execFileAsync("yt-dlp", buildYtDlpArgs(outputTemplate, videoId, cookiesPath, false), {
+          timeout: 60_000,
+        });
+      } else {
+        throw e;
+      }
+    }
     const raw = await readFile(`${outputTemplate}.ja.json3`, "utf-8");
     const text = json3ToText(JSON.parse(raw) as Json3Captions);
     return text.length > 0 ? text : null;
