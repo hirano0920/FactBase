@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { HomeFeed } from "@/components/home/home-feed";
+import { HomeLayoutSwitcher } from "@/components/home/home-layout-switcher";
 import { AppSidebarStatic } from "@/components/layout/app-sidebar";
 import { SidebarSkeleton } from "@/components/layout/sidebar-skeleton";
 import { LeftRail } from "@/components/layout/left-rail";
@@ -31,26 +31,20 @@ export default async function HomePage() {
   return (
     <PageContainer>
       <div className={`grid gap-6 lg:gap-8 ${HOME_THREE_COL_GRID}`}>
-        <div className="hidden xl:block">
-          <LeftRail />
-        </div>
-
-        <div className="min-w-0 space-y-6">
-          <Suspense fallback={null}>
-            <HomeFeed
-              allIssues={allIssues}
-              mostRead={mostRead}
-              mostActive={mostActive}
-              participants={participants}
-            />
-          </Suspense>
-        </div>
-
-        <div className="hidden lg:block">
-          <Suspense fallback={<SidebarSkeleton />}>
-            <AppSidebarStatic />
-          </Suspense>
-        </div>
+        <Suspense fallback={null}>
+          <HomeLayoutSwitcher
+            allIssues={allIssues}
+            mostRead={mostRead}
+            mostActive={mostActive}
+            participants={participants}
+            leftRail={<LeftRail />}
+            sidebar={
+              <Suspense fallback={<SidebarSkeleton />}>
+                <AppSidebarStatic />
+              </Suspense>
+            }
+          />
+        </Suspense>
       </div>
     </PageContainer>
   );

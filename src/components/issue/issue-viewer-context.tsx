@@ -11,6 +11,7 @@ import {
 } from "react";
 import { BookmarkButton } from "@/components/issue/bookmark-button";
 import { CommentSection } from "@/components/issue/comment-section";
+import { NewsCommentSection } from "@/components/issue/news-comment-section";
 import { QualityReportButton } from "@/components/issue/quality-report-button";
 import { VotePanelLive } from "@/components/issue/vote-panel-live";
 import { SpectrumVote } from "@/components/issue/spectrum-vote";
@@ -234,6 +235,8 @@ interface IssueCommentsSlotProps {
   issueId: string;
   commentCount: number;
   voteTally: VoteTally;
+  /** newsは投票済みかどうかに関係なく誰でも読める通常のコメント欄にする */
+  track?: "debate" | "news";
 }
 
 function VoteToUnlockGate({ commentCount }: { commentCount: number }) {
@@ -271,12 +274,35 @@ function CommentsSkeleton() {
   );
 }
 
-export function IssueCommentsSlot({ slug, issueId, commentCount, voteTally }: IssueCommentsSlotProps) {
+export function IssueCommentsSlot({
+  slug,
+  issueId,
+  commentCount,
+  voteTally,
+  track = "debate",
+}: IssueCommentsSlotProps) {
   const { viewerReady, commentsReady, isLoggedIn, plan, userVote, comments, nextCursor, justVoted } =
     useIssueViewer();
   const canComment = canPostComment(isLoggedIn);
   const canFactCheck = canUseFactCheck(plan);
   const canRebuttalAi = canUseRebuttalAi(plan);
+
+  // News: 賛成/反対の投票もスプリット表示も無い、誰でも読める通常のコメント欄
+  if (track === "news") {
+    if (!viewerReady || !commentsReady) return <CommentsSkeleton />;
+    return (
+      <NewsCommentSection
+        issueId={issueId}
+        issueSlug={slug}
+        initialComments={comments}
+        initialCursor={nextCursor}
+        commentCount={commentCount}
+        canComment={canComment}
+        canFactCheck={canFactCheck}
+        isLoggedIn={isLoggedIn}
+      />
+    );
+  }
 
   // 投票ゲート判定には viewer だけ必要。未投票ならコメント取得完了を待たずゲートを出す
   if (!viewerReady) return <CommentsSkeleton />;

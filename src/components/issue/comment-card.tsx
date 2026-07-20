@@ -27,6 +27,8 @@ interface CommentCardProps {
   onReply?: (parentId: string, body: string) => Promise<string | null>;
   /** ネストされた返信として小さめ・インデント表示にする */
   isReply?: boolean;
+  /** Newsの通常コメント欄には賛成/反対の概念が無いため、スタンスバッジ・色分けを出さない */
+  showStance?: boolean;
 }
 
 function stanceLabel(stance: VoteChoiceId) {
@@ -86,6 +88,7 @@ export function CommentCard({
   onReport,
   onReply,
   isReply = false,
+  showStance = true,
 }: CommentCardProps) {
   const fc = comment.fcResult;
   const verdictStyle = fc ? VERDICT_STYLES[fc.verdict] : null;
@@ -134,10 +137,10 @@ export function CommentCard({
             totalLikes={comment.userTotalLikes}
             variant="thread"
             nameClassName="text-sm"
-            stance={comment.stance}
+            stance={showStance ? comment.stance : null}
           />
         </Link>
-        {!isReply && <Badge variant="stance">{stanceLabel(comment.stance)}派</Badge>}
+        {!isReply && showStance && <Badge variant="stance">{stanceLabel(comment.stance)}派</Badge>}
         {comment.verifiedBadge && (
           <Badge variant="verified" title="Plus/Proユーザーによる、出典で確認済みのコメントです">
             ✅ {VERIFIED_BADGE_LABEL}
@@ -305,6 +308,7 @@ export function CommentCard({
               onHelpful={onHelpful}
               onFactCheck={onFactCheck}
               onReport={onReport}
+              showStance={showStance}
             />
           ))}
           {comment.replyCount > comment.replies.length && (

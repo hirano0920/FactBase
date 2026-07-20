@@ -21,6 +21,11 @@ interface SummaryCardProps {
   debateType?: DebateType | null;
   /** 難語ポップオーバー用語集。未生成（旧記事）はundefined/[]で、その場合は素の文字列のまま表示 */
   glossary?: GlossaryTerm[] | null;
+  /**
+   * newsは対立の芯（賛成/反対の分割表示）を出さず、解説メインの長めのleadをそのまま読ませる。
+   * スレッド（議論）が主役のdebateとは逆に、記事の読了自体が目的のため。
+   */
+  variant?: "debate" | "news";
 }
 
 /**
@@ -34,10 +39,11 @@ export function SummaryCard({
   compact = false,
   debateType = null,
   glossary = null,
+  variant = "debate",
 }: SummaryCardProps) {
   const bullets = summary.bullets.slice(0, 3);
   const [context, sideA, sideB] = bullets;
-  const canSplit = bullets.length === 3 && Boolean(sideA && sideB);
+  const canSplit = variant === "debate" && bullets.length === 3 && Boolean(sideA && sideB);
   const parsedContext = context ? parseBullet(context) : null;
   const parsedSideA = canSplit ? parseBullet(sideA) : null;
   const parsedSideB = canSplit ? parseBullet(sideB) : null;

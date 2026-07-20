@@ -94,34 +94,37 @@ export async function POST(req: NextRequest) {
       `${isReply ? "返信" : "コメント"}は${minLen}字以上${maxLen}字以内で投稿してください`,
     );
   }
-  if (!isReply && !parsed.data.stance) {
-    return errors.validation("スタンスを選択してください");
-  }
-
   const ok = await checkRateLimit("comment", session.user.id, 5, 60);
   if (!ok) return errors.rateLimited();
 
   const issue = await prisma.issue.findUnique({
     where: { id: parsed.data.issueId },
-    select: { id: true, status: true, slug: true },
+    select: { id: true, status: true, slug: true, track: true },
   });
   if (!issue) return errors.notFound("この争点は存在しません");
   if (issue.status === "ARCHIVED") {
     return errors.validation("この争点の議論は終了しています");
   }
 
-  // クライアント側のVoteToUnlockGateはUIの誘導に過ぎず、直接APIを叩けば回避できてしまう。
-  // 「投票した側にしかコメントできない」を実効あるものにするため、サーバー側でも投票済みを必須にし、
-  // 新規トップレベルコメントは自分が投票した立場でしか書けないようにする（返信はstance省略＝親を継承なので対象外）
-  const vote = await prisma.vote.findUnique({
-    where: { userId_issueId: { userId: session.user.id, issueId: issue.id } },
-    select: { choice: true },
-  });
-  if (!vote) {
-    return errors.forbidden("コメントするには先に投票してください");
-  }
-  if (!isReply && parsed.data.stance !== enumToChoice[vote.choice]) {
-    return errors.forbidden("コメントは自分が投票した立場でのみ投稿できます");
+  // Newsは通常のコメント欄（投票不要・賛成/反対の選択なし）。Debateのみスタンス選択と投票済みを必須にする
+  // News側はstance未選択のままcreateCommentへ渡し、undecidedとして保存する（UI上はバッジ非表示のため意味を持たない）
+  if (issue.track !== "NEWS") {
+    if (!isReply && !parsed.data.stance) {
+      return errors.validation("スタンスを選択してください");
+    }
+    // クライアント側のVoteToUnlockGateはUIの誘導に過ぎず、直接APIを叩けば回避できてしまう。
+    // 「投票した側にしかコメントできない」を実効あるものにするため、サーバー側でも投票済みを必須にし、
+    // 新規トップレベルコメントは自分が投票した立場でしか書けないようにする（返信はstance省略＝親を継承なので対象外）
+    const vote = await prisma.vote.findUnique({
+      where: { userId_issueId: { userId: session.user.id, issueId: issue.id } },
+      select: { choice: true },
+    });
+    if (!vote) {
+      return errors.forbidden("コメントするには先に投票してください");
+    }
+    if (!isReply && parsed.data.stance !== enumToChoice[vote.choice]) {
+      return errors.forbidden("コメントは自分が投票した立場でのみ投稿できます");
+    }
   }
 
   try {
@@ -129,7 +132,7 @@ export async function POST(req: NextRequest) {
       userId: session.user.id,
       userCreatedAt: new Date(session.user.createdAt),
       issueId: issue.id,
-      stance: parsed.data.stance ?? "for",
+      stance: parsed.data.stance ?? "undecided",
       body: parsed.data.body,
       parentId: parsed.data.parentId,
     });

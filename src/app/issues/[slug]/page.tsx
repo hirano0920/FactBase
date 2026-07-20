@@ -73,6 +73,7 @@ export default async function IssuePage({ params }: IssuePageProps) {
   commentPage.nextCursor = null;
 
   const tally = issue.voteTally;
+  const isNews = issue.track === "news";
 
   return (
     <IssueViewerProvider slug={issue.slug} issueId={issue.id} guestComments={commentPage.comments}>
@@ -128,57 +129,86 @@ export default async function IssuePage({ params }: IssuePageProps) {
             </header>
 
             <div className="space-y-6">
-              {/* 要点→投票→議論を1枚のカードで最後まで流す。
-                  「要点カード」「投票カード」と箱を分けると、読み終えるたびに区切りが入って
-                  投票への勢いが途切れるため、対立の芯を読んだ流れのままボタンに指を伸ばせるようにする。
-                  議論は投票するまで完全に隠す（プレビューも出さない）＝投票が唯一の入口にする */}
-              <ScrollReveal>
-                <Section id="vote-panel" variant="arena">
-                  <SectionTitle>要点</SectionTitle>
-                  <SummaryCard
-                    summary={issue.summary}
-                    articleSlug={issue.articleHtml ? issue.slug : undefined}
-                    debateType={issue.debateType}
-                    glossary={issue.glossary}
-                  />
+              {isNews ? (
+                /* News: 解説メインの長めの要点→通常のコメント欄。投票も対立の軸も出さない */
+                <ScrollReveal>
+                  <Section variant="arena">
+                    <SectionTitle>要点</SectionTitle>
+                    <SummaryCard
+                      summary={issue.summary}
+                      articleSlug={issue.articleHtml ? issue.slug : undefined}
+                      debateType={issue.debateType}
+                      glossary={issue.glossary}
+                      variant="news"
+                    />
 
-                  <div className="mt-6 border-t border-border pt-6 text-center">
-                    {/* ページ上部のH1と同じissue.titleをここでも再掲する。以前は
-                        「あなたはどう思いますか？」という固定の汎用文言だったため、
-                        争点ごとに具体的に作った設問（例:「国会前デモの抗議、妥当だと思いますか？」）が
-                        投票の意思決定点では見えなくなっていた */}
-                    <p className="mb-4 text-base font-bold text-ink">{issue.title}</p>
-                    {issue.summary.externalPoll && (
-                      <div className="mx-auto max-w-md text-left">
-                        <YahooPollReference poll={issue.summary.externalPoll} />
-                      </div>
-                    )}
-                    <div className="mx-auto max-w-md">
-                      <IssueVoteSlot
-                        issueId={issue.id}
-                        initialTally={tally}
-                        labels={issue.voteLabels}
-                      />
-                      <SwingIndicator
-                        slug={issue.slug}
-                        initialSwing={swing}
-                        labels={issue.voteLabels}
-                      />
+                    <div id="discussion" className="mt-6 border-t border-border pt-6">
+                      <Suspense fallback={null}>
+                        <IssueCommentsSlot
+                          slug={issue.slug}
+                          issueId={issue.id}
+                          commentCount={issue.commentCount}
+                          voteTally={tally}
+                          track="news"
+                        />
+                      </Suspense>
                     </div>
-                  </div>
+                  </Section>
+                </ScrollReveal>
+              ) : (
+                /* Debate: 要点→投票→議論を1枚のカードで最後まで流す。
+                    「要点カード」「投票カード」と箱を分けると、読み終えるたびに区切りが入って
+                    投票への勢いが途切れるため、対立の芯を読んだ流れのままボタンに指を伸ばせるようにする。
+                    議論は投票するまで完全に隠す（プレビューも出さない）＝投票が唯一の入口にする */
+                <ScrollReveal>
+                  <Section id="vote-panel" variant="arena">
+                    <SectionTitle>要点</SectionTitle>
+                    <SummaryCard
+                      summary={issue.summary}
+                      articleSlug={issue.articleHtml ? issue.slug : undefined}
+                      debateType={issue.debateType}
+                      glossary={issue.glossary}
+                    />
 
-                  <div id="discussion" className="mt-6 border-t border-border pt-6">
-                    <Suspense fallback={null}>
-                      <IssueCommentsSlot
-                        slug={issue.slug}
-                        issueId={issue.id}
-                        commentCount={issue.commentCount}
-                        voteTally={tally}
-                      />
-                    </Suspense>
-                  </div>
-                </Section>
-              </ScrollReveal>
+                    <div className="mt-6 border-t border-border pt-6 text-center">
+                      {/* ページ上部のH1と同じissue.titleをここでも再掲する。以前は
+                          「あなたはどう思いますか？」という固定の汎用文言だったため、
+                          争点ごとに具体的に作った設問（例:「国会前デモの抗議、妥当だと思いますか？」）が
+                          投票の意思決定点では見えなくなっていた */}
+                      <p className="mb-4 text-base font-bold text-ink">{issue.title}</p>
+                      {issue.summary.externalPoll && (
+                        <div className="mx-auto max-w-md text-left">
+                          <YahooPollReference poll={issue.summary.externalPoll} />
+                        </div>
+                      )}
+                      <div className="mx-auto max-w-md">
+                        <IssueVoteSlot
+                          issueId={issue.id}
+                          initialTally={tally}
+                          labels={issue.voteLabels}
+                        />
+                        <SwingIndicator
+                          slug={issue.slug}
+                          initialSwing={swing}
+                          labels={issue.voteLabels}
+                        />
+                      </div>
+                    </div>
+
+                    <div id="discussion" className="mt-6 border-t border-border pt-6">
+                      <Suspense fallback={null}>
+                        <IssueCommentsSlot
+                          slug={issue.slug}
+                          issueId={issue.id}
+                          commentCount={issue.commentCount}
+                          voteTally={tally}
+                          track="debate"
+                        />
+                      </Suspense>
+                    </div>
+                  </Section>
+                </ScrollReveal>
+              )}
 
               {/* 更新タイムラインは「要点→投票」の間に挟むと読了までの距離が伸びるため、
                   投票・議論より後ろに退避する（記事はおまけ・スレッドが主役という前提） */}
@@ -188,14 +218,16 @@ export default async function IssuePage({ params }: IssuePageProps) {
                 </ScrollReveal>
               )}
 
-              <IssueSpectrumSlot slug={issue.slug} labels={issue.voteLabels} />
+              {!isNews && <IssueSpectrumSlot slug={issue.slug} labels={issue.voteLabels} />}
 
-              <ScrollReveal>
-                <Section variant="arena">
-                  <SectionTitle>議論インテリジェンス</SectionTitle>
-                  <IssueIntelligenceSlot slug={issue.slug} />
-                </Section>
-              </ScrollReveal>
+              {!isNews && (
+                <ScrollReveal>
+                  <Section variant="arena">
+                    <SectionTitle>議論インテリジェンス</SectionTitle>
+                    <IssueIntelligenceSlot slug={issue.slug} />
+                  </Section>
+                </ScrollReveal>
+              )}
 
               {issue.confirmation !== null && (
                 <div className="text-center">
