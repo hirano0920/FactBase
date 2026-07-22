@@ -65,9 +65,24 @@ export function HomeFeed({ allIssues, mostRead, mostActive, participants }: Home
     [pool, category, sort],
   );
 
+  // Debateファースト構成（戦略: Newsは入り口、Debateが本丸）。
+  // 上段=アクティブなDebate（参加の総量順。「今盛り上がってる」が最初に見える）、
+  // 下段=News・その他（ユーザー選択のソート順のまま）。
+  const activeDebates = useMemo(() => {
+    const debates = filtered.filter((i) => i.track === "debate");
+    return [...debates]
+      .sort(
+        (a, b) =>
+          b.voteTally.totalVotes + b.commentCount * 2 - (a.voteTally.totalVotes + a.commentCount * 2),
+      )
+      .slice(0, 15);
+  }, [filtered]);
+  const debateIds = useMemo(() => new Set(activeDebates.map((i) => i.id)), [activeDebates]);
+  const restIssues = useMemo(() => filtered.filter((i) => !debateIds.has(i.id)), [filtered, debateIds]);
+
   const visibleCount = page * HOME_FEED_PAGE_SIZE;
-  const pageIssues = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
-  const hasMore = filtered.length > visibleCount;
+  const pageIssues = useMemo(() => restIssues.slice(0, visibleCount), [restIssues, visibleCount]);
+  const hasMore = restIssues.length > visibleCount;
 
   useEffect(() => {
     if (!expandedIssue) {
@@ -156,12 +171,32 @@ export function HomeFeed({ allIssues, mostRead, mostActive, participants }: Home
         onSortChange={onSortChange}
       />
 
-      {pageIssues.length === 0 ? (
+      {activeDebates.length > 0 && (
+        <section aria-label="議論が熱い争点">
+          <h2 className="mb-3 flex items-center gap-1.5 text-sm font-bold text-ink">
+            🔥 議論が熱い
+          </h2>
+          <div className="grid gap-3">
+            {activeDebates.map((issue, i) => (
+              <ScrollReveal key={issue.id} delay={Math.min(i, 3) * 60}>
+                <IssueCard issue={issue} hideResults onSelect={(opts) => openIssue(issue.slug, opts)} />
+              </ScrollReveal>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {pageIssues.length === 0 && activeDebates.length === 0 ? (
         <p className="rounded-[20px] border border-border bg-surface-raised p-8 text-center text-sm text-ink-faint">
           該当するスレッドはまだありません
         </p>
       ) : (
         <div className="space-y-6">
+          {pageIssues.length > 0 && (
+            <h2 className="flex items-center gap-1.5 pt-2 text-sm font-bold text-ink">
+              📰 新着ニュース・その他
+            </h2>
+          )}
           {groups.map((group, gi) => (
             <div key={gi} className="space-y-3">
               <div className="grid gap-3">

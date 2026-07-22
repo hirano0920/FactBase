@@ -99,16 +99,18 @@ model User {
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
-  accounts       Account[]
-  sessions       Session[]
-  votes          Vote[]
-  voteEvents     VoteEvent[]
-  comments       Comment[]
-  badges         UserBadge[]
-  reports        Report[]
-  bookmarks      Bookmark[]
-  qualityReports IssueQualityReport[]
-  appeals        Appeal[]
+  accounts        Account[]
+  sessions        Session[]
+  votes           Vote[]
+  voteEvents      VoteEvent[]
+  comments        Comment[]
+  badges          UserBadge[]
+  reports         Report[]
+  bookmarks       Bookmark[]
+  qualityReports  IssueQualityReport[]
+  appeals         Appeal[]
+  politicianVotes      PoliticianVote[]
+  politicianVoteEvents PoliticianVoteEvent[]
 
   @@index([registrationIp, createdAt])
 }
@@ -182,9 +184,13 @@ model Issue {
   // 人間確認が終わるまでトレンド表示・新規流入から外す（削除はしない＝透明性ログとして残す）
   underReview    Boolean              @default(false)
   qualityReports IssueQualityReport[]
-  // 常設debate（長年論争になってる争点）。オーナーが手動で選定・trueにする運用が前提で、
-  // discover/promoteの自動パイプラインからは付与しない。
+  // 常設debate（長年論争になってる争点）。オーナーの手動選定に加え、伝説級バズり動画
+  // パイプライン（promote-legendary.ts）が公開時に自動で付与する。通常のdiscover/promoteは付与しない。
   isStanding     Boolean              @default(false)
+  // 討論動画の埋め込み（アベプラ等のYouTube討論回が元ネタの争点のみ）。
+  // {"provider":"youtube","videoId","title","channel","url"}。iframe埋め込みのみ（YouTube規約内）、
+  // スクショ・転載はしない。null=動画由来でない通常の争点
+  videoJson      Json?
 
   votes         Vote[]
   voteEvents    VoteEvent[]
@@ -444,9 +450,63 @@ model Politician {
   party     String?
   createdAt DateTime @default(now())
 
-  issues IssuePolitician[]
+  // --- プロフィール（enrich-politician.tsが定期的に埋める。全てnull許容=未エンリッチの旧データ） ---
+  /** Wikipediaのサムネイル画像URL */
+  photoUrl String?
+  /** Wikipedia summary APIのextract（プレーンテキスト） */
+  bioSummary String?
+  wikipediaUrl String?
+  /** 国会会議録検索システムから取得した直近の発言。[{"date","meeting","snippet","url"}] */
+  recentStatementsJson Json?
+  /** 選挙区（参議院公式名簿由来。衆議院分・政党エントリはnull） */
+  electoralDistrict String?
+  /** 上記プロフィール系フィールドを最後に更新した時刻。RADAR.politicianEnrichRefreshDays経過で再取得対象になる */
+  enrichedAt DateTime?
+
+  issues     IssuePolitician[]
+  votes      PoliticianVote[]
+  voteEvents PoliticianVoteEvent[]
 
   @@index([name])
+}
+
+/**
+ * 政治家への評価投票の現在状態（1ユーザー1政治家1票、変更は上書き）。
+ * 「人格への好き嫌い」ではなく「この政治家の行動・発言・国会活動を評価するか」の投票
+ * （UIの文言側でこの枠付けを必ず維持する）。選択肢はVoteChoiceを流用:
+ * FOR=評価する / AGAINST=評価しない / UNDECIDED=わからない
+ */
+model PoliticianVote {
+  id           String     @id @default(cuid())
+  userId       String
+  politicianId String
+  choice       VoteChoice
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  politician Politician @relation(fields: [politicianId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, politicianId])
+  @@index([politicianId])
+}
+
+/**
+ * 政治家評価投票の追記ログ（投票・変更のたびに1行追加、上書きしない）。
+ * 「直近1週間の割合」「スイング（増減）」の集計元。PoliticianVoteが現在状態の真実のソースで、
+ * こちらは時系列分析専用（IssueのVote/VoteEventの関係と同じ二層構造）
+ */
+model PoliticianVoteEvent {
+  id           String     @id @default(cuid())
+  userId       String
+  politicianId String
+  choice       VoteChoice
+  createdAt    DateTime   @default(now())
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  politician Politician @relation(fields: [politicianId], references: [id], onDelete: Cascade)
+
+  @@index([politicianId, createdAt])
 }
 
 /**
@@ -470,6 +530,21 @@ model IssuePolitician {
 
   @@unique([issueId, politicianId])
   @@index([politicianId])
+}
+
+/**
+ * Webプッシュ購読（PWA）。ログイン不要でも購読できるようにuserIdはオプショナル。
+ * endpointがブラウザ+デバイスごとに一意。無効化（410 Gone）されたら送信側が削除する。
+ */
+model PushSubscription {
+  id        String   @id @default(cuid())
+  endpoint  String   @unique
+  /** Web Push API のキー（p256dh/auth） */
+  keysJson  Json
+  userId    String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 model FcCache {

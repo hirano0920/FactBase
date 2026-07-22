@@ -88,12 +88,45 @@ export async function getPoliticianPersuasionScore(
   };
 }
 
+export interface RelatedNewsBrief {
+  slug: string;
+  title: string;
+  createdAt: string;
+}
+
+/**
+ * 政治家名が争点タグ付け（IssuePolitician）ではなくタイトル・キーワードに出てくるNews記事。
+ * 「賛否タグが付くほど法案化していないが、この政治家に関するニュースがある」ケースを拾う
+ * （タグ付けはdietVote由来の法案系のみなので、スキャンダル・人事等のNewsは別ルートが必要）。
+ */
+export async function getRelatedNewsForPolitician(
+  name: string,
+  limit = 5,
+): Promise<RelatedNewsBrief[]> {
+  const rows = await prisma.issue.findMany({
+    where: {
+      track: "NEWS",
+      underReview: false,
+      status: { not: "ARCHIVED" },
+      OR: [{ title: { contains: name } }, { keywords: { has: name } }],
+    },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+    select: { slug: true, title: true, createdAt: true },
+  });
+  return rows.map((r) => ({ slug: r.slug, title: r.title, createdAt: r.createdAt.toISOString() }));
+}
+
 export interface PoliticianVoteRecord {
   issueId: string;
   issueSlug: string;
   issueTitle: string;
   stance: "FOR" | "AGAINST" | "ABSTAIN";
   votedAt: string;
+  /** タグ付けの出典（"dietVote:party"=本会議記名投票の政党多数派 / "dietVote:defector"=同・個人票 / null=手動） */
+  source: string | null;
+  /** 争点が今もアクティブか（関連Debateへの誘導CTAの出し分け用） */
+  issueStatus: "ACTIVE" | "TRENDING" | "PASSED" | "ARCHIVED";
 }
 
 /** 「この政治家が直近の争点で賛成/反対/棄権どれだったか」の一覧。新しい順 */
@@ -107,8 +140,9 @@ export async function getPoliticianVoteHistory(
     take: limit,
     select: {
       stance: true,
+      source: true,
       createdAt: true,
-      issue: { select: { id: true, slug: true, title: true } },
+      issue: { select: { id: true, slug: true, title: true, status: true } },
     },
   });
   return rows.map((r) => ({
@@ -117,5 +151,7 @@ export async function getPoliticianVoteHistory(
     issueTitle: r.issue.title,
     stance: r.stance,
     votedAt: r.createdAt.toISOString(),
+    source: r.source,
+    issueStatus: r.issue.status,
   }));
 }

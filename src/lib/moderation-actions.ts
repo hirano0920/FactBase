@@ -81,6 +81,77 @@ export async function resolveModerationCase(caseId: string, resolution: Moderati
   return { caseId, resolution, slug };
 }
 
+export interface SurgingIssue {
+  id: string;
+  slug: string;
+  title: string;
+  track: "DEBATE" | "NEWS";
+  underReview: boolean;
+  recentVotes: number;
+  recentComments: number;
+  /** 監査優先度スコア。コメントは投票より事故リスクが高い（誹謗中傷・デマ）ため重み2倍 */
+  surgeScore: number;
+}
+
+/**
+ * 急上昇（バズ）検知: 直近hoursAgo時間で投票・コメントが集中している争点を降順で返す。
+ * 監査体制（バズったものと通報が来たものだけを人間が見る運用）の「バズった」側の入力。
+ * 全件レビューをやめる代わりに、事故が起きやすい場所へ監査時間を集中させるための一覧。
+ */
+export async function listSurgingIssues(hoursAgo = 6, limit = 10): Promise<SurgingIssue[]> {
+  const cutoff = new Date(Date.now() - hoursAgo * 3600_000);
+  const [voteRows, commentRows] = await Promise.all([
+    prisma.vote.groupBy({
+      by: ["issueId"],
+      where: { createdAt: { gte: cutoff } },
+      _count: { _all: true },
+    }),
+    prisma.comment.groupBy({
+      by: ["issueId"],
+      where: { createdAt: { gte: cutoff } },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const scores = new Map<string, { votes: number; comments: number }>();
+  for (const r of voteRows) {
+    scores.set(r.issueId, { votes: r._count._all, comments: 0 });
+  }
+  for (const r of commentRows) {
+    const s = scores.get(r.issueId) ?? { votes: 0, comments: 0 };
+    s.comments = r._count._all;
+    scores.set(r.issueId, s);
+  }
+  if (scores.size === 0) return [];
+
+  const ranked = [...scores.entries()]
+    .map(([issueId, s]) => ({ issueId, ...s, score: s.votes + s.comments * 2 }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+
+  const issues = await prisma.issue.findMany({
+    where: { id: { in: ranked.map((r) => r.issueId) } },
+    select: { id: true, slug: true, title: true, track: true, underReview: true },
+  });
+  const byId = new Map(issues.map((i) => [i.id, i]));
+
+  return ranked
+    .filter((r) => byId.has(r.issueId))
+    .map((r) => {
+      const issue = byId.get(r.issueId)!;
+      return {
+        id: issue.id,
+        slug: issue.slug,
+        title: issue.title,
+        track: issue.track,
+        underReview: issue.underReview,
+        recentVotes: r.votes,
+        recentComments: r.comments,
+        surgeScore: r.score,
+      };
+    });
+}
+
 export async function listFlaggedIssues() {
   return prisma.issue.findMany({
     where: { underReview: true },

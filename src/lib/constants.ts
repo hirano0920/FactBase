@@ -383,15 +383,96 @@ export const RADAR = {
   /** News 見出しドリブン YouTube 検索のシード数 */
   youtubeNewsSeedQueries: 8,
   /**
-   * ABEMA Prime 公式チャンネルID。動画取り込みの対象（オーナーが実例で承認した基準:
-   * 再生数25,000以上・コメント数200以上なら討論回として拾う。人生ストーリー・単独対談は
-   * 量的しきい値を満たしても除外し、それはclassifyAbemaVideoが判定する）。
+   * ABEMA Prime 公式チャンネルID。旧・単一チャンネル時代の設定（discover-abema.tsの
+   * dedupKey生成等、後方互換のため残置）。日次discoverの対象チャンネル自体は
+   * dailyDebateChannelsに一本化した。
    */
   abemaPrimeChannelId: "UCB1dgsqLiEp57oDAyNV_vww",
-  abemaPrimeMinViews: 25_000,
-  abemaPrimeMinComments: 200,
-  /** discover 1実行あたりのABEMA Prime取り込み上限 */
+  /** discover 1実行あたりの解析上限（互換のため残置。実際の取得件数はdailyDebatePerChannelPerRunが効く） */
   abemaPrimePerRun: 5,
+  /**
+   * ABEMA Primeの1日あたりの公開上限。News(20)/Debateの共通バズパイプラインとは
+   * 完全に独立した枠（promote-abema.ts）。番組側の編集判断を信頼し、discover段階の
+   * しきい値＋Geminiのexclude判定だけをゲートにする。
+   */
+  abemaPrimeDailyPublishCap: 5,
+  /**
+   * 日次討論動画discover（scripts/radar/sources/daily-debate-videos.ts）の対象4チャンネル。
+   * 2026-07-22、オーナー指示でReHacQ/NewsPicks/PIVOTを追加（旧実装はABEMA Primeのみ）。
+   *
+   * しきい値設計（2026-07-22、2回改訂）:
+   * 1回目の改訂で「全チャンネル一律の中央値」→「投稿したら実際にバズる絶対水準（再生数15万前後）」に
+   * 引き上げたが、これはn=50サンプルを**投稿からの経過時間を問わず**集計した分布だった。
+   * 実際に「公開18〜96時間（安定窓）の動画がその時点でどこまで伸びているか」を直接検証したところ、
+   * ABEMA Prime/ReHacQでこの絶対水準に達する候補が実質0件になる日が多いと判明
+   * （動画は公開から数日〜1週間かけて再生数を伸ばすため、72〜96時間時点ではまだ道半ばのことが多い）。
+   * 2回目の改訂で、安定窓（18〜96時間）に限定した実測分布（p40〜p50相当）を基準に引き下げた。
+   * 「チャンネル優先順位（ABEMA Prime > ReHacQ > NewsPicks > PIVOT）を閾値の厳しさに反映する」
+   * という方針は維持しつつ、絶対数では現実的な日次生産量を優先する。
+   * 実測（安定窓18〜96時間、n=100サンプル中の該当分、2026-07-22時点）:
+   *   ABEMA Prime: n=3  views p50=71,033  / comments p50=490（サンプル薄いため単価は参考値）
+   *   ReHacQ:      n=7  views p50=74,008  / comments p50=114
+   *   NewsPicks:   n=17 views p50=25,436  / comments p50=17
+   *   PIVOT:       n=13 views p50=54,651  / comments p50=105
+   */
+  dailyDebateChannels: [
+    {
+      name: "ABEMA Prime",
+      channelId: "UCB1dgsqLiEp57oDAyNV_vww",
+      minViews: 40_000,
+      minComments: 250,
+      minViewsPerHour: 2_000,
+      minCommentsForVelocity: 50,
+    },
+    {
+      name: "ReHacQ",
+      channelId: "UCG_oqDSlIYEspNpd2H4zWhw",
+      minViews: 50_000,
+      minComments: 80,
+      minViewsPerHour: 2_500,
+      minCommentsForVelocity: 30,
+    },
+    {
+      name: "NewsPicks",
+      channelId: "UCfTnJmRQP79C4y_BMF_XrlA",
+      minViews: 20_000,
+      minComments: 15,
+      minViewsPerHour: 1_000,
+      minCommentsForVelocity: 5,
+    },
+    {
+      name: "PIVOT",
+      channelId: "UC8yHePe_RgUBE-waRWy6olw",
+      minViews: 35_000,
+      minComments: 60,
+      minViewsPerHour: 1_800,
+      minCommentsForVelocity: 20,
+    },
+  ],
+  /** discover 1実行・1チャンネルあたりの取り込み上限 */
+  dailyDebatePerChannelPerRun: 5,
+  /**
+   * 伝説級バズり動画→常設Debate化（discover-legendary.ts / promote-legendary.ts）。
+   * 討論系チャンネルの歴代トップ再生動画から「今でも議論が成立する定番争点」を拾い、
+   * isStanding=true の常設Debateとして公開する。日次枠(dailyDebateChannels)ともbuzz枠とも独立。
+   * チャンネルはchannelId直指定かハンドル（実行時にchannels.list forHandleで解決）のどちらか。
+   */
+  legendaryChannels: [
+    { name: "ABEMA Prime", channelId: "UCB1dgsqLiEp57oDAyNV_vww" },
+    { name: "ReHacQ", channelId: "UCG_oqDSlIYEspNpd2H4zWhw" },
+    { name: "NewsPicks", channelId: "UCfTnJmRQP79C4y_BMF_XrlA" },
+    { name: "PIVOT", channelId: "UC8yHePe_RgUBE-waRWy6olw" },
+  ] as { name: string; channelId?: string; handle?: string }[],
+  /** 伝説級の再生数しきい値（数百万再生級のみ＝流入が既に証明されている動画だけを常設化） */
+  legendaryMinViews: 1_000_000,
+  /** 伝説級のコメント数しきい値（議論が実際に起きている証拠） */
+  legendaryMinComments: 1_000,
+  /** discover 1実行あたりの伝説級動画のGemini解析上限（1本あたり動画1本分の視聴クォータを使うため控えめに） */
+  legendaryPerRun: 6,
+  /** 伝説級→常設Debateの1日あたり公開上限 */
+  legendaryDailyPublishCap: 5,
+  /** 政治家プロフィール（Wikipedia写真・経歴・公式サイト要約・国会発言）の再取得間隔 */
+  politicianEnrichRefreshDays: 30,
   // --- 記事生成の調査エンリッチ（summarize.ts/followup.ts、detect.ts系にもdiscover.ts相当の調査を後付け）---
   /** この時間内に調査済みならTopicCandidate.evidenceJsonを再利用し、外部APIを叩き直さない */
   enrichRefreshHours: 12,

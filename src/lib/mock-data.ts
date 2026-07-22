@@ -39,6 +39,7 @@ export const MOCK_ISSUES: Issue[] = DEMO_ISSUES.map((def, index) => ({
   thumbnailUrl: null,
   thumbnailSourceUrl: null,
   thumbnailSourceFeed: null,
+  video: null,
 }));
 
 const slugToId = Object.fromEntries(MOCK_ISSUES.map((i) => [i.slug, i.id]));

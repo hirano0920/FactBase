@@ -52,13 +52,21 @@ const RESPONSE_SCHEMA = {
   ],
 };
 
-const SYSTEM_PROMPT = `あなたはABEMA Primeの討論動画を見て、TwoSides（中立な争点まとめサイト）向けの
+const buildSystemPrompt = (channelName: string) => `あなたは${channelName}の討論動画を見て、TwoSides（中立な争点まとめサイト）向けの
 素材を抽出する編集者です。動画を実際に視聴し、以下を抽出してください。
 
 # 分類（trackフィールド）
-- debate: 賛成/反対が分かれる討論回。forBullets/againstBulletsを埋める
+- debate: 賛成/反対が分かれる討論回。**ただし「社会的に意味のある争点」であることが必須**
+  （政治・経済・法制度・社会問題・国際情勢など、視聴者が自分の立場を持つ意味がある公共的なテーマ）。
+  forBullets/againstBulletsを埋める
 - news: 賛否の対立構造は無いが情報価値のある専門家解説。keyPointsを埋める（forBullets/againstBulletsは空配列）
-- exclude: 個人の人生ストーリー・生き方・芸能人生活・単独対談中心で、討論でも解説でもない回
+- exclude: 個人の人生ストーリー・生き方・芸能人生活・単独対談・ドキュメンタリー企画中心で、討論でも解説でもない回。
+  また、当事者のセンシティブな体験を消費的に扱う回（犯罪被害の詳細な語り直し、自殺・自傷の手口に踏み込む回など）や、
+  差別・誹謗中傷を助長しかねない内容など倫理的にリスクがある回もexcludeにする。
+  **恋愛・容姿・性癖・結婚観・人間関係の悩みなど、出演者同士で意見が割れていても
+  「個人のライフスタイル・価値観」の域を出ないテーマはexcludeにする**（例:「年上女性に甘えたいのはアリか」
+  「痩せすぎは病的か」等。討論の構造（賛成派/反対派が対立する形式）を取っていても、
+  公共的な争点（政策・制度・社会問題）でなければdebateにしない）
 
 # 抽出のルール
 - lead: 何が論点かの中立な要約（2〜3文）
@@ -72,6 +80,7 @@ JSONのみで回答してください。`;
 export async function analyzeAbemaVideo(
   videoId: string,
   title: string,
+  channelName = "ABEMA Prime",
 ): Promise<AbemaVideoAnalysis | null> {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) {
@@ -92,7 +101,7 @@ export async function analyzeAbemaVideo(
         },
       ],
       config: {
-        systemInstruction: SYSTEM_PROMPT,
+        systemInstruction: buildSystemPrompt(channelName),
         responseMimeType: "application/json",
         responseSchema: RESPONSE_SCHEMA,
       },

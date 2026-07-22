@@ -72,6 +72,18 @@ describe("resolveIssueTrack", () => {
     ).toBe("debate");
   });
 
+  it("2026-07-22回帰: legitimateだが両論シグナルが弱い一般政治トピックはNews（無条件Debate化バグの再発防止）", () => {
+    expect(
+      resolveIssueTrack({
+        legitimate: true,
+        topicClass: "politics",
+        commentFrictionScore: 0.1,
+        claimDiffConflictCount: 0,
+        hasRealExternalPoll: false,
+      }),
+    ).toBe("news");
+  });
+
   it("国旗損壊罪(legal) + 摩擦 → Debate", () => {
     expect(
       resolveIssueTrack({

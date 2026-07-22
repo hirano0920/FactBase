@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { SummaryCard } from "@/components/issue/summary-card";
+import { VideoEmbed } from "@/components/issue/video-embed";
 import { YahooPollReference } from "@/components/issue/yahoo-poll-reference";
 import { IssueTimelineLive } from "@/components/issue/issue-timeline-live";
 import {
@@ -19,7 +20,8 @@ import { AdSlotGated } from "@/components/layout/ad-slot-gated";
 import { PageContainer, Section, SectionTitle } from "@/components/layout/page-container";
 import { LeftRail } from "@/components/layout/left-rail";
 import { ScrollReveal } from "@/components/ui/scroll-reveal";
-import { getComments, getIssueBySlug, getIssueTimeline, isDbEnabled } from "@/lib/data";
+import Link from "next/link";
+import { getComments, getIssueBySlug, getIssueTimeline, getRelatedDebates, isDbEnabled } from "@/lib/data";
 import { getVoteSwing } from "@/lib/vote-swing";
 import { SwingIndicator } from "@/components/issue/swing-indicator";
 import { GUEST_COMMENT_LIMIT, HOME_THREE_COL_GRID } from "@/lib/constants";
@@ -65,15 +67,16 @@ export default async function IssuePage({ params }: IssuePageProps) {
   const issue = await getIssueBySlug(slug);
   if (!issue) notFound();
 
-  const [commentPage, timeline, swing] = await Promise.all([
+  const isNews = issue.track === "news";
+  const [commentPage, timeline, swing, relatedDebates] = await Promise.all([
     getComments(issue.id, undefined, GUEST_COMMENT_LIMIT, "new", { includeReplies: false }),
     isDbEnabled() ? getIssueTimeline(issue.id) : Promise.resolve([]),
     isDbEnabled() ? getVoteSwing(issue.id) : Promise.resolve(null),
+    isNews ? getRelatedDebates(slug) : Promise.resolve([]),
   ]);
   commentPage.nextCursor = null;
 
   const tally = issue.voteTally;
-  const isNews = issue.track === "news";
 
   return (
     <IssueViewerProvider slug={issue.slug} issueId={issue.id} guestComments={commentPage.comments}>
@@ -133,6 +136,12 @@ export default async function IssuePage({ params }: IssuePageProps) {
                 /* News: 解説メインの長めの要点→通常のコメント欄。投票も対立の軸も出さない */
                 <ScrollReveal>
                   <Section variant="arena">
+                    {/* 討論動画が元ネタの争点は、要点より先に動画そのものを見せる（§動画→30秒要約→議論の順） */}
+                    {issue.video && (
+                      <div className="mb-6">
+                        <VideoEmbed video={issue.video} />
+                      </div>
+                    )}
                     <SectionTitle>要点</SectionTitle>
                     <SummaryCard
                       summary={issue.summary}
@@ -141,6 +150,30 @@ export default async function IssuePage({ params }: IssuePageProps) {
                       glossary={issue.glossary}
                       variant="news"
                     />
+
+                    {/* News=入り口 → Debate=本丸への導線。解説を読み終えた直後に「議論の場」を提示する */}
+                    {relatedDebates.length > 0 && (
+                      <div className="mt-6 border-t border-border pt-6">
+                        <p className="mb-3 text-sm font-bold text-ink">🔥 この話題に関連する議論</p>
+                        <ul className="space-y-2">
+                          {relatedDebates.map((d) => (
+                            <li key={d.slug}>
+                              <Link
+                                href={`/issues/${d.slug}`}
+                                className="flex items-center justify-between gap-3 rounded-lg border border-accent/30 bg-accent-soft/40 px-4 py-3 text-sm text-ink no-underline transition-colors hover:border-accent hover:bg-accent-soft"
+                              >
+                                <span className="min-w-0 flex-1">{d.title}</span>
+                                <span className="shrink-0 text-xs font-semibold text-accent">
+                                  {d.totalVotes > 0 && `${d.totalVotes}票 · `}
+                                  {d.commentCount > 0 && `${d.commentCount}件の意見 · `}
+                                  議論に参加 →
+                                </span>
+                              </Link>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
 
                     <div id="discussion" className="mt-6 border-t border-border pt-6">
                       <Suspense fallback={null}>
@@ -162,6 +195,12 @@ export default async function IssuePage({ params }: IssuePageProps) {
                     議論は投票するまで完全に隠す（プレビューも出さない）＝投票が唯一の入口にする */
                 <ScrollReveal>
                   <Section id="vote-panel" variant="arena">
+                    {/* 討論動画が元ネタの争点は、要点より先に動画そのものを見せる（動画→30秒要約→投票→議論の順） */}
+                    {issue.video && (
+                      <div className="mb-6">
+                        <VideoEmbed video={issue.video} />
+                      </div>
+                    )}
                     <SectionTitle>要点</SectionTitle>
                     <SummaryCard
                       summary={issue.summary}
@@ -191,6 +230,7 @@ export default async function IssuePage({ params }: IssuePageProps) {
                           slug={issue.slug}
                           initialSwing={swing}
                           labels={issue.voteLabels}
+                          shareTitle={issue.shareTitle || issue.title}
                         />
                       </div>
                     </div>

@@ -1107,6 +1107,12 @@ export interface ComposeVoteQuestionInput {
   avoidHint?: string;
   /** 軸ロックで確定した対立軸。選択肢を実際の両側の立場に合わせる */
   lockedAxis?: { axis: string; sideA: string; sideB: string };
+  /**
+   * 伝説級（過去のバズり動画）由来で、動画公開後に関連法令が実際に成立した場合。
+   * 「賛成ですか？」という現在進行形の設問ではなく、「振り返ってどう思うか」の回顧的設問に
+   * 切り替えさせる（discover-legendary.tsが動画公開日と法令成立日を比較して検知）。
+   */
+  resolvedSinceVideo?: { lawTitle: string; promulgationDate: string };
 }
 
 export interface VoteQuestionResult {
@@ -1130,6 +1136,12 @@ export async function composeVoteQuestion(input: ComposeVoteQuestionInput): Prom
     const axisBlock = input.lockedAxis
       ? `\n\n対立軸（この軸に沿った設問と選択肢にすること）:\n論点: ${input.lockedAxis.axis}\n側A: ${input.lockedAxis.sideA}\n側B: ${input.lockedAxis.sideB}`
       : "";
+    const resolvedSinceBlock = input.resolvedSinceVideo
+      ? `\n\n★重要: この論点は動画公開後に${input.resolvedSinceVideo.lawTitle}として実際に成立済み（成立日: ${input.resolvedSinceVideo.promulgationDate}）。
+「賛成ですか？反対ですか？」という現在進行形の設問は事実と矛盾するため禁止。
+「この判断は妥当だったと思いますか？」「振り返ってどう思いますか？」のような回顧的な設問にすること。
+選択肢も「賛成/反対」ではなく「妥当だった/妥当ではなかった」等、過去の判断への評価として作ること。`
+      : "";
     const res = await getOpenAIRadar().chat.completions.create({
       model: process.env.RADAR_CLASSIFY_MODEL || AI_MODELS.utility,
       response_format: { type: "json_object" },
@@ -1142,7 +1154,7 @@ export async function composeVoteQuestion(input: ComposeVoteQuestionInput): Prom
 仮の設問: ${input.fallbackQuestion || "（なし）"}
 記事の要点: ${input.lead}
 論点:
-${input.bullets.map((b) => `- ${b}`).join("\n")}${axisBlock}${avoidHintBlock}`,
+${input.bullets.map((b) => `- ${b}`).join("\n")}${axisBlock}${resolvedSinceBlock}${avoidHintBlock}`,
         },
       ],
     });

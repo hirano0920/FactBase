@@ -149,7 +149,7 @@ function trackHeld(decision: string, title: string) {
   heldReasons.set(prefix, (heldReasons.get(prefix) ?? 0) + 1);
   console.warn(`  ⚠️ HELD->${prefix}${detail ? `「${detail}」` : ""}: ${title}`);
 }
-function logHeldSummary() {
+export function logHeldSummary() {
   if (heldReasons.size === 0) return;
   console.log("\n📊 HELD分析サマリー（このラン）:");
   for (const [reason, count] of [...heldReasons.entries()].sort((a, b) => b[1] - a[1])) {
@@ -582,7 +582,7 @@ async function mergeIntoExistingIssue(c: PromotionCandidate, duplicate: ActiveIs
   ]);
 }
 
-interface ResearchedCandidate {
+export interface ResearchedCandidate {
   c: PromotionCandidate;
   isOfficial: boolean;
   primaryExcerpts: Awaited<ReturnType<typeof fetchPrimaryExcerpts>>;
@@ -619,7 +619,7 @@ interface ResearchedCandidate {
  * nullを返す（Writerまで進めない）。OFFICIAL（一次資料あり）は厚さ判定の対象外とし、
  * 一次資料の分量をそのままスコアにする（一次情報がある時点で証拠として十分強いため）。
  */
-async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandidate | null> {
+export async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandidate | null> {
   let isOfficial = c.evidence.officialEvents.length > 0 || c.evidence.laws.length > 0;
   const internationalSources = c.evidence.internationalNews.map((n) => ({
     title: n.title,
@@ -637,6 +637,28 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
     console.warn(`  ⚠️ OFFICIAL判定だが一次本文なし → REPORTEDにフォールバック: ${c.title}`);
     isOfficial = false;
   }
+
+  // ABEMA Prime討論回は動画を実際に視聴した抽出（lead/axis/賛否bullets）自体が一次資料。
+  // Webの報道抜粋が少ない/無いトピック（哲学的議論など）でも、この抽出内容を厚さ・書けるか・
+  // 両論性の判定材料に含める（webExcerpt由来の厚さゲートで不当にHELDされるのを防ぐ）。
+  const abemaGateExcerpts = c.evidence.abemaPrime
+    ? [
+        {
+          feed: "ABEMA Prime",
+          title: c.evidence.abemaPrime.videoTitle,
+          url: c.evidence.abemaPrime.videoUrl,
+          text: [
+            c.evidence.abemaPrime.lead,
+            c.evidence.abemaPrime.axis,
+            ...c.evidence.abemaPrime.forBullets,
+            ...c.evidence.abemaPrime.againstBullets,
+            ...c.evidence.abemaPrime.keyPoints,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        },
+      ]
+    : [];
 
   const useInternational = shouldUseInternationalReports(c.category, c.topicTerm || c.title);
   const debateTypePreview =
@@ -672,6 +694,7 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
       ...internationalReportExcerpts,
       ...datedExcerpts,
       ...pollingExcerpts,
+      ...abemaGateExcerpts,
     ]);
     if (!thickness.ok) {
       trackHeld(`thin_excerpts:${(thickness.reason ?? "").slice(0, 200)}`, c.title);
@@ -695,6 +718,7 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
         ...internationalReportExcerpts,
         ...datedExcerpts,
         ...pollingExcerpts,
+        ...abemaGateExcerpts,
       ]);
       if (!writeableCheck.writable) {
         trackHeld(`writeability_rejected:${(writeableCheck.reason ?? "").slice(0, 200)}`, c.title);
@@ -790,6 +814,7 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
         ...internationalReportExcerpts,
         ...datedExcerpts,
         ...pollingExcerpts,
+        ...abemaGateExcerpts,
       ],
       category: c.category ?? undefined,
       // ★ 追加情報: 軸ロック結果・投票実測・コメント摩擦・媒体食い違い
@@ -883,6 +908,10 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
       claimDiffConflictCount: claimDiff.conflicts.length,
       topicClass,
       hasRealExternalPoll,
+      // 討論動画（Gemini動画理解が実視聴でtrack="debate"と判定済み）は、Yahoo系の
+      // 実測シグナルが無くてもhasStrongDebateSignalsと同格の強いDebateシグナルとして扱う
+      // （そうしないとABEMA Prime/ReHacQ/NewsPicks由来の候補がほぼ全てNewsへ格下げされる）
+      videoDebateConfirmed: c.evidence.abemaPrime?.track === "debate",
     });
     // News確定なら evidence.debatable も同期。Rank計算から DebateHeat を外し、
     // 「コメント摩擦で過大評価→Debate枠を食う」を防ぐ。
@@ -932,7 +961,7 @@ async function researchCandidate(c: PromotionCandidate): Promise<ResearchedCandi
 }
 
 /** 公開できた場合は作成したIssueのidを返す（ラン内統合の吸収候補を後から紐づけるため）。HELD/dry-runはnull */
-async function writeAndPublish(researched: ResearchedCandidate): Promise<string | null> {
+export async function writeAndPublish(researched: ResearchedCandidate): Promise<string | null> {
   const {
     c,
     isOfficial,
@@ -1020,6 +1049,8 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
     lockedAxis: track === "debate" ? (lockedAxis ?? undefined) : undefined,
     track,
     writerTier,
+    abemaPrime: c.evidence.abemaPrime,
+    resolvedSinceVideo: c.evidence.resolvedSinceVideo,
   });
   let article = generatedArticle;
   if (writerTier === "economy") {
@@ -1165,6 +1196,12 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
       fallbackQuestion: (c.evidence.voteQuestion && c.evidence.voteQuestion.length >= 20) ? c.evidence.voteQuestion : c.title,
       fallbackChoices,
       lockedAxis: lockedAxis ?? undefined,
+      resolvedSinceVideo: c.evidence.resolvedSinceVideo
+        ? {
+            lawTitle: c.evidence.resolvedSinceVideo.lawTitle,
+            promulgationDate: c.evidence.resolvedSinceVideo.promulgationDate,
+          }
+        : undefined,
     };
     ({ question: voteQuestionTitle, choices } = await composeVoteQuestion(voteQuestionInput));
 
@@ -1330,6 +1367,15 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
       thumbnailUrl: thumbnail?.thumbnailUrl ?? null,
       thumbnailSourceUrl: thumbnail?.thumbnailSourceUrl ?? null,
       thumbnailSourceFeed: thumbnail?.thumbnailSourceFeed ?? null,
+      videoJson: c.evidence.abemaPrime
+        ? ({
+            provider: "youtube",
+            videoId: c.evidence.abemaPrime.videoId,
+            title: c.evidence.abemaPrime.videoTitle,
+            channel: c.evidence.abemaPrime.channel ?? "ABEMA Prime",
+            url: c.evidence.abemaPrime.videoUrl,
+          } as unknown as Prisma.InputJsonValue)
+        : undefined,
       keywords: c.topicTerm ? [c.topicTerm] : [c.title],
       monitoringUntil: new Date(Date.now() + 60 * 86400_000),
     },
@@ -1382,10 +1428,14 @@ async function writeAndPublish(researched: ResearchedCandidate): Promise<string 
   return issue.id;
 }
 
-main()
-  .catch(async (e) => {
-    console.error(e);
-    await notifyRadarFailure("promote.ts 致命的エラー（ジョブ全体が停止）", e);
-    process.exit(1);
-  })
-  .finally(() => prisma.$disconnect());
+// promote-abema.tsがresearchCandidate/writeAndPublishを再利用するためにimportする際、
+// main()（News/Debateの共通バズパイプライン）が二重実行されないよう、直接実行時のみ起動する。
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main()
+    .catch(async (e) => {
+      console.error(e);
+      await notifyRadarFailure("promote.ts 致命的エラー（ジョブ全体が停止）", e);
+      process.exit(1);
+    })
+    .finally(() => prisma.$disconnect());
+}

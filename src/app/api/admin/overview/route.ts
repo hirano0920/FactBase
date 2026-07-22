@@ -6,6 +6,7 @@ import {
   listHeldRadarCandidates,
   listPendingModerationCases,
   listRecentRadarIssues,
+  listSurgingIssues,
   listUnresolvedReports,
 } from "@/lib/moderation-actions";
 
@@ -15,17 +16,20 @@ export async function GET(req: NextRequest) {
   const session = await requireAdmin(req);
   if (session instanceof NextResponse) return session;
 
-  const [cases, flaggedIssues, recentRadar, heldRadar, openReports, radarHealth] = await Promise.all([
-    listPendingModerationCases(),
-    listFlaggedIssues(),
-    listRecentRadarIssues(),
-    listHeldRadarCandidates(),
-    listUnresolvedReports(),
-    getRadarHealth(),
-  ]);
+  const [cases, flaggedIssues, recentRadar, heldRadar, openReports, radarHealth, surgingIssues] =
+    await Promise.all([
+      listPendingModerationCases(),
+      listFlaggedIssues(),
+      listRecentRadarIssues(),
+      listHeldRadarCandidates(),
+      listUnresolvedReports(),
+      getRadarHealth(),
+      listSurgingIssues(),
+    ]);
 
   return NextResponse.json({
     radarHealth,
+    surgingIssues,
     counts: {
       pendingCases: cases.length,
       underReviewIssues: flaggedIssues.length,

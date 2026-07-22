@@ -70,6 +70,46 @@ export async function searchDietSpeeches(term: string, limit = 5): Promise<DietS
 }
 
 /**
+ * 指定した氏名の発言記録を新しい順に最大limit件取得する（政治家ページ「過去の発言」欄用）。
+ * searchDietSpeechesはトピック語の全文検索（any=）だが、こちらは speaker= で発言者を直接絞り込む。
+ * 同姓同名の別人が混じる可能性はAPI側では判別できないため、呼び出し側は「本人の発言とは限らない」
+ * 前提で表示すること（会派名も併記しているのはその補助情報）。
+ */
+export async function fetchSpeechesBySpeaker(name: string, limit = 5): Promise<DietSpeech[]> {
+  if (name.trim().length < 2) return [];
+  try {
+    const params = new URLSearchParams({
+      speaker: name,
+      recordPacking: "json",
+      maximumRecords: String(Math.min(limit, 10)),
+    });
+    const res = await fetch(`${SPEECH_API}?${params.toString()}`, {
+      headers: { "User-Agent": UA, Accept: "application/json" },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = (await res.json()) as { speechRecord?: Record<string, unknown>[] };
+    const records = Array.isArray(data.speechRecord) ? data.speechRecord : [];
+    return records
+      .map((r) => ({
+        date: clean(r.date),
+        house: clean(r.nameOfHouse),
+        meeting: clean(r.nameOfMeeting),
+        session: clean(r.session),
+        speaker: clean(r.speaker),
+        speakerGroup: clean(r.speakerGroup),
+        snippet: clean(r.speech).slice(0, 300),
+        url: clean(r.speechURL) || clean(r.meetingURL),
+      }))
+      .filter((s) => s.url && s.snippet)
+      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  } catch (e) {
+    console.warn(`  ⚠️ kokkai speechesBySpeaker (${name}): 取得失敗 (${e})`);
+    return [];
+  }
+}
+
+/**
  * 指定した氏名の直近の発言記録から speakerPosition（国務大臣等の肩書。API側が実際の会議録に
  * 記載された肩書として返す一次情報）を取得する。幹事長・政調会長等の党内役職は会議録に
  * 記載されないため取得できない（憶測で埋めず null を返す）。

@@ -1,5 +1,7 @@
 import type { MetadataRoute } from "next";
-import { getIssues } from "@/lib/data";
+import { getIssues, isDbEnabled } from "@/lib/data";
+import { listGlossaryTerms } from "@/lib/glossary-pages";
+import { prisma } from "@/lib/prisma";
 import { SITE } from "@/lib/constants";
 
 const BASE_URL = process.env.AUTH_URL?.replace(/\/$/, "") || SITE.url;
@@ -39,5 +41,33 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     return entries;
   });
 
-  return [...staticPages, ...issuePages];
+  // 用語ページ・政治家ページ（SEO資産）。DB未接続環境（ローカルモック等）ではスキップ
+  let glossaryPages: MetadataRoute.Sitemap = [];
+  let politicianPages: MetadataRoute.Sitemap = [];
+  if (isDbEnabled()) {
+    const [terms, politicians] = await Promise.all([
+      listGlossaryTerms(2000),
+      prisma.politician.findMany({ select: { slug: true }, take: 2000 }),
+    ]);
+    glossaryPages = terms.map((t) => ({
+      url: `${BASE_URL}/glossary/${encodeURIComponent(t.term)}`,
+      changeFrequency: "weekly" as const,
+      priority: 0.5,
+    }));
+    politicianPages = [
+      { url: `${BASE_URL}/politicians`, changeFrequency: "daily" as const, priority: 0.7 },
+      ...politicians.map((p) => ({
+        url: `${BASE_URL}/politicians/${encodeURIComponent(p.slug)}`,
+        changeFrequency: "daily" as const,
+        priority: 0.6,
+      })),
+    ];
+    glossaryPages.unshift({
+      url: `${BASE_URL}/glossary`,
+      changeFrequency: "daily" as const,
+      priority: 0.6,
+    });
+  }
+
+  return [...staticPages, ...issuePages, ...glossaryPages, ...politicianPages];
 }

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { SITE } from "@/lib/constants";
 import { CountUp } from "@/components/ui/count-up";
+import { PushSubscribeButton } from "@/components/push/push-subscribe-button";
 
 interface HomeIntroProps {
   participants: number;
@@ -53,13 +54,16 @@ export function HomeIntro({ participants }: HomeIntroProps) {
           バズってる争点を中立に整理し、投票とスプリットで両側の意見が見える討論会場。
           ゴシップもニュースも、ここで議論できます。
         </p>
-        <Link
-          href="/about"
-          className="mt-5 flex max-w-md flex-col gap-1 rounded-2xl border border-border bg-surface-raised px-5 py-3.5 text-sm no-underline shadow-subtle transition hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-glow sm:flex-row sm:items-center sm:gap-3"
-        >
-          <span className="font-bold text-ink">{SITE.name}を知る</span>
-          <span className="text-xs text-ink-muted">中立 · 両論 · アルゴなし →</span>
-        </Link>
+        <div className="mt-5 flex max-w-md flex-wrap items-center gap-3">
+          <Link
+            href="/about"
+            className="flex flex-1 flex-col gap-1 rounded-2xl border border-border bg-surface-raised px-5 py-3.5 text-sm no-underline shadow-subtle transition hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-glow sm:flex-row sm:items-center sm:gap-3"
+          >
+            <span className="font-bold text-ink">{SITE.name}を知る</span>
+            <span className="text-xs text-ink-muted">中立 · 両論 · アルゴなし →</span>
+          </Link>
+          <PushSubscribeButton />
+        </div>
       </div>
     </div>
   );

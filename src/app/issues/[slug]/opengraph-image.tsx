@@ -1,5 +1,6 @@
 import { ImageResponse } from "next/og";
-import { getIssueBySlug } from "@/lib/data";
+import { getIssueBySlug, isDbEnabled } from "@/lib/data";
+import { getVoteSwing } from "@/lib/vote-swing";
 import { SITE } from "@/lib/constants";
 
 export const runtime = "nodejs";
@@ -31,7 +32,25 @@ export default async function OgImage({ params }: { params: Promise<{ slug: stri
   const lead = issue?.summary.lead ?? SITE.tagline;
   const tally = issue?.voteTally;
 
-  const textForFont = `${title}${lead}${SITE.name}${SITE.tagline}賛成反対わからない%0123456789.`;
+  // スイングカード: 直近数時間の「揺れ」があればOG画像の主役にする。
+  // 「今、空気が動いている」瞬間のスクリーンショット自体が煽りゼロで拡散される設計（戦略§3.4）
+  const swing = issue && isDbEnabled() ? await getVoteSwing(issue.id) : null;
+  const swingCallout = (() => {
+    if (!swing) return null;
+    const sides = [
+      { label: issue?.voteLabels?.for ?? "賛成", delta: swing.deltaPoints.for, color: "#3D6B4F" },
+      { label: issue?.voteLabels?.against ?? "反対", delta: swing.deltaPoints.against, color: "#8B4A4A" },
+    ];
+    const top = sides.sort((a, b) => b.delta - a.delta)[0];
+    if (top.delta < 0.5) return null;
+    return {
+      text: `直近${swing.hoursAgo}時間で「${top.label}」へ +${top.delta}pt`,
+      color: top.color,
+      sub: `新しい投票 ${swing.newVotes}件`,
+    };
+  })();
+
+  const textForFont = `${title}${lead}${SITE.name}${SITE.tagline}${swingCallout ? `${swingCallout.text}${swingCallout.sub}` : ""}賛成反対わからない直近時間で新しい投票件%0123456789.+「」`;
   const fontData = await loadFont(textForFont);
 
   return new ImageResponse(
@@ -76,6 +95,21 @@ export default async function OgImage({ params }: { params: Promise<{ slug: stri
 
         {tally && tally.totalVotes > 0 && (
           <div style={{ display: "flex", flexDirection: "column" }}>
+            {swingCallout && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "baseline",
+                  gap: 16,
+                  marginBottom: 20,
+                }}
+              >
+                <span style={{ fontSize: 34, fontWeight: 600, color: swingCallout.color }}>
+                  {swingCallout.text}
+                </span>
+                <span style={{ fontSize: 22, color: "#6B6B6B" }}>{swingCallout.sub}</span>
+              </div>
+            )}
             <div style={{ display: "flex", height: 16, borderRadius: 8, overflow: "hidden" }}>
               <div style={{ width: `${tally.percents.for}%`, backgroundColor: "#3D6B4F" }} />
               <div style={{ width: `${tally.percents.against}%`, backgroundColor: "#8B4A4A" }} />

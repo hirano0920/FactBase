@@ -1,0 +1,44 @@
+name: Politician Enrich (プロフィール・過去の発言)
+
+on:
+  schedule:
+    - cron: '15 3 * * *' # 12:15 JST。政治家ページの負荷が低い時間帯に少しずつ進める
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '動作確認モード（DB書込なし）'
+        required: false
+        default: false
+        type: boolean
+      limit:
+        description: '1回の実行で処理する件数'
+        required: false
+        default: '30'
+        type: string
+
+concurrency:
+  group: politician-enrich
+  cancel-in-progress: false
+
+jobs:
+  enrich:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+      AZURE_OPENAI_BASE_URL: ${{ secrets.AZURE_OPENAI_BASE_URL }}
+      NODE_ENV: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npx prisma generate
+      - name: Run enrich-politician
+        run: |
+          ARGS="--limit=${{ github.event.inputs.limit || '30' }}"
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          npx tsx scripts/radar/enrich-politician.ts $ARGS

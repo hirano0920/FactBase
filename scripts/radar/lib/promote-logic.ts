@@ -84,6 +84,37 @@ export type SavedEvidence = EvidenceBundle & {
    * discover.ts の BuzzSourceHit.newsClusterCount からコピー。
    */
   newsClusterCount?: number;
+  /**
+   * ABEMA Prime討論回をGemini動画理解APIで解析した結果（scripts/radar/lib/abema-gemini.ts）。
+   * lead/axis/賛否の要点が動画から直接抽出済みのため、Writerはこれを主要な一次資料として使う
+   * （discover-abema.tsが生成する候補だけに付く。通常のbuzz候補には無い）。
+   */
+  abemaPrime?: {
+    videoId: string;
+    videoTitle: string;
+    videoUrl: string;
+    /** チャンネル名。未設定は"ABEMA Prime"（後からReHacQ/NewsPicks等の伝説級枠でも同じ構造を使うため） */
+    channel?: string;
+    track: "debate" | "news";
+    lead: string;
+    axis: string | null;
+    forLabel: string | null;
+    forBullets: string[];
+    againstLabel: string | null;
+    againstBullets: string[];
+    keyPoints: string[];
+  };
+  /**
+   * 伝説級（過去のバズり動画）由来の争点で、動画公開後に関連法令が実際に成立したことを検知した場合。
+   * 「動画時点ではまだ賛否が割れていたが、その後成立した」というギャップをWriterに明示し、
+   * 「今も賛成/反対を問う」ではなく「振り返ってどう思うか」という回顧的な設問に切り替えさせる
+   * （discover-legendary.tsが動画のpublishedAtと法令のpromulgationDateを比較して設定）。
+   */
+  resolvedSinceVideo?: {
+    lawTitle: string;
+    promulgationDate: string;
+    videoPublishedAt: string;
+  };
 };
 
 /** media consensus 経路で公開を許す最低媒体数（通常の証拠十分性2より高く設定し乱発を防ぐ） */

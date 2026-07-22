@@ -19,6 +19,10 @@ on:
     - cron: '3 2 * * *'    # 11:03 JST 昼
     - cron: '3 7 * * *'    # 16:03 JST 夕方
 
+    # ABEMA Prime系（下のabemaジョブ）は新しいcronを足さず、既存の6:33 JST（'33 21'）と
+    # 12:33 JST（'33 3'）の発火に相乗りする。cronを増やすと、時間帯ゲートを持つ
+    # discover.ts/promote.tsも余計に起動してしまうため（abemaジョブ側でJST時刻ゲートする）
+
   workflow_dispatch:
     inputs:
       mode:
@@ -30,6 +34,7 @@ on:
           - both
           - discover-only
           - promote-only
+          - abema-only
       dry_run:
         description: '動作確認モード（DB書込なし）'
         required: false
@@ -101,3 +106,66 @@ jobs:
           if [ "${{ github.event.inputs.dry_run}}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
           if [ "${{ github.event.inputs.force}}" = "true" ]; then ARGS="$ARGS --force"; fi
           npx tsx scripts/radar/promote.ts $ARGS
+
+  abema:
+    name: 📺 ABEMA Prime（discover → promote）
+    if: |
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' &&
+       (github.event.inputs.mode == 'both' || github.event.inputs.mode == 'abema-only'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+    steps:
+      # scheduleは既存cron全部で発火するため、朝6時台・昼12時台JSTだけ通す
+      # （discover-abema/promote-abema自体は時間帯ゲートを持たないのでここで絞る）。
+      # workflow_dispatchは常に通す
+      - name: JST時刻ゲート
+        id: gate
+        run: |
+          HOUR_JST=$(TZ=Asia/Tokyo date +%H)
+          echo "hour=$HOUR_JST" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$HOUR_JST" = "06" ] || [ "$HOUR_JST" = "12" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "JST ${HOUR_JST}時はABEMA枠の実行時間帯ではないためスキップ"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.run == 'true'
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+        if: steps.gate.outputs.run == 'true'
+      - run: npx prisma generate
+        if: steps.gate.outputs.run == 'true'
+      - name: Run discover-abema
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.dry_run}}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          npx tsx scripts/radar/discover-abema.ts $ARGS
+      - name: Run promote-abema
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.dry_run}}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          npx tsx scripts/radar/promote-abema.ts $ARGS
+      # 伝説級バズり動画→常設Debate。Gemini動画理解の無料枠（1日8時間分）をアベマ日次枠と
+      # 分け合うため、昼の1回だけ実行する（dedupKeyで既処理はスキップされるので毎日少しずつ進む）
+      - name: Run discover-legendary（昼のみ）
+        if: steps.gate.outputs.run == 'true' && (github.event_name == 'workflow_dispatch' || steps.gate.outputs.hour == '12')
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.dry_run}}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          npx tsx scripts/radar/discover-legendary.ts $ARGS
+      - name: Run promote-legendary（昼のみ）
+        if: steps.gate.outputs.run == 'true' && (github.event_name == 'workflow_dispatch' || steps.gate.outputs.hour == '12')
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.dry_run}}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          npx tsx scripts/radar/promote-legendary.ts $ARGS

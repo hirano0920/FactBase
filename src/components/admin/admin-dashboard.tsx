@@ -16,6 +16,16 @@ interface RadarHealth {
 
 interface OverviewData {
   radarHealth: RadarHealth;
+  surgingIssues: Array<{
+    id: string;
+    slug: string;
+    title: string;
+    track: "DEBATE" | "NEWS";
+    underReview: boolean;
+    recentVotes: number;
+    recentComments: number;
+    surgeScore: number;
+  }>;
   counts: {
     pendingCases: number;
     underReviewIssues: number;
@@ -439,6 +449,44 @@ export function AdminDashboard() {
         <CountCard label="Radar HELD" value={data.counts.heldRadar} targetId="section-held" />
         <CountCard label="未処理通報" value={data.counts.openReports} targetId="section-open-reports" />
       </div>
+
+      {/* 監査運用の起点: 全件レビューはせず「バズってるもの」と「通報が来たもの」だけを見る。
+          このセクションが「バズってるもの」側の一覧（直近6時間の投票+コメント×2の降順） */}
+      <Section id="section-surging">
+        <SectionTitle>
+          🔥 急上昇（直近6時間） {data.surgingIssues.length > 0 && `（${data.surgingIssues.length}件）`}
+        </SectionTitle>
+        {data.surgingIssues.length === 0 ? (
+          <p className="text-sm text-ink-muted">急上昇中の争点はありません</p>
+        ) : (
+          <ul className="space-y-2">
+            {data.surgingIssues.map((issue) => (
+              <li
+                key={issue.id}
+                className="flex items-center justify-between gap-3 rounded-md border border-border px-4 py-2.5"
+              >
+                <div className="min-w-0 flex-1">
+                  <Link
+                    href={`/issues/${issue.slug}`}
+                    className="text-sm font-semibold text-ink underline-offset-2 hover:underline"
+                    target="_blank"
+                  >
+                    {issue.title}
+                  </Link>
+                  <p className="mt-0.5 text-xs text-ink-muted">
+                    {issue.track === "NEWS" ? "News" : "Debate"} · 投票 {issue.recentVotes} · コメント{" "}
+                    {issue.recentComments}
+                    {issue.underReview && " · ⚠️ 確認中"}
+                  </p>
+                </div>
+                <span className="shrink-0 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-700 ring-1 ring-amber-200">
+                  {issue.surgeScore}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
 
       <Section id="section-recent-radar">
         <SectionTitle>

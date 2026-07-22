@@ -1,0 +1,37 @@
+name: Politician Seed (議員名簿の再同期)
+
+on:
+  schedule:
+    # 選挙・内閣改造・離党等で会派構成が変わるため、月1回全件を洗い替える
+    - cron: '0 18 1 * *' # 毎月1日 3:00 JST
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '動作確認モード（DB書込なし）'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: politician-seed
+  cancel-in-progress: false
+
+jobs:
+  seed:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      NODE_ENV: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npx prisma generate
+      - name: Seed 参議院
+        run: npx tsx scripts/radar/seed-politicians-sangiin.ts ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+      - name: Seed 衆議院
+        run: npx tsx scripts/radar/seed-politicians-shugiin.ts ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}

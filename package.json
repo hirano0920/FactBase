@@ -50,6 +50,7 @@
     "stripe": "^22.3.0",
     "tailwind-merge": "^3.3.1",
     "unpdf": "^1.6.2",
+    "web-push": "^3.6.7",
     "zod": "^3.25.67"
   },
   "devDependencies": {
@@ -58,6 +59,7 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@types/sanitize-html": "^2.16.1",
+    "@types/web-push": "^3.6.4",
     "@vitejs/plugin-react": "^6.0.3",
     "eslint": "^9.29.0",
     "eslint-config-next": "^15.3.4",

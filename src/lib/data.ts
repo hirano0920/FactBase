@@ -162,6 +162,7 @@ function mapIssue(issue: DbIssue): Issue {
           : null,
     voteLabels: (issue.voteLabelsJson as Issue["voteLabels"]) ?? null,
     glossary: (issue.glossaryJson as unknown as Issue["glossary"]) ?? [],
+    video: (issue.videoJson as unknown as Issue["video"]) ?? null,
     debateType: parseDebateType(issue.debateType),
     track: issue.track === "NEWS" ? "news" : "debate",
     underReview: issue.underReview,
@@ -244,6 +245,70 @@ export async function getRelatedIssues(slug: string): Promise<RelatedIssueBrief[
     select: { slug: true, title: true, category: true },
   });
   return rows.map((r) => ({ slug: r.slug, title: r.title, category: categoryToId[r.category] }));
+}
+
+export interface RelatedDebateBrief {
+  slug: string;
+  title: string;
+  category: CategoryId;
+  commentCount: number;
+  totalVotes: number;
+}
+
+/**
+ * News記事末尾の「この話題について議論する」CTA用。
+ * キーワードが重なるアクティブなDebate（無ければ同カテゴリの直近Debate）を最大3件返す。
+ * News=入り口 → Debate=本丸 への導線（News/Debateテンプレ分離で消えた逆方向のリンクを張り直す）
+ */
+export async function getRelatedDebates(slug: string): Promise<RelatedDebateBrief[]> {
+  if (!isDbEnabled()) return [];
+  const current = await prisma.issue.findUnique({
+    where: { slug },
+    select: { id: true, keywords: true, category: true },
+  });
+  if (!current) return [];
+
+  const baseWhere = {
+    id: { not: current.id },
+    track: "DEBATE" as const,
+    status: { in: ["ACTIVE", "TRENDING"] as ("ACTIVE" | "TRENDING")[] },
+    underReview: false,
+  };
+  const select = {
+    slug: true,
+    title: true,
+    category: true,
+    commentCount: true,
+    voteForCount: true,
+    voteAgainstCount: true,
+    voteUndecidedCount: true,
+  };
+
+  const searchTerms = current.keywords.slice(0, 3);
+  let rows =
+    searchTerms.length > 0
+      ? await prisma.issue.findMany({
+          where: { ...baseWhere, OR: searchTerms.map((k) => ({ keywords: { has: k } })) },
+          orderBy: { commentCount: "desc" },
+          take: 3,
+          select,
+        })
+      : [];
+  if (rows.length === 0) {
+    rows = await prisma.issue.findMany({
+      where: { ...baseWhere, category: current.category },
+      orderBy: { createdAt: "desc" },
+      take: 3,
+      select,
+    });
+  }
+  return rows.map((r) => ({
+    slug: r.slug,
+    title: r.title,
+    category: categoryToId[r.category],
+    commentCount: r.commentCount,
+    totalVotes: r.voteForCount + r.voteAgainstCount + r.voteUndecidedCount,
+  }));
 }
 
 export interface IssueSearchResult {

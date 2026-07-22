@@ -27,6 +27,9 @@ interface IssueCardProps {
 export function IssueCard({ issue, onSelect }: IssueCardProps) {
   const { totalVoters } = issue.voteTally;
   const categoryLabel = CATEGORIES.find((c) => c.id === issue.category)?.label ?? issue.category;
+  // Newsトラックには投票パネル自体が存在しない（news-debate-template-split.mdで削除済み）ため、
+  // #vote-panelへのリンクも「投票する」文言も出さない（存在しないアンカーへの壊れたリンクになる）
+  const isDebate = issue.track === "debate";
 
   const body = (
     <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
@@ -77,26 +80,29 @@ export function IssueCard({ issue, onSelect }: IssueCardProps) {
           <MessageCircleIcon className="h-[15px] w-[15px]" />
           {formatNumber(issue.commentCount)}
         </span>
-        <span className="flex min-h-11 items-center gap-1.5 rounded-full px-2 text-xs text-ink-faint transition-colors hover:bg-for/10 hover:text-for">
-          <ChartBarIcon className="h-[15px] w-[15px]" />
-          {formatNumber(totalVoters)}
-        </span>
-        {onSelect ? (
-          <button
-            type="button"
-            onClick={() => onSelect({ scrollToVote: true })}
-            className="flex min-h-11 items-center rounded-full px-2 text-xs font-medium text-accent transition-colors hover:bg-accent/10"
-          >
-            {totalVoters > 0 ? "投票する" : "最初の一票を"}
-          </button>
-        ) : (
-          <Link
-            href={`/issues/${issue.slug}#vote-panel`}
-            className="flex min-h-11 items-center rounded-full px-2 text-xs font-medium text-accent no-underline transition-colors hover:bg-accent/10"
-          >
-            {totalVoters > 0 ? "投票する" : "最初の一票を"}
-          </Link>
+        {isDebate && (
+          <span className="flex min-h-11 items-center gap-1.5 rounded-full px-2 text-xs text-ink-faint transition-colors hover:bg-for/10 hover:text-for">
+            <ChartBarIcon className="h-[15px] w-[15px]" />
+            {formatNumber(totalVoters)}
+          </span>
         )}
+        {isDebate &&
+          (onSelect ? (
+            <button
+              type="button"
+              onClick={() => onSelect({ scrollToVote: true })}
+              className="flex min-h-11 items-center rounded-full px-2 text-xs font-medium text-accent transition-colors hover:bg-accent/10"
+            >
+              {totalVoters > 0 ? "投票する" : "最初の一票を"}
+            </button>
+          ) : (
+            <Link
+              href={`/issues/${issue.slug}#vote-panel`}
+              className="flex min-h-11 items-center rounded-full px-2 text-xs font-medium text-accent no-underline transition-colors hover:bg-accent/10"
+            >
+              {totalVoters > 0 ? "投票する" : "最初の一票を"}
+            </Link>
+          ))}
       </div>
     </div>
   );

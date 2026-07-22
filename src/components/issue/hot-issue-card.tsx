@@ -26,6 +26,9 @@ interface HotIssueCardProps {
 export function HotIssueCard({ issue, badge, onSelect }: HotIssueCardProps) {
   const { totalVoters } = issue.voteTally;
   const isActive = badge === "most-active";
+  // Newsトラックには投票パネル自体が存在しない（news-debate-template-split.mdで削除済み）ため、
+  // #vote-panelへのリンクも「投票する」文言も出さない（存在しないアンカーへの壊れたリンクになる）
+  const isDebate = issue.track === "debate";
 
   const body = (
     <>
@@ -81,31 +84,34 @@ export function HotIssueCard({ issue, badge, onSelect }: HotIssueCardProps) {
 
       <div className="mt-auto flex items-center justify-between border-t border-border px-3.5 py-2.5">
         <span className="flex items-center gap-2.5 text-xs text-ink-faint tabular-nums">
-          <span className="flex items-center gap-1">
-            <ChartBarIcon className="h-[13px] w-[13px]" />
-            {formatNumber(totalVoters)}
-          </span>
+          {isDebate && (
+            <span className="flex items-center gap-1">
+              <ChartBarIcon className="h-[13px] w-[13px]" />
+              {formatNumber(totalVoters)}
+            </span>
+          )}
           <span className="flex items-center gap-1">
             <MessageCircleIcon className="h-[13px] w-[13px]" />
             {formatNumber(issue.commentCount)}
           </span>
         </span>
-        {onSelect ? (
-          <button
-            type="button"
-            onClick={() => onSelect({ scrollToVote: true })}
-            className="text-xs font-medium text-accent hover:underline"
-          >
-            投票 →
-          </button>
-        ) : (
-          <Link
-            href={`/issues/${issue.slug}#vote-panel`}
-            className="text-xs font-medium text-accent no-underline hover:underline"
-          >
-            投票 →
-          </Link>
-        )}
+        {isDebate &&
+          (onSelect ? (
+            <button
+              type="button"
+              onClick={() => onSelect({ scrollToVote: true })}
+              className="text-xs font-medium text-accent hover:underline"
+            >
+              投票 →
+            </button>
+          ) : (
+            <Link
+              href={`/issues/${issue.slug}#vote-panel`}
+              className="text-xs font-medium text-accent no-underline hover:underline"
+            >
+              投票 →
+            </Link>
+          ))}
       </div>
     </div>
   );

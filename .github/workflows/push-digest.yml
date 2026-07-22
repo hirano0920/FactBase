@@ -1,0 +1,40 @@
+name: Push Digest (朝の争点プッシュ通知)
+
+on:
+  schedule:
+    - cron: '0 22 * * *' # 7:00 JST
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '動作確認モード（送信なし）'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: push-digest
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+      VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+      VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+      NODE_ENV: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npx prisma generate
+      - name: Send morning digest
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then ARGS="--dry-run"; fi
+          npx tsx scripts/radar/notify-push.ts $ARGS

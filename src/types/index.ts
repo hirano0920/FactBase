@@ -82,6 +82,17 @@ export interface Issue {
   thumbnailSourceFeed: string | null;
   /** 要点カードの難語ポップオーバー用語集。null/[]=未生成（旧記事） */
   glossary: GlossaryTerm[];
+  /** 討論動画の埋め込み（アベプラ等のYouTube討論回が元ネタの争点のみ）。null=通常の争点 */
+  video: IssueVideo | null;
+}
+
+/** YouTube討論回の埋め込み情報。iframe埋め込みのみ（YouTube規約内）、スクショ・転載はしない */
+export interface IssueVideo {
+  provider: "youtube";
+  videoId: string;
+  title: string;
+  channel: string;
+  url: string;
 }
 
 export interface Comment {
